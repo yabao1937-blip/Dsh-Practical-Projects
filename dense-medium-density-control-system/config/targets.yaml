@@ -1,0 +1,76 @@
+# 预测目标与特征定义
+# 特征基线：沿用旧项目「粗精煤泥多因素」模型的 10 个因子（真实数据表就绪前占位）
+# kind: soft_sensor 表示该指标无法实时/在线测量，需用可测工艺量前馈预测
+features:
+  - name: raw_ash
+    dtype: float
+    unit: "%"
+    desc: 原煤灰分
+  - name: coal_amount
+    dtype: float
+    unit: "t/h"
+    desc: 小时带煤量
+  - name: sysA
+    dtype: int
+    unit: ""
+    desc: A系统开启(0/1)
+  - name: sysB
+    dtype: int
+    unit: ""
+    desc: B系统开启(0/1)
+  - name: sys401
+    dtype: int
+    unit: ""
+    desc: 401系统开启(0/1)
+  - name: sys402
+    dtype: int
+    unit: ""
+    desc: 402系统开启(0/1)
+  - name: desliming473
+    dtype: int
+    unit: ""
+    desc: 473脱粉开启(0/1)
+  - name: desliming474
+    dtype: int
+    unit: ""
+    desc: 474脱粉开启(0/1)
+  - name: is_stoppage
+    dtype: int
+    unit: ""
+    desc: 停机/低负荷(0/1)
+  - name: level
+    dtype: float
+    unit: "%"
+    desc: 精磁尾液位
+
+targets:
+  clean_ash:
+    name: 精煤真实灰分
+    unit: "%"
+    range: [8.0, 14.0]
+    kind: soft_sensor
+    features: [raw_ash, coal_amount, sysA, sysB, sys401, sys402, desliming473, desliming474, is_stoppage, level]
+  medium_viscosity:
+    name: 介质粘度
+    unit: "cP"
+    range: [1.0, 8.0]
+    kind: soft_sensor
+    features: [level, raw_ash, coal_amount, is_stoppage, sysA, sysB]
+  clean_moisture:
+    name: 精煤水分
+    unit: "%"
+    range: [6.0, 12.0]
+    kind: soft_sensor
+    features: [raw_ash, coal_amount, level, desliming473, desliming474, is_stoppage]
+  suspension_density:
+    name: 悬液密度（软测量）
+    unit: "g/cm3"
+    range: [1.35, 1.60]
+    kind: soft_sensor
+    features: [level, raw_ash, coal_amount, sys401, sys402, is_stoppage]
+  recovery:
+    name: 回收率/产率
+    unit: "%"
+    range: [55.0, 95.0]
+    kind: soft_sensor
+    features: [raw_ash, coal_amount, level, is_stoppage, desliming473, desliming474]

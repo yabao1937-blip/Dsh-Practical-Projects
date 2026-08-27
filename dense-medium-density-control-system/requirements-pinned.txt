@@ -1,0 +1,19 @@
+# 重介密控系统 - 第一步依赖（锁定版本，Python 3.11 / Windows x64）
+# 安装方式（任选其一）：
+#   A. 命令行（国内镜像）：
+#      .venv\Scripts\python.exe -m pip install -r requirements-pinned.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+#   B. PyCharm：Settings -> Project -> Python Interpreter -> "+" ->
+#      添加仓库 https://pypi.tuna.tsinghua.edu.cn/simple 后逐个安装
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.5.2
+xgboost==2.1.4
+lightgbm==4.5.0
+pyyaml==6.0.2
+joblib==1.4.2
+
+# scipy 是 scikit-learn 的自动依赖，无需单独装；若镜像未自动带上可显式安装：
+# scipy==1.14.1
+
+# --- TCN 时序模型依赖（CPU 版；Windows PyPI 默认即 CPU，无 CUDA） ---
+torch==2.5.1
