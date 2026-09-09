@@ -1,3 +1,4 @@
+"""Alembic 迁移运行环境：离线/在线迁移入口，绑定 app.models 的 Base.metadata。"""
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config

@@ -1,4 +1,4 @@
-"""全局配置"""
+"""全局配置：数据库 URL（SQLite dev / 可切 MySQL·PG）、前端静态目录、灰分模型参数路径。"""
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
