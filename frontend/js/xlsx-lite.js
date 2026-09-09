@@ -270,8 +270,11 @@ var XLSX = {
     },
 
     _decodeXml(s) {
-        return s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-               .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+        // 数字字符引用先解(如 &#10;=换行,Excel 多行单元格的标准存法);
+        // 先于命名实体,保证 "&amp;#10;" 正确还原为字面 "&#10;" 而非换行
+        return s.replace(/&#(\d+);/g, (_, d) => String.fromCharCode(parseInt(d, 10)))
+            .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
     },
 
     // ========== utils（保持原有API不变） ==========

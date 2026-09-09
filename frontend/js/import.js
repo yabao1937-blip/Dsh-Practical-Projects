@@ -361,8 +361,37 @@ const ImportPage = {
             if (p.length >= 2 && +p[0] >= 1 && +p[0] <= 12) return { m: +p[0], d: +p[1] };
             return null;
         };
-        const parseTs = (dc, tc) => {
-            const md = extractDate(dc);
+        // 「M.f 单个小数位」歧义识别:6.3 可能是 6月30(省尾零)也可能是 6月3;
+        // 数值型单个小数位必然 %10==0(6.3→30),字符串型直接匹配一位小数
+        const ambiguousDate = dc => {
+            if (dc === null || dc === undefined || dc instanceof Date) return null;
+            if (typeof dc === 'number') {
+                if (dc >= 1000) return null;
+                const m = Math.floor(dc);
+                const fracDd = Math.round((dc - m) * 100);
+                if (fracDd % 10 === 0 && fracDd >= 10 && fracDd <= 90) return [m, fracDd / 10];
+                return null;
+            }
+            const mt = String(dc).trim().match(/^(\d{1,2})\.(\d)$/);
+            return mt ? [+mt[1], +mt[2]] : null;
+        };
+        // 带序列上下文的日期解析(与后端 importer.extract_date_seq 一致):
+        // 候选={f, f*10},取「不早于前一行日期的最小候选」——
+        // 6.29 后的 6.3→30;9.1 后的 9.2→2(旧规则会错解析成 9.20)
+        const extractDateSeq = (dc, prev) => {
+            const legacy = extractDate(dc);
+            if (!legacy) return null;
+            const amb = ambiguousDate(dc);
+            if (!amb || !prev) return legacy;
+            const [m, f] = amb;
+            const cands = [...new Set([f, f * 10])].sort((a, b) => a - b);
+            for (const d of cands) {
+                if (d >= 1 && d <= 31 && (m > prev.m || (m === prev.m && d >= prev.d))) return { m, d };
+            }
+            return legacy;
+        };
+        const parseTs = (dc, tc, prevMd) => {
+            const md = extractDateSeq(dc, prevMd);
             const t = extractTime(tc);
             return md ? `2026-${pad(md.m)}-${pad(md.d)} ${t}` : `${String(dc || '').trim()} ${t}`;
         };
@@ -376,9 +405,12 @@ const ImportPage = {
         };
 
         let lastRawAsh = null;
+        let lastMd = null;   // 上一行解析出的 {m,d},供 extractDateSeq 消歧
         const dataRows = raw.slice(hIdx + 2).filter(r => r && r.some(c => c !== null && c !== '' && c !== undefined));
         const previewRows = [];
         dataRows.forEach((row) => {
+            const md = extractDateSeq(row[dateCol], lastMd);
+            if (md) lastMd = md;
             const ash = col.ash >= 0 ? toNum(row[col.ash]) : NaN;
             if (isNaN(ash)) return;                       // 无灰分行跳过
             if (ash < 1 || ash > 40) return;              // 异常灰分跳过（如时间误填成1899-12-30被读成1899）
@@ -390,7 +422,7 @@ const ImportPage = {
             const moist = col.moisture >= 0 ? toNum(row[col.moisture]) : NaN;
             const onSys = systemInfo(row);
             const rec = {
-                timestamp: parseTs(row[dateCol], row[timeCol]),
+                timestamp: parseTs(row[dateCol], row[timeCol], lastMd),
                 system: '合并',   // 界面合并显示；系统开关内部保留在 sysA..sys402
                 ash_content: +ash.toFixed(4),
                 coal_amount: isNaN(coal) ? 0 : +coal,
@@ -404,7 +436,7 @@ const ImportPage = {
                 desliming473: col.des473 >= 0 ? parseDes(row[col.des473]) : 0,
                 desliming474: col.des474 >= 0 ? parseDes(row[col.des474]) : 0,
                 is_stoppage: (coalSafe <= 10) ? 1 : 0,
-                mining_face: col.face >= 0 ? String(row[col.face] || '').split('\n')[0].trim() : ''
+                mining_face: col.face >= 0 ? String(row[col.face] || '').replace(/&#10;/g, '\n').split(/\r?\n/)[0].trim() : ''
             };
             records.push(rec);
             previewRows.push([
@@ -463,6 +495,16 @@ const ImportPage = {
             category: 'coarse_factors', fileName: this.fileName, total: recs.length,
             success: imported, failed: 0, skipped: 0, status: '成功', errors: []
         });
+
+        // 一次性数据修复(2026-09):旧 fixDay 规则曾把 7.2/7.3 误解析成 7月20/30 日,
+        // 种子/历史数据遗留的 2026-07-20/30 孤儿行在此清除(修正后的解析写回 07-02/03)。
+        // 源表(6.16-7.14)不存在 7月20/30 采样,可安全按时间戳模式清除。
+        const badTs = /^2026-07-(20|30) /;
+        if (App.store.coarseCoal.some(c => badTs.test(c.timestamp))) {
+            App.store.coarseCoal = App.store.coarseCoal.filter(c => !badTs.test(c.timestamp));
+            App.store.magneticTail = App.store.magneticTail.filter(c => !badTs.test(c.timestamp));
+        }
+
         App.saveStore();
 
         // 导入后自动训练多因素模型（http 下走后端 sklearn，file:// 回退本地）

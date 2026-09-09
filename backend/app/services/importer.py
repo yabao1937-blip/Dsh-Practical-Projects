@@ -30,7 +30,7 @@ def _excel_serial_to_date(serial: float) -> dict | None:
 
 
 def extract_date(dc) -> dict | None:
-    """与前端 parseCoarseFactors 的 extractDate 一致。"""
+    """与前端 extractDate 一致（无上下文的旧规则,保留作回退）。"""
     if dc is None:
         return None
     if isinstance(dc, bool):
@@ -58,6 +58,53 @@ def extract_date(dc) -> dict | None:
     return None
 
 
+def _ambiguous_frac(dc):
+    """识别「M.f 单个小数位」写法(6.3 可能是 6月30 也可能是 6月3),返回 (m, f) 或 None。
+
+    数值型 6.3 的 (dc-m)*100 舍入为 30(尾零已被 Excel 归一化),单个小数位
+    数值上必然 %10==0;字符串型直接匹配一位小数。
+    """
+    if dc is None or isinstance(dc, bool):
+        return None
+    if isinstance(dc, (int, float)):
+        if dc >= 1000:
+            return None
+        m = math.floor(dc)
+        frac_dd = round((dc - m) * 100)
+        if frac_dd % 10 == 0 and 10 <= frac_dd <= 90:
+            return (m, frac_dd // 10)
+        return None
+    mt = re.match(r"^(\d{1,2})\.(\d)$", str(dc).strip())
+    if mt:
+        return (int(mt.group(1)), int(mt.group(2)))
+    return None
+
+
+def extract_date_seq(dc, prev: dict | None = None) -> dict | None:
+    """带序列上下文的日期解析（与前端 import.js extractDateSeq 一致）。
+
+    背景：同一手写表中「6.3」跟在 6.29 后=6月30日,而「7.1~7.9」「9.1~9.3」
+    就是 1~9 日本身——旧 fixDay 一律按"省略尾零"把 7.2/7.3/9.2/9.3 解析成
+    20/30/20/30 日,产生错误时间戳。规则：
+    - 候选日 = {f, f*10}(单个小数位才有歧义;两位小数无歧义);
+    - 取「不早于前一行日期的最小候选」(同一行内多条同日记录靠 >= 保持同日;
+      6.3 在 6.29 之后 → 3<29 被拒 → 30 ✓;9.2 在 9.1 之后 → 2 ✓);
+    - 无上下文/候选全不合格 → 回退旧 fixDay 规则。
+    """
+    legacy = extract_date(dc)
+    if legacy is None:
+        return None
+    amb = _ambiguous_frac(dc)
+    if amb is None or prev is None:
+        return legacy
+    m, f = amb
+    cands = sorted({f, f * 10})
+    for d in cands:
+        if 1 <= d <= 31 and (m, d) >= (prev["m"], prev["d"]):
+            return {"m": m, "d": d}
+    return legacy
+
+
 def extract_time(tc) -> str:
     """与前端 extractTime 一致。"""
     if tc is None:
@@ -77,8 +124,8 @@ def extract_time(tc) -> str:
     return "00:00:00"
 
 
-def parse_ts(dc, tc) -> str:
-    md = extract_date(dc)
+def parse_ts(dc, tc, prev: dict | None = None) -> str:
+    md = extract_date_seq(dc, prev)
     t = extract_time(tc)
     return f"{DEFAULT_YEAR}-{_pad(md['m'])}-{_pad(md['d'])} {t}" if md else f"{str(dc or '').strip()} {t}"
 
@@ -202,10 +249,15 @@ def parse_coarse_factors(raw: list) -> dict:
         return row[c] if c is not None and c >= 0 and c < len(row) else None
 
     last_raw_ash = None
+    last_md = None   # 上一行解析出的 {m, d},供 extract_date_seq 消歧
     data_rows = raw[h_idx + 2:]
     for row in data_rows:
         if not row or not any(c not in (None, "") for c in row):
             continue
+        dc_raw = cell(row, date_col)
+        md = extract_date_seq(dc_raw, last_md)
+        if md is not None:
+            last_md = md
         ash = _to_num(cell(row, col["ash"]))
         if math.isnan(ash) or ash < 1 or ash > 40:
             continue
@@ -224,9 +276,9 @@ def parse_coarse_factors(raw: list) -> dict:
             if not math.isnan(v) and v:
                 on_sys.append(code)
         face_raw = cell(row, col["face"]) if col["face"] >= 0 else None
-        face = str("" if face_raw is None else face_raw).split("\n")[0].strip()
+        face = str("" if face_raw is None else face_raw).replace("&#10;", "\n").split("\n")[0].strip()
         rec = {
-            "timestamp": parse_ts(cell(row, date_col), cell(row, time_col)),
+            "timestamp": parse_ts(dc_raw, cell(row, time_col), last_md),
             "system": "合并",
             "ash_content": round(ash, 4),
             "coal_amount": 0.0 if math.isnan(coal) else coal,
