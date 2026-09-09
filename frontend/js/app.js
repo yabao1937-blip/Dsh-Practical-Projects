@@ -1,5 +1,10 @@
 /* ========================================
-   重介密控系统 - 全局核心模块
+   全局核心模块：数据 store + 持久化 + 算法/训练引擎
+   - store：内存数据模型（coarseCoal/floatCoal/calcLogs/coarseModel 等）
+   - saveStore/loadStore：localStorage 持久化，http 下额外镜像 PUT /api/v1/state
+   - 算法：取值链 resolve*、总灰分 calcTotalAsh、密度建议 computeDensityGuidance、
+           粗灰预测 predictCoarseAsh、推测简报 buildHourlyBrief
+   - 训练：trainMlr/trainPls（本地回退）+ retrainCoarseModelAsync（走后端 sklearn）
    ======================================== */
 
 const App = {
