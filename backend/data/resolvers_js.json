@@ -1,0 +1,15 @@
+{
+  "heavyAsh": 8.5,
+  "heavyAmt": 436.7,
+  "floatAmt": 27,
+  "coarseAmt": 40,
+  "totalAmt": 503.7,
+  "floatAsh": 8.22,
+  "coarseAsh": 13.67,
+  "totalAsh": 8.8956,
+  "totalAshLayer": "公式计算",
+  "density": 1.49,
+  "guideScheme": "total",
+  "ashTarget": 8.5,
+  "ashTargetTol": 0.1
+}

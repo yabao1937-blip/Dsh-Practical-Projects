@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>重介密控系统 - 密度推荐与灰分监控平台</title>
+    <link rel="stylesheet" href="css/style.css?v=9">
+    <!-- 无外部依赖，图表使用纯Canvas 2D绘制 -->
+    <script src="js/xlsx-lite.js?v=5"></script>
+    <script src="js/chart-lite.js?v=6"></script>
+</head>
+<body>
+    <!-- 顶部导航栏 -->
+    <header class="top-bar">
+        <div class="top-bar-left">
+            <div class="logo">
+                <span class="logo-icon">&#9881;</span>
+                <h1>重介密控系统</h1>
+            </div>
+            <span class="system-subtitle">密度推荐与灰分监控平台</span>
+        </div>
+        <div class="top-bar-center">
+            <nav class="main-nav">
+                <a href="#" class="nav-item active" data-page="page-overview">
+                    <span class="nav-icon">&#9634;</span>密度推荐总览
+                </a>
+                <a href="#" class="nav-item" data-page="page-collect">
+                    <span class="nav-icon">&#9733;</span>数据采集与补录
+                </a>
+                <a href="#" class="nav-item" data-page="page-coarse">
+                    <span class="nav-icon">&#9650;</span>粗精煤泥分析
+                </a>
+                <a href="#" class="nav-item" data-page="page-float">
+                    <span class="nav-icon">&#9660;</span>浮精影响分析
+                </a>
+                <a href="#" class="nav-item" data-page="page-import">
+                    <span class="nav-icon">&#10515;</span>批量数据导入
+                </a>
+                <a href="#" class="nav-item" data-page="page-history">
+                    <span class="nav-icon">&#9744;</span>历史数据查询
+                </a>
+            </nav>
+        </div>
+        <div class="top-bar-right">
+            <div class="sys-status">
+                <span class="status-dot online"></span>
+                <span id="sys-time">--</span>
+            </div>
+            <div class="alert-badge" id="alert-badge" title="告警信息">
+                <span>&#9888;</span>
+                <span class="badge-count" id="alert-count">0</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- 告警横幅 -->
+    <div class="alert-banner hidden" id="alert-banner">
+        <div class="alert-banner-content">
+            <span class="alert-banner-icon">&#9888;</span>
+            <span id="alert-banner-text">系统告警</span>
+            <button class="alert-banner-close" onclick="document.getElementById('alert-banner').classList.add('hidden')">&times;</button>
+        </div>
+    </div>
+
+    <!-- 主内容区 -->
+    <main class="main-content">
+
+        <!-- ==================== 页面一：密度推荐总览 ==================== -->
+        <section class="page active" id="page-overview">
+            <div class="page-header">
+                <h2>密度推荐总览</h2>
+                <div class="page-header-actions">
+                    <div class="filter-group">
+                        <label>皮带：</label>
+                        <select id="filter-belt" onchange="OverviewPage.refresh()">
+                            <option value="all">全部</option>
+                            <option value="501">501皮带</option>
+                            <option value="502">502皮带</option>
+                        </select>
+                        <label>系统：</label>
+                        <select id="filter-system" onchange="OverviewPage.refresh()">
+                            <option value="all">全部</option>
+                            <option value="401">401系统</option>
+                            <option value="402">402系统</option>
+                            <option value="A">A系统</option>
+                            <option value="B">B系统</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" onclick="OverviewPage.refresh()">刷新数据</button>
+                    <button class="btn" id="btn-guide-scheme" onclick="App.toggleGuideScheme()">总灰分版</button>
+                    <div class="filter-group compact">
+                        <label title="密度逐步执行的每步幅度(g/cm³)">钳制</label>
+                        <input type="number" id="density-maxstep" step="0.001" min="0.001" max="0.1" value="0.01" style="width:52px">
+                        <label title="总灰分达标容差(±%)，也是密度建议的保持判定带">容差</label>
+                        <input type="number" id="ash-target-tol" step="0.05" min="0.05" max="3" value="0.1" style="width:48px">
+                        <button class="btn btn-sm" onclick="App.applyDensityGuideSettings()">应用</button>
+                    </div>
+                    <button class="btn" onclick="App.trainModels()">训练模型</button>
+                    <button class="btn" onclick="App.exportData()">导出备份</button>
+                    <button class="btn" onclick="App.importBackup()">导入备份</button>
+                    <button class="btn" onclick="App.clearData()" style="color:var(--accent-red)">清除数据</button>
+                </div>
+            </div>
+
+            <!-- 告警区域 -->
+            <div class="alert-zone" id="overview-alerts"></div>
+
+                        <!-- 合并系统密度推荐卡片 -->            <div class="card-grid-4">
+                <div class="density-card" id="card-total" onclick="OverviewPage.showCardDetail('total')">
+                    <div class="density-card-header">
+                        <span class="system-tag">合并系统</span>
+                        <span class="belt-tag">501+502皮带</span>
+                        <span class="confidence-tag high" id="conf-total">置信度：高</span>
+                        <span class="confidence-tag scheme-tag" id="scheme-total">总灰分版</span>
+                    </div>
+                    <div class="density-card-body">
+                        <div class="density-value">
+                            <span class="density-label">建议密度</span>
+                            <span class="density-num" id="density-total">1.450</span>
+                            <span class="density-unit">g/cm³</span>
+                        </div>
+                        <span class="density-sub" id="density-sub-total"></span>
+                        <div class="direction-indicator" id="direction-total">
+                            <span class="direction-arrow stable">&#9644;</span>
+                            <span class="direction-text">保持稳定</span>
+                        </div>
+                    </div>
+                    <div class="density-card-footer">
+                        <div class="ash-compare">
+                            <div class="ash-item">
+                                <span class="ash-label" id="target-ash-label-total">目标灰分</span>
+                                <span class="ash-val">
+                                    <button class="arrow-btn" onclick="event.stopPropagation();OverviewPage.adjustAsh('total','target',-0.1)">&#9660;</button>
+                                    <span id="target-ash-total">8.50%</span>
+                                    <button class="arrow-btn" onclick="event.stopPropagation();OverviewPage.adjustAsh('total','target',0.1)">&#9650;</button>
+                                </span>
+                            </div>
+                            <div class="ash-item">
+                                <span class="ash-label" id="actual-ash-label-total">实际灰分</span>
+                                <span class="ash-val">
+                                    <button class="arrow-btn" onclick="event.stopPropagation();OverviewPage.adjustAsh('total','actual',-0.1)">&#9660;</button>
+                                    <span id="actual-ash-total">10.52%</span>
+                                    <button class="arrow-btn" onclick="event.stopPropagation();OverviewPage.adjustAsh('total','actual',0.1)">&#9650;</button>
+                                </span>
+                            </div>
+                            <div class="ash-item">
+                                <span class="ash-label">偏差</span>
+                                <span class="ash-val" id="deviation-total">--</span>
+                            </div>
+                        </div>
+                        <div class="effect-summary" id="effect-total">预期效果：暂无数据</div>
+                    </div>
+                    <div class="density-card-trace">
+                        <span>来源：<span id="source-total">--</span></span>
+                        <span>更新：<span id="update-time-total">--</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 灰分趋势图 -->
+            <div class="panel-row">
+                <div class="panel panel-wide">
+                    <div class="panel-header">
+                        <h3>各系统灰分趋势对比</h3>
+                        <select id="overview-trend-range" onchange="OverviewPage.refreshTrend()">
+                            <option value="8h">近8小时</option>
+                            <option value="24h" selected>近24小时</option>
+                            <option value="3d">近3天</option>
+                        </select>
+                    </div>
+                    <div class="panel-body chart-container">
+                        <canvas id="chart-overview-trend"></canvas>
+                    </div>
+                </div>
+                <div class="panel panel-narrow">
+                    <div class="panel-header">
+                        <h3>系统状态汇总</h3>
+                    </div>
+                    <div class="panel-body">
+                        <div class="status-summary-list">
+                            <div class="status-item">
+                                <span class="status-label">数据采集</span>
+                                <span class="status-val good" id="status-collect">等待PLC接入</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">模型状态</span>
+                                <span class="status-val warn" id="status-model-state">未训练</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">告警数量</span>
+                                <span class="status-val" id="status-alert-count">0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">手工补录</span>
+                                <span class="status-val warn" id="status-manual-count">0条待处理</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">上次模型训练</span>
+                                <span class="status-val" id="status-last-train">--</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">数据记录</span>
+                                <span class="status-val warn" id="status-data-integrity">暂无数据</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 页面二：数据采集与手工补录 ==================== -->
+        <section class="page" id="page-collect">
+            <div class="page-header">
+                <h2>数据采集与手工补录</h2>
+                <div class="page-header-actions">
+                    <button class="btn btn-primary" onclick="CollectPage.refreshAll()">刷新全部</button>
+                </div>
+            </div>
+
+            <!-- 上半部分：自动采集健康状态 -->
+            <div class="panel">
+                <div class="panel-header" style="cursor:pointer" onclick="CollectPage.toggleInstruments()">
+                    <h3>在线仪表实时数据 <span id="instrument-toggle-icon" style="font-size:12px;color:var(--text-muted)">&#9660; 收起</span></h3>
+                    <div class="panel-header-info">
+                        <span class="live-dot"></span> 等待PLC接入
+                        <span id="collect-refresh-time">上次刷新：--</span>
+                    </div>
+                </div>
+                <div class="panel-body" id="instrument-panel-body">
+                    <table class="data-table collect-table">
+                        <thead>
+                            <tr>
+                                <th>仪表名称</th>
+                                <th>指标</th>
+                                <th>当前值</th>
+                                <th>单位</th>
+                                <th>区间范围</th>
+                                <th>数据来源</th>
+                                <th>更新时间</th>
+                                <th>质量状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="collect-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 下半部分：手工补录 -->
+            <div class="panel-row">
+                <div class="panel panel-half">
+                    <div class="panel-header">
+                        <h3>手工补录表单</h3>
+                    </div>
+                    <div class="panel-body">
+                        <div class="form-group">
+                            <label>数据类别</label>
+                            <select id="manual-category" onchange="CollectPage.onCategoryChange()">
+                                <option value="heavy_ash_sample">重介精煤灰分采样</option>
+                                <option value="ash_meter">灰分仪</option>
+                                <option value="density_meter">密度计</option>
+                                <option value="belt_scale">皮带秤</option>
+                                <option value="magnetic_tail">精磁尾液位</option>
+                                <option value="float_ash">浮精灰分</option>
+                            </select>
+                        </div>
+                        <div class="form-row" id="manual-form-fields"></div>
+                        <div class="form-group">
+                            <label>采样时间</label>
+                            <input type="datetime-local" id="manual-time">
+                        </div>
+                        <div class="form-group">
+                            <label>备注</label>
+                            <input type="text" id="manual-remark" placeholder="可选填写备注信息">
+                        </div>
+                        <div class="form-actions">
+                            <button class="btn btn-primary" onclick="CollectPage.submitManual()">提交补录</button>
+                            <button class="btn" onclick="CollectPage.resetManual()">重置</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="panel panel-half">
+                    <div class="panel-header">
+                        <h3>补录历史记录</h3>
+                        <div class="panel-header-info">
+                            <input type="text" id="manual-history-search" placeholder="搜索时间/指标值..." oninput="CollectPage.loadHistory()" style="width:160px;padding:4px 8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-darker);color:var(--text-primary);font-size:12px;">
+                            <select id="manual-history-filter" onchange="CollectPage.loadHistory()">
+                                <option value="all">全部类别</option>
+                                <option value="ash_meter">灰分仪</option>
+                                <option value="density_meter">密度计</option>
+                                <option value="belt_scale">皮带秤</option>
+                                <option value="magnetic_tail">精磁尾液位</option>
+                                <option value="float_ash">浮精灰分</option>
+                            </select>
+                            <button class="btn btn-sm" style="margin-left:8px;color:var(--accent-red)" onclick="CollectPage.clearHistory()">清空记录</button>
+                        </div>
+                    </div>
+                    <div class="panel-body">
+                        <div class="table-scroll">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>序号</th>
+                                    <th>时间</th>
+                                    <th>类别</th>
+                                    <th>指标值</th>
+                                    <th>操作人</th>
+                                    <th>状态</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="manual-history-tbody"></tbody>
+                        </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 页面三：粗精煤泥灰分实时分析 ==================== -->
+        <section class="page" id="page-coarse">
+            <div class="page-header">
+                <h2>粗精煤泥灰分实时分析</h2>
+                <div class="page-header-actions">
+                    <div class="filter-group">
+                        <label>视图：</label>
+                        <select id="coarse-view-mode" onchange="CoarsePage.switchView()">
+                            <option value="shift">按班次</option>
+                            <option value="day">按日</option>
+                        </select>
+                    </div>
+                    <button class="btn" onclick="CoarsePage.retrain()">重新训练模型</button>
+                    <button class="btn btn-primary" onclick="CoarsePage.refresh()">刷新</button>
+                </div>
+            </div>
+
+            <!-- 数值卡片 -->
+            <div class="card-grid-5">
+                <div class="stat-card" onclick="CoarsePage.showCardDetail('ash')">
+                    <div class="stat-card-label">当前实测灰分</div>
+                    <div class="stat-card-value" id="coarse-current-ash">--<span class="stat-unit">%</span></div>
+                    <div class="stat-card-sub">精磁尾液位: <span id="coarse-level">--</span>%</div>
+                </div>
+                <div class="stat-card accent-blue" onclick="CoarsePage.showCardDetail('predict')">
+                    <div class="stat-card-label">多因素预测灰分</div>
+                    <div class="stat-card-value" id="coarse-predicted-ash">--<span class="stat-unit">%</span></div>
+                    <div class="stat-card-sub" id="coarse-predicted-dev">前馈预测（MLR/PLS）</div>
+                </div>
+                <div class="stat-card accent-purple">
+                    <div class="stat-card-label">粗精煤泥量</div>
+                    <div class="stat-card-value" id="coarse-amount-display">--<span class="stat-unit">t/h</span></div>
+                    <div class="stat-card-sub">
+                        <input type="number" id="coarse-amount-input" class="stat-card-input" step="0.1" min="0" placeholder="输入当前煤量"
+                               onchange="CoarsePage.onAmountChange()">
+                    </div>
+                </div>
+                <div class="stat-card accent-orange" onclick="CoarsePage.showCardDetail('cumulative')">
+                    <div class="stat-card-label">累计灰分（本班次）</div>
+                    <div class="stat-card-value" id="coarse-cumulative-ash">--<span class="stat-unit">%</span></div>
+                    <div class="stat-card-sub" id="coarse-cumulative-sub">按煤量加权</div>
+                </div>
+                <div class="stat-card accent-green" onclick="CoarsePage.showCardDetail('fit')">
+                    <div class="stat-card-label">模型拟合度 R²</div>
+                    <div class="stat-card-value" id="coarse-fit-r2">--</div>
+                    <div class="stat-card-sub" id="coarse-fit-sub">需先导入数据</div>
+                </div>
+            </div>
+
+            <!-- 趋势图 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>粗精煤泥灰分趋势</h3>
+                </div>
+                <div class="panel-body chart-container">
+                    <canvas id="chart-coarse-trend"></canvas>
+                </div>
+            </div>
+
+            <!-- 多因素影响权重 + 灰分 vs 液位：实际值 + 多因素预测值 -->
+            <div class="panel-row">
+                <div class="panel panel-narrow">
+                    <div class="panel-header">
+                        <h3>多因素影响权重</h3>
+                    </div>
+                    <div class="panel-body chart-container-small">
+                        <canvas id="chart-coarse-factors"></canvas>
+                    </div>
+                </div>
+                <div class="panel panel-wide">
+                    <div class="panel-header">
+                        <h3>粗精煤泥灰分 vs 精磁尾液位（实际值 / 多因素预测值）</h3>
+                        <div class="panel-header-info">
+                            <span id="regression-formula-text">算法：--</span>
+                            <span id="regression-r2-text">R² = --</span>
+                        </div>
+                    </div>
+                    <div class="panel-body chart-container" style="height:340px">
+                        <canvas id="chart-coarse-regression"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 近10天公式校验 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>近10天公式校验（新公式计算值 vs 实测值）</h3>
+                    <div class="panel-header-info">
+                        <span>合格判定：偏差在容差内为合格</span>
+                        <span id="coarse-update-time">更新时间：--</span>
+                    </div>
+                    <div class="panel-header-actions" style="margin-left:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <label style="font-size:12px;color:var(--text-secondary)">容差±%</label>
+                        <input type="number" id="coarse-tol" value="0.8" step="0.1" min="0.1" style="width:56px;padding:3px 6px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-darker);color:var(--text-primary);font-size:12px" onchange="CoarsePage.onTolChange()">
+                        <label style="font-size:12px;color:var(--text-secondary)">算法</label>
+                        <select id="coarse-view-model" onchange="CoarsePage.onModelViewChange()" style="padding:3px 6px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-darker);color:var(--text-primary);font-size:12px">
+                            <option value="production">生产模型</option>
+                            <option value="mlr">MLR</option>
+                            <option value="pls">PLS</option>
+                        </select>
+                        <label style="font-size:12px;color:var(--text-secondary)">训练范围</label>
+                        <select id="coarse-train-range" onchange="CoarsePage.onTrainRangeChange()" style="padding:3px 6px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-darker);color:var(--text-primary);font-size:12px">
+                            <option value="jun_jul">仅6-7月（出厂口径）</option>
+                            <option value="30d">近30天</option>
+                            <option value="all">全部数据</option>
+                        </select>
+                        <label class="checkbox-label" style="font-size:12px;color:var(--text-secondary)">
+                            <input type="checkbox" id="coarse-auto-roll" onchange="CoarsePage.toggleAutoRoll()"> 每5分钟滚动
+                        </label>
+                        <button class="btn btn-sm" onclick="CoarsePage.retrain()">重新训练</button>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <div class="import-preview-summary" id="coarse-model-summary"></div>
+                    <div class="table-scroll">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>实测灰分(%)</th>
+                                <th>预测灰分(%)</th>
+                                <th>偏差(%)</th>
+                                <th>合格判定</th>
+                                <th>系统</th>
+                            </tr>
+                        </thead>
+                        <tbody id="coarse-tbody"></tbody>
+                    </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 重训练历史（持续优化追踪） -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>模型重训练历史（公式不断完善记录）</h3>
+                    <div class="panel-header-info"><span>每次导入/重训练追加一条，追踪 R² 与合格率变化</span></div>
+                </div>
+                <div class="panel-body">
+                    <div class="table-scroll">
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>训练时间</th><th>样本数</th><th>训练范围</th><th>MLR</th><th>PLS</th><th>生产模型</th></tr>
+                        </thead>
+                        <tbody id="coarse-history-tbody"></tbody>
+                    </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 页面四：浮精影响分析 ==================== -->
+        <section class="page" id="page-float">
+            <div class="page-header">
+                <h2>浮精影响分析</h2>
+                <div class="page-header-actions">
+                    <div class="filter-group">
+                        <label>时间范围：</label>
+                        <input type="datetime-local" id="float-start-time">
+                        <span>至</span>
+                        <input type="datetime-local" id="float-end-time">
+                        <button class="btn btn-primary" onclick="FloatPage.query()">查询</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 数值卡片 -->
+            <div class="card-grid-4">
+                <div class="stat-card" onclick="FloatPage.showCardDetail('ash')">
+                    <div class="stat-card-label">当前浮精灰分</div>
+                    <div class="stat-card-value" id="float-current-ash">9.80<span class="stat-unit">%</span></div>
+                    <div class="stat-card-sub">最新批次化验值</div>
+                </div>
+                <div class="stat-card accent-blue" onclick="FloatPage.showCardDetail('amount')">
+                    <div class="stat-card-label">浮精煤量</div>
+                    <div class="stat-card-value" id="float-current-amount">30.0<span class="stat-unit">t/h</span></div>
+                    <div class="stat-card-sub">
+                        <input type="number" id="float-amount-input" class="stat-card-input" step="0.1" min="0" placeholder="输入当前煤量"
+                               onclick="event.stopPropagation()" onchange="FloatPage.onAmountChange()">
+                    </div>
+                </div>
+                <div class="stat-card accent-orange" onclick="FloatPage.showCardDetail('influence')">
+                    <div class="stat-card-label">固定影响值</div>
+                    <div class="stat-card-value" id="float-fixed-influence">+0.15<span class="stat-unit">%</span></div>
+                    <div class="stat-card-sub">对501皮带总精煤灰分</div>
+                </div>
+                <div class="stat-card accent-green" onclick="FloatPage.showCardDetail('range')">
+                    <div class="stat-card-label">动态波动范围</div>
+                    <div class="stat-card-value" id="float-dynamic-range">±0.08<span class="stat-unit">%</span></div>
+                    <div class="stat-card-sub">近24h标准差</div>
+                </div>
+            </div>
+
+            <!-- 图表区域 -->
+            <div class="panel-row">
+                <div class="panel panel-wide">
+                    <div class="panel-header">
+                        <h3>浮精灰分与总精煤灰分联动趋势</h3>
+                    </div>
+                    <div class="panel-body chart-container">
+                        <canvas id="chart-float-linkage"></canvas>
+                    </div>
+                </div>
+                <div class="panel panel-narrow">
+                    <div class="panel-header">
+                        <h3>浮精影响值分布</h3>
+                    </div>
+                    <div class="panel-body chart-container-small">
+                        <canvas id="chart-float-distribution"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 异常工况标注 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>浮精数据记录与工况标注</h3>
+                    <div class="panel-header-actions">
+                        <button class="btn btn-sm" onclick="FloatPage.showAnnotateModal()">标注异常工况</button>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <div class="table-scroll">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>浮精灰分(%)</th>
+                                <th>浮精煤量(t/h)</th>
+                                <th>压滤机状态</th>
+                                <th>影响值(%)</th>
+                                <th>工况标注</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="float-tbody"></tbody>
+                    </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 页面五：批量数据导入 ==================== -->
+        <section class="page" id="page-import">
+            <div class="page-header">
+                <h2>批量数据导入</h2>
+                <div class="page-header-actions">
+                    <button class="btn btn-primary" onclick="ImportPage.generateBrief()">生成推测简报</button>
+                </div>
+            </div>
+
+            <div class="panel-row">
+                <!-- 导入操作 -->
+                <div class="panel panel-half">
+                    <div class="panel-header">
+                        <h3>数据导入</h3>
+                    </div>
+                    <div class="panel-body">
+                        <div class="form-group">
+                            <label>数据类别</label>
+                            <select id="import-category">
+                                <option value="coarse_magnetic">粗精煤泥、精磁尾</option>
+                                <option value="coarse_factors">粗精煤泥多因素（推荐）</option>
+                                <option value="float_ash">浮精</option>
+                                <option value="ash_density">灰分、密度</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>选择Excel文件</label>
+                            <div class="file-upload-area" id="file-drop-zone">
+                                <div class="file-upload-icon">&#10515;</div>
+                                <p>将Excel文件拖放到此处，或点击选择文件</p>
+                                <input type="file" id="import-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="ImportPage.onFileSelected(this)">
+                            </div>
+                            <div class="file-info" id="import-file-info"></div>
+                        </div>
+                        <div class="form-actions">
+                            <button class="btn" onclick="ImportPage.downloadTemplate()">下载导入模板</button>
+                            <button class="btn btn-primary" id="btn-import" onclick="ImportPage.startImport()" disabled>开始导入</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 导入设置 -->
+                <div class="panel panel-half">
+                    <div class="panel-header">
+                        <h3>导入选项</h3>
+                    </div>
+                    <div class="panel-body">
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="import-dedup" checked>
+                                自动去除重复数据
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="import-validate" checked>
+                                导入前格式校验
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="import-abnormal-check" checked>
+                                异常值提示（超出合理范围的值）
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>重复判定规则</label>
+                            <select id="import-dedup-rule">
+                                <option value="timestamp">按时间戳去重</option>
+                                <option value="all">所有字段完全相同才算重复</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 预览区域 -->
+            <div class="panel" id="import-preview-panel" style="display:none">
+                <div class="panel-header">
+                    <h3>数据预览与校验</h3>
+                    <div class="panel-header-info">
+                        <span id="import-preview-stats"></span>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <div class="import-preview-summary" id="import-summary"></div>
+                    <div class="table-scroll">
+                        <table class="data-table" id="import-preview-table">
+                            <thead id="import-preview-thead"></thead>
+                            <tbody id="import-preview-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div class="form-actions" style="margin-top:16px">
+                        <button class="btn btn-primary" onclick="ImportPage.confirmImport()">确认导入</button>
+                        <button class="btn" onclick="ImportPage.cancelImport()">取消</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 导入日志 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>导入日志</h3>
+                    <div class="panel-header-actions">
+                        <button class="btn btn-sm" onclick="ImportPage.exportErrors()">导出错误记录</button>
+                    </div>
+                </div>
+                <div class="panel-body">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>导入时间</th>
+                                <th>数据类别</th>
+                                <th>文件名</th>
+                                <th>总行数</th>
+                                <th>成功</th>
+                                <th>失败</th>
+                                <th>跳过(重复)</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="import-log-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== 页面六：历史数据查询 ==================== -->
+        <section class="page" id="page-history">
+            <div class="page-header">
+                <h2>历史数据查询</h2>
+                <div class="page-header-actions">
+                    <button class="btn" onclick="HistoryPage.exportResults()">导出查询结果</button>
+                </div>
+            </div>
+
+            <!-- 查询条件 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>查询条件</h3>
+                </div>
+                <div class="panel-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>开始时间</label>
+                            <input type="datetime-local" id="history-start-time">
+                        </div>
+                        <div class="form-group">
+                            <label>结束时间</label>
+                            <input type="datetime-local" id="history-end-time">
+                        </div>
+                        <div class="form-group">
+                            <label>系统筛选</label>
+                            <select id="history-system-filter">
+                                <option value="all">全部系统</option>
+                                <option value="401">401系统</option>
+                                <option value="402">402系统</option>
+                                <option value="A">A系统</option>
+                                <option value="B">B系统</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>数据类别</label>
+                            <select id="history-category-filter">
+                                <option value="all">全部类别</option>
+                                <option value="ash">灰分</option>
+                                <option value="density">密度</option>
+                                <option value="coal">煤量</option>
+                                <option value="level">液位</option>
+                                <option value="influence">影响值</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button class="btn btn-primary" onclick="HistoryPage.query()">查询</button>
+                        <button class="btn" onclick="HistoryPage.setDefaultDates()">重置时间</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 查询摘要 -->
+            <div id="history-summary"></div>
+
+            <!-- 查询结果 -->
+            <div id="history-results">
+                <div class="panel"><div class="panel-body" style="text-align:center;color:var(--text-muted);padding:40px">请设置查询条件后点击"查询"</div></div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- 通用弹窗 -->
+    <div class="modal-overlay hidden" id="modal-overlay">
+        <div class="modal" id="modal-box">
+            <div class="modal-header">
+                <h3 id="modal-title">详情</h3>
+                <button class="modal-close" onclick="App.closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-footer" id="modal-footer"></div>
+        </div>
+    </div>
+
+    <!-- Toast通知 -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="js/seed_data.js?v=8"></script>
+    <script src="js/api.js?v=1"></script>
+    <script src="js/app.js?v=63"></script>
+    <script src="js/overview.js?v=36"></script>
+    <script src="js/collect.js?v=21"></script>
+    <script src="js/coarse.js?v=19"></script>
+    <script src="js/float.js?v=10"></script>
+    <script src="js/import.js?v=16"></script>
+    <script src="js/history.js?v=1"></script>
+</body>
+</html>

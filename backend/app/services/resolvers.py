@@ -1,0 +1,236 @@
+"""在线仪表/量/灰分的取值链解析（逐值对齐前端 App.resolve* 系列）。
+
+state 为 store 字典（来自 seed_store.json 或 DB 快照）。本模块覆盖 seed 无手动覆盖的
+主路径；手动有效期(manual_at>=auto_at)的完整判定在 validity.py 中单独实现。
+"""
+import json
+import math
+
+from .density import calc_total_ash
+from .modeling import predict_coarse_ash
+
+INSTRUMENT_DEFAULT = {"ash_501": 8.52, "ash_502": 10.68, "scale_501": 268.5,
+                      "scale_502": 235.2, "density": 1.450, "level_tail": 55, "float_ash": 9.85}
+
+
+def _is_num(v):
+    """数值判定（排除 bool，因 isinstance(True, int) 为 True，否则 True 会被当作 1 穿透）。"""
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _num(v):
+    return v if _is_num(v) and not (isinstance(v, float) and math.isnan(v)) else None
+
+
+def _latest_by_time(items):
+    """时间戳最新的一条（字符串序 == 时间序，>= 使数组靠后者在同时刻胜出，与 JS 一致）"""
+    best = None
+    best_t = None
+    for d in items or []:
+        t = d.get("timestamp")
+        if t is None:
+            continue
+        if best_t is None or t >= best_t:
+            best_t = t
+            best = d
+    return best
+
+
+def _latest_calc_value(store, calc_type, belt):
+    for l in reversed(store.get("calcLogs") or []):
+        if l.get("calc_type") != calc_type:
+            continue
+        try:
+            v = json.loads(l.get("input_json") or "{}")
+        except Exception:
+            continue
+        if (belt is None or str(v.get("belt") or "") == str(belt)) and _is_num(v.get("value")):
+            return float(v["value"])
+    return None
+
+
+def resolve_instrument(store, inst_id):
+    cfg = (store.get("instrumentInputs") or {}).get(inst_id) or {}
+    entry = None
+    if inst_id in ("scale_501", "scale_502"):
+        entry = _latest_calc_value(store, "belt_scale", "501" if inst_id == "scale_501" else "502")
+    elif inst_id in ("ash_501", "ash_502"):
+        entry = _latest_calc_value(store, "ash_meter", "501" if inst_id == "ash_501" else "502")
+        if entry is None:
+            entry = _latest_belt_ash(store, "501" if inst_id == "ash_501" else "502")
+    elif inst_id == "density":
+        for l in reversed(store.get("calcLogs") or []):
+            if l.get("calc_type") != "ash_density":
+                continue
+            try:
+                v = json.loads(l.get("input_json") or "{}")
+                d = v.get("density")
+                if _is_num(d) and 1.3 <= d <= 1.6:
+                    entry = float(d)
+                    break
+            except Exception:
+                continue
+    elif inst_id == "level_tail":
+        for l in reversed(store.get("magneticTail") or []):
+            if _is_num(l.get("level")) and l["level"] > 0:
+                entry = float(l["level"])
+                break
+    manual = cfg.get("manual")
+    if _is_num(manual) and manual >= 0:
+        return manual
+    if entry is not None:
+        return entry
+    return INSTRUMENT_DEFAULT.get(inst_id)
+
+
+def _latest_belt_ash(store, belt):
+    for l in reversed(store.get("calcLogs") or []):
+        if l.get("calc_type") != "ash_density":
+            continue
+        try:
+            v = json.loads(l.get("input_json") or "{}")
+            if str(v.get("belt") or "") == str(belt) and _is_num(v.get("ash_content")):
+                return float(v["ash_content"])
+        except Exception:
+            continue
+    return None
+
+
+def resolve_total_amount(store):
+    cfg = (store.get("amountInputs") or {}).get("totalAmount") or {}
+    entry = cfg.get("entry")
+    if _is_num(entry) and entry >= 0:
+        pass  # 有 entry 时优先
+    else:
+        e501 = _latest_calc_value(store, "belt_scale", "501")
+        e502 = _latest_calc_value(store, "belt_scale", "502")
+        entry = round(e501 + e502, 1) if (e501 is not None and e502 is not None) else None
+    manual = cfg.get("manual")
+    if _is_num(manual) and manual >= 0:
+        return manual
+    if entry is not None:
+        return entry
+    return round(resolve_instrument(store, "scale_501") + resolve_instrument(store, "scale_502"), 1)
+
+
+def resolve_coarse_amount(store):
+    cfg = (store.get("amountInputs") or {}).get("coarseAmount") or {}
+    cc = store.get("coarseCalc") or {}
+    calc = None
+    if _is_num(cc.get("screen315")) and _is_num(cc.get("waterUnder")) \
+            and cc["screen315"] >= cc["waterUnder"]:
+        calc = round(cc["screen315"] - cc["waterUnder"], 1)
+    manual = cfg.get("manual")
+    if _is_num(manual) and manual >= 0:
+        return manual
+    if calc is not None:
+        return calc
+    return None
+
+
+def resolve_amount(store, key):
+    cfg = (store.get("amountInputs") or {}).get(key) or {}
+    mode = cfg.get("mode") or "manual"
+    auto = None
+    if key == "floatAmount" and mode == "auto":
+        last = _latest_by_time(store.get("floatCoal"))
+        auto = last.get("coal_amount") if (last and _is_num(last.get("coal_amount"))) else None
+    elif key == "denseAmount" and mode == "calc":
+        t = resolve_amount(store, "totalAmount")
+        f = resolve_amount(store, "floatAmount")
+        c = resolve_amount(store, "coarseAmount")
+        if t is not None and f is not None and c is not None:
+            auto = max(0.0, round(t - f - c, 1))
+    elif key == "totalAmount":
+        auto = resolve_total_amount(store)
+    elif key == "coarseAmount":
+        auto = resolve_coarse_amount(store)
+    manual = cfg.get("manual")
+    if _is_num(manual) and manual >= 0:
+        return manual
+    if auto is not None:
+        return auto
+    return None
+
+
+def resolve_float_ash(store):
+    cfg = store.get("floatAshInput") or {}
+    last = _latest_by_time(store.get("floatCoal"))
+    auto = last.get("ash_content") if (last and _is_num(last.get("ash_content"))) else None
+    if auto is None:
+        auto = INSTRUMENT_DEFAULT["float_ash"]
+    manual = cfg.get("manual")
+    if _is_num(manual) and manual >= 0:
+        return manual
+    return auto
+
+
+def resolve_coarse_ash(store):
+    cfg = store.get("coarseAshInput") or {}
+    last = _latest_by_time(store.get("coarseCoal"))
+    auto = None
+    if last:
+        raw = predict_coarse_ash(last, _model(store))
+        if raw is None and _is_num(last.get("ash_content")):
+            raw = last["ash_content"]
+        if raw is not None and math.isfinite(raw):
+            auto = round(raw, 2)  # seed 首次 EMA 无历史 → 返回原始预测
+    manual = cfg.get("manual")
+    if _is_num(manual) and manual >= 0:
+        return manual
+    return auto
+
+
+def _model(store):
+    cm = store.get("coarseModel") or {}
+    prod = cm.get("production") or "pls"
+    return cm.get(prod) or {}
+
+
+def get_heavy_ash(store):
+    """重介精煤灰分取值：manual 需为非负有限数值（排除 bool/NaN/inf），否则回退默认 8.50。
+
+    brief 与取值链共用此函数，保证同一数据两处口径一致（GLM 发现的原不一致问题）。
+    """
+    cfg = store.get("heavyAshInput") or {}
+    m = cfg.get("manual")
+    if _is_num(m) and math.isfinite(m) and m >= 0:
+        return m
+    return 8.50
+
+
+def formula_total_ash(store):
+    heavy_amt = resolve_amount(store, "denseAmount")
+    float_amt = resolve_amount(store, "floatAmount")
+    coarse_amt = resolve_amount(store, "coarseAmount")
+    float_ash = resolve_float_ash(store)
+    coarse_ash = resolve_coarse_ash(store)
+    if heavy_amt is None or heavy_amt <= 0 or float_amt is None or coarse_amt is None \
+            or float_ash is None or coarse_ash is None:
+        return None
+    return round(calc_total_ash(get_heavy_ash(store), heavy_amt, float_ash, float_amt, coarse_ash, coarse_amt), 4)
+
+
+def resolve_total_ash(store):
+    cfg = (store.get("ashInputs") or {}).get("totalAsh") or {}
+    manual = cfg.get("manual")
+    if _is_num(manual) and manual >= 0:
+        return manual
+    formula = formula_total_ash(store)
+    if formula is not None:
+        return formula
+    entry = cfg.get("entry")
+    if _is_num(entry) and entry >= 0:
+        return entry
+    a501 = resolve_instrument(store, "ash_501")
+    a502 = resolve_instrument(store, "ash_502")
+    w501 = resolve_instrument(store, "scale_501")
+    w502 = resolve_instrument(store, "scale_502")
+    denom = w501 + w502
+    if denom == 0:
+        return None
+    return round((a501 * w501 + a502 * w502) / denom, 4)
+
+
+def resolve_density(store):
+    return resolve_instrument(store, "density")

@@ -1,0 +1,25 @@
+{
+  "name": "expert_weighted",
+  "intercept": -0.5,
+  "coefficients": {
+    "raw_coal_ash": 1.02,
+    "raw_coal_slime_content": 0.38,
+    "raw_coal_feed": 0.0051,
+    "dedust_amount": -0.255,
+    "mag_tail_level": 0.0657
+  },
+  "centers": {
+    "raw_coal_feed": 500.0,
+    "dedust_amount": 60.0,
+    "mag_tail_level": 55.0
+  },
+  "clamp": [5.0, 60.0],
+  "weights": {
+    "raw_coal_ash": 0.4,
+    "dedust_amount": 0.4,
+    "raw_coal_slime_content": 0.1,
+    "mag_tail_level": 0.06,
+    "raw_coal_feed": 0.04
+  },
+  "description": "专家加权模型：原煤灰分40% + 脱粉系统40% + 其他20%（煤泥含量10%、精磁尾液位6%、入洗原煤量4%）。权重按各因子典型变化范围×系数折算的影响力占比实现；脱粉方向暂按'脱粉越多煤泥灰分越低'（可调）。"
+}

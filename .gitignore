@@ -1,12 +1,19 @@
-# 通用忽略：虚拟环境 / IDE / 缓存 / 模型与数据产物
-.venv/
-.idea/
+# Python
 __pycache__/
 *.pyc
-artifacts/
-data/raw/
-data/processed/
-data/db/
-*.joblib
-*.pt
+.venv/
 *.db
+
+# 前端 / 构建
+node_modules/
+dist/
+
+# IDE / 缓存
+.idea/
+.pytest_cache/
+
+# 运行时数据库
+backend/data/*.db
+
+# 临时 / 检查输出
+backend/inspect_out*.txt

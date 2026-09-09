@@ -1,8 +1,0 @@
-.venv/
-.idea/
-__pycache__/
-*.pyc
-artifacts/
-data/raw/*.csv
-data/processed/
-*.joblib
