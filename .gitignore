@@ -17,3 +17,6 @@ backend/data/*.db
 
 # 临时 / 检查输出
 backend/inspect_out*.txt
+
+# Office 打开文档时的临时锁文件
+~$*
