@@ -122,6 +122,25 @@ def _to_num(v):
         return float("nan")
 
 
+def _parse_des(v) -> float:
+    """脱粉列解析（与前端 import.js parseDes 一致：开/1→1，停/关/0→0，数值原样，坏值 0）。"""
+    s = str("" if v is None else v).strip()
+    if s in ("开", "1"):
+        return 1.0
+    if s in ("停", "关", "0"):
+        return 0.0
+    n = _to_num(v)
+    return 0.0 if math.isnan(n) else n
+
+
+def _switch_val(row, col_idx) -> float:
+    """系统开关列（0/1）：NaN/空 → 0，与前端 toNum(x) || 0 一致。"""
+    if col_idx is None or col_idx < 0:
+        return 0.0
+    v = _to_num(row[col_idx] if col_idx < len(row) else None)
+    return 0.0 if math.isnan(v) else v
+
+
 def parse_coarse_factors(raw: list) -> dict:
     """与前端 parseCoarseFactors 一致：解析表1 多因素（多Sheet合并后传入行数组）。"""
     errors, records = [], []
@@ -204,6 +223,8 @@ def parse_coarse_factors(raw: list) -> dict:
             v = _to_num(cell(row, col[key]))
             if not math.isnan(v) and v:
                 on_sys.append(code)
+        face_raw = cell(row, col["face"]) if col["face"] >= 0 else None
+        face = str("" if face_raw is None else face_raw).split("\n")[0].strip()
         rec = {
             "timestamp": parse_ts(cell(row, date_col), cell(row, time_col)),
             "system": "合并",
@@ -212,10 +233,14 @@ def parse_coarse_factors(raw: list) -> dict:
             "level": None if math.isnan(level) else level,
             "raw_ash": None if raw_ash is None or math.isnan(raw_ash) else raw_ash,
             "moisture": None if math.isnan(moist) else moist,
-            "sysA": 0, "sysB": 0, "sys401": 0, "sys402": 0,
-            "desliming473": 0, "desliming474": 0,
+            "sysA": _switch_val(row, col["sysA"]),
+            "sysB": _switch_val(row, col["sysB"]),
+            "sys401": _switch_val(row, col["sys401"]),
+            "sys402": _switch_val(row, col["sys402"]),
+            "desliming473": _parse_des(cell(row, col["des473"])) if col["des473"] >= 0 else 0.0,
+            "desliming474": _parse_des(cell(row, col["des474"])) if col["des474"] >= 0 else 0.0,
             "is_stoppage": 1 if coal_safe <= 10 else 0,
-            "mining_face": "",
+            "mining_face": face,
         }
         records.append(rec)
 

@@ -443,7 +443,7 @@ const OverviewPage = {
                     <tr><td>期望总灰分</td><td>${g.targetTotal.toFixed(2)}%</td></tr>
                     <tr><td>${g.scheme === 'heavy' ? '等效总灰分偏差' : '总灰分偏差'} ΔA</td><td>${g.valid ? (g.deltaA > 0 ? '+' : '') + g.deltaA.toFixed(2) + '%' : '—'}</td></tr>
                     <tr><td>调整规则(专家经验)</td><td>偏差≤0.05%不调；0.15%→调0.01；0.25%→调0.02；区间线性插值，0.25%以上按斜率0.1外推</td></tr>
-                    <tr><td>预测增益 K</td><td>${g.K.toFixed(4)}（专家经验反推，仅用于调密后重介灰分预测）</td></tr>
+                    <tr><td>预测增益 K</td><td>${g.K.toFixed(4)}（${g.kSource === 'data' ? '表3配对数据驱动' + (g.kInfo ? '，n=' + g.kInfo.n + '，' + (g.kInfo.source === 'per_system' ? '分系统加权' : '合并回归') : '') : '专家经验反推'}，仅用于调密后重介灰分预测）</td></tr>
                     <tr><td>密度修正量</td><td>${g.valid ? (g.deltaRho > 0 ? '+' : '') + g.deltaRho.toFixed(3) : '—'} g/cm³（建议值，人工执行后录入实际密度）</td></tr>
                     <tr><td>目标密度</td><td><strong>${g.rhoNew.toFixed(3)} g/cm³</strong>（范围1.35~1.60）</td></tr>
                     <tr><td>重介灰分预测(调密后)</td><td>${g.valid && Math.abs(g.deltaRho) > 1e-9 ? (g.heavyAsh + (g.rhoNew - g.rhoCur) / (g.K || 0.03)).toFixed(2) + '%（仅预测，不参与计算，请采样验证）' : '—'}</td></tr>

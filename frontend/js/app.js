@@ -1074,7 +1074,8 @@ const App = {
     //   |ΔA|≤0.05% → 不调；0.15%→0.01；0.25%→0.02；>0.25% 按末段斜率0.1外推
     EXPERT_ADJUST: { deadband: 0.05, p1: { dA: 0.15, dRho: 0.01 }, p2: { dA: 0.25, dRho: 0.02 }, slope: 0.1 },
     // 专家经验反推的物理增益 K（0.01/0.15≈0.067，0.02/0.25=0.08，取0.075）：
-    // 仅用于"调密后重介灰分预测"（ΔA ≈ Δρ/K），不参与调整量计算
+    // 仅用于"调密后重介灰分预测"（ΔA ≈ Δρ/K），不参与调整量计算。
+    // 表3 配对足够时由 densityGainK() 数据驱动估计（分系统 OLS），此常数为回退值。
     K_PREDICT: 0.075,
 
     // 专家经验：|总灰分偏差| → 密度修正量
@@ -1086,29 +1087,58 @@ const App = {
         return t.p2.dRho + (dAbs - t.p2.dA) * t.slope;
     },
 
-    // 灰分→密度 增益 K（表3 灰分密度历史线性回归），样本不足用默认0.03
+    // 灰分→密度 增益 K（表3 灰分密度配对，分系统 OLS 加权平均；与后端 density_model.py 逐值一致）
+    // A/B 为并联两套重介系统、同灰分下密度设定不同，直接合并回归会把系统间设定差混进斜率，
+    // 故分系统拟合后按样本数加权；单系统 <5 点、|分母|<1e-9、斜率非正或越出 (0.005,0.2) 丢弃；
+    // 分系统全失效回退 pooled，仍失效 valid=false（调用方回退 K_PREDICT 展示常数）。
+    // 返回 {valid, k, n, source, totalPoints, systems:{名:{k,n,r2,used}}}
     densityGainK() {
         const logs = (this.store.calcLogs || []).filter(l => l.calc_type === 'ash_density');
         const pts = [];
         logs.forEach(l => {
             try {
                 const v = JSON.parse(l.input_json || '{}');
-                if (isFinite(+v.ash_content) && isFinite(+v.density) && +v.density >= 1.3 && +v.density <= 1.6) pts.push([+v.ash_content, +v.density]);
+                if (isFinite(+v.ash_content) && isFinite(+v.density) && +v.density >= 1.3 && +v.density <= 1.6) {
+                    pts.push({ system: String(v.system || '').trim(), a: +v.ash_content, r: +v.density });
+                }
             } catch (e) { /* 忽略坏记录 */ }
         });
-        if (pts.length < 5) return this.DENSITY_GUIDE.kFallback;
-        const n = pts.length;
-        const sx = pts.reduce((s, p) => s + p[0], 0);
-        const sy = pts.reduce((s, p) => s + p[1], 0);
-        const sxy = pts.reduce((s, p) => s + p[0] * p[1], 0);
-        const sxx = pts.reduce((s, p) => s + p[0] * p[0], 0);
-        const denom = n * sxx - sx * sx;
-        if (Math.abs(denom) < 1e-9) return this.DENSITY_GUIDE.kFallback;
-        const k = (n * sxy - sx * sy) / denom;
-        // 物理约束：密度↑→灰分↑，K 必须为正；表3数据存在系统混杂(A/B)可能得到负斜率，
-        // 负相关/异常值直接回退默认增益 0.03，保证调整方向不反
-        if (!(k > 0.005 && k < 0.2)) return this.DENSITY_GUIDE.kFallback;
-        return k;
+        const ols = pairs => {
+            const n = pairs.length;
+            if (n < 5) return null;
+            let sx = 0, sy = 0, sxy = 0, sxx = 0;
+            pairs.forEach(p => { sx += p[0]; sy += p[1]; sxy += p[0] * p[1]; sxx += p[0] * p[0]; });
+            const denom = n * sxx - sx * sx;
+            if (Math.abs(denom) < 1e-9) return null;
+            const k = (n * sxy - sx * sy) / denom;
+            const ym = sy / n;
+            let ssRes = 0, ssTot = 0;
+            pairs.forEach(p => {
+                const yh = ym + k * (p[0] - sx / n);
+                ssRes += (p[1] - yh) ** 2; ssTot += (p[1] - ym) ** 2;
+            });
+            return { k, n, r2: ssTot > 0 ? 1 - ssRes / ssTot : 0 };
+        };
+        // 物理约束：密度↑→灰分↑，K 必须为正且有界；表3 系统混杂可能得到负斜率，直接丢弃保证方向不反
+        const kOk = k => (k > 0.005 && k < 0.2 && isFinite(k));
+        const bySys = {};
+        pts.forEach(p => { (bySys[p.system] = bySys[p.system] || []).push([p.a, p.r]); });
+        const systems = {}; const used = [];
+        Object.keys(bySys).sort().forEach(name => {
+            const fit = ols(bySys[name]);
+            if (!fit) return;
+            const entry = { k: fit.k, n: fit.n, r2: fit.r2, used: kOk(fit.k) };
+            if (entry.used) used.push(entry);
+            systems[name] = entry;
+        });
+        if (used.length) {
+            let ks = 0, ws = 0;
+            used.forEach(e => { ks += e.k * e.n; ws += e.n; });
+            return { valid: true, k: ks / ws, n: ws, source: 'per_system', systems, totalPoints: pts.length };
+        }
+        const pooled = ols(pts.map(p => [p.a, p.r]));
+        if (pooled && kOk(pooled.k)) return { valid: true, k: pooled.k, n: pooled.n, source: 'pooled', systems, totalPoints: pts.length };
+        return { valid: false, k: null, n: pts.length, source: 'none', systems, totalPoints: pts.length };
     },
 
     // 仿真基准密度：取表3最新有效密度（灰分测量所在工况点），缺省1.49
@@ -1164,9 +1194,14 @@ const App = {
         const heavyAsh = this.getHeavyAsh();                     // 静态初始值/采样值，不参与实时反推
         const actualTotal = this.resolveTotalAsh();              // 与卡片/在线仪表同源
         const tol = (this.store.ashTargetTol != null) ? this.store.ashTargetTol : 0.1;
+        // 数据驱动 K（表3 配对分系统拟合）优先，无有效估计回退展示常数 K_PREDICT
+        const kData = this.densityGainK();
+        const kUsed = (kData && kData.valid && isFinite(kData.k) && kData.k > 0) ? kData.k : this.K_PREDICT;
         const r = {
             valid: actualTotal != null && isFinite(actualTotal),
-            rhoCur, K: this.K_PREDICT, heavyAsh,
+            rhoCur, K: kUsed, kSource: (kUsed === this.K_PREDICT) ? 'default' : 'data',
+            kInfo: (kData && kData.valid) ? { n: kData.n, source: kData.source } : null,
+            heavyAsh,
             targetTotal: targetTotalAsh, actualTotal, scheme,
             targetHeavy: null, deltaAHeavy: null,
             deltaA: null, deltaRho: 0, rhoNew: rhoCur, direction: 'stable', reason: '',

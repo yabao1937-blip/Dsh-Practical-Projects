@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..services import resolvers
 from ..services.density import compute_density_guidance
+from ..services.density_model import fit_density_gain
 from ..services.state import load_store
 
 router = APIRouter(prefix="/overview", tags=["总览"])
@@ -19,9 +20,12 @@ def dashboard(db: Session = Depends(get_db)):
     heavy_ash = resolvers.get_heavy_ash(store)
     rho_cur = resolvers.resolve_density(store)
     actual_total = resolvers.resolve_total_ash(store)
+    density_k = fit_density_gain(store)          # 数据驱动 K（表3 配对，分系统）
 
     g_state = {"rho_cur": rho_cur, "heavy_ash": heavy_ash, "actual_total": actual_total,
                "scheme": scheme, "tol": tol}
+    if density_k["valid"]:
+        g_state["k"] = density_k["k"]
     if scheme == "heavy":
         g_state.update({
             "heavy_amt": resolvers.resolve_amount(store, "denseAmount"),
@@ -48,6 +52,7 @@ def dashboard(db: Session = Depends(get_db)):
         "floatAsh": resolvers.resolve_float_ash(store),
         "coarseAsh": resolvers.resolve_coarse_ash(store),
         "guidance": guide,
+        "densityK": density_k,
     }
 
 
