@@ -140,6 +140,8 @@ const App = {
         }
         // http 模式:服务器数据更多时自动反向同步(旧浏览器自愈,防止镜像覆盖服务器新数据)
         this.autoPullIfStale();
+        // 补记历史密度决策的灰分响应(页面打开时兜底一次)
+        this._completeDensityDecisionResponses();
 
         this.checkAlerts();
         // 只初始化首页（当前可见页）
@@ -1118,6 +1120,19 @@ const App = {
             patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
             if (!('autoExec' in patch)) patch.autoExec = false;   // 操作员手动写入清除自动执行标记
         }
+        // 决策日志:操作员手动设定密度(有效范围内)——记录决策上下文,45分钟后自动补记灰分响应
+        if (id === 'density' && !patch.autoExec && typeof patch.manual === 'number'
+            && isFinite(patch.manual) && patch.manual >= 1.3 && patch.manual <= 1.6) {
+            const prev = this.resolveDensity();
+            this._logDensityDecision('density_set', {
+                scheme: (this.store.guideScheme === 'heavy') ? 'heavy' : 'total',
+                targetTotal: (this.store.ashTarget != null) ? this.store.ashTarget : 8.50,
+                deadband: (this.store.ashTargetTol != null) ? this.store.ashTargetTol : 0.1,
+                rhoCur: prev, rhoNew: patch.manual, deltaRho: +(patch.manual - prev).toFixed(4),
+                deltaA: null, K: this.K_PREDICT, kSource: 'default',
+                heavyAsh: this.getHeavyAsh(), actualTotal: this.resolveTotalAsh(),
+            });
+        }
         Object.assign(this.store.instrumentInputs[id], patch);
         // 外部(操作员)改动输入时重置防震荡记忆：方向翻转若由人工改数引起，不停止自动执行；
         // 自动执行器自己的写入(autoExec)不重置，保证真正的过冲翻转仍能停步
@@ -1496,6 +1511,89 @@ const App = {
     // ============================================================
     densityAutoTimer: null,
 
+    // ============================================================
+    //  密度决策日志(工况条件化 Stage 0 观测):
+    //  记录每次真实密度决策(自动重定目标/操作员设定)时的工况上下文(带煤量/原煤灰分/
+    //  脱粉/系统组合/工作面/精磁尾液位),并在决策45分钟后自动补记灰分响应——
+    //  每次真实调整 = 一个 mini 阶跃实验点(Δρ_actual, ΔA_actual),
+    //  供 K(工况) 标定。闭环常规数据不可辨识 K,只有这类"决策+响应"对有效。
+    //  存储:store.densityDecisionLog(auto_state 持久化,上限 200 条)。
+    //  查看:GET /api/v1/state → densityDecisionLog。
+    // ============================================================
+    DECISION_LOG_MAX: 200,
+    DECISION_RESPONSE_MIN_AGE_MS: 45 * 60000,   // 决策后等过程到位再补记响应
+
+    _decisionCtx() {
+        let last = null, lastT = '';
+        (this.store.coarseCoal || []).forEach(r => {
+            if (r && r.timestamp && r.timestamp >= lastT) { lastT = r.timestamp; last = r; }
+        });
+        const n = (v) => (typeof v === 'number' && isFinite(v)) ? v : null;
+        return {
+            coalAmount: last ? n(last.coal_amount) : null,
+            rawAsh: last ? n(last.raw_ash) : null,
+            desl473: last ? (last.desliming473 || 0) : null,
+            desl474: last ? (last.desliming474 || 0) : null,
+            sysA: last ? (last.sysA || 0) : null, sysB: last ? (last.sysB || 0) : null,
+            sys401: last ? (last.sys401 || 0) : null, sys402: last ? (last.sys402 || 0) : null,
+            miningFace: last ? (last.mining_face || '') : '',
+            levelTail: (() => { try { return this.resolveInstrument('level_tail'); } catch (e) { return null; } })(),
+        };
+    },
+
+    _logDensityDecision(trigger, g) {
+        try {
+            this._completeDensityDecisionResponses();
+            if (!this.store.densityDecisionLog) this.store.densityDecisionLog = [];
+            const log = this.store.densityDecisionLog;
+            const now = Date.now();
+            // 节流:同类触发 10 分钟内不重复记录(页面反复刷新不刷日志)
+            for (let i = log.length - 1; i >= 0; i--) {
+                if (log[i].trigger !== trigger) continue;
+                const t0 = new Date(String(log[i].ts).replace(' ', 'T')).getTime();
+                if (isFinite(t0) && now - t0 < 10 * 60000) return;
+                break;
+            }
+            log.push({
+                ts: this.formatDate(new Date()),
+                trigger,                                    // retarget | density_set
+                scheme: g.scheme, target: g.targetTotal, tol: g.deadband,
+                rhoCur: g.rhoCur, rhoNew: g.rhoNew, deltaRho: g.deltaRho, deltaA: g.deltaA,
+                kUsed: g.K, kSource: g.kSource || 'default',
+                heavyAsh: g.heavyAsh, totalAsh: g.actualTotal,
+                ctx: this._decisionCtx(),
+                response: null,
+            });
+            if (log.length > this.DECISION_LOG_MAX) this.store.densityDecisionLog = log.slice(-this.DECISION_LOG_MAX);
+            this.saveStore();
+        } catch (e) { console.warn('决策日志写入失败:', e); }
+    },
+
+    // 补记响应:决策满45分钟且未闭环的条目,记录 实际Δρ 与 重介灰分ΔA —— K 标定的原料
+    _completeDensityDecisionResponses() {
+        try {
+            const log = this.store.densityDecisionLog;
+            if (!log || !log.length) return;
+            const now = Date.now();
+            let changed = false;
+            log.forEach(e => {
+                if (e.response) return;
+                const t0 = new Date(String(e.ts).replace(' ', 'T')).getTime();
+                if (!isFinite(t0) || now - t0 < this.DECISION_RESPONSE_MIN_AGE_MS) return;
+                const rhoNow = this.resolveDensity();
+                const ashNow = this.getHeavyAsh();
+                e.response = {
+                    ts: this.formatDate(new Date()),
+                    rhoNow, heavyAshNow: ashNow,
+                    dRhoActual: +(rhoNow - e.rhoCur).toFixed(4),
+                    dAActual: +(ashNow - e.heavyAsh).toFixed(3),
+                };
+                changed = true;
+            });
+            if (changed) this.saveStore();
+        } catch (e) { /* 日志失败不影响主流程 */ }
+    },
+
     // 同步按钮文案/样式到当前开关状态
     _syncDensityAutoBtn() {
         const btn = document.getElementById('btn-density-auto');
@@ -1529,6 +1627,7 @@ const App = {
                 this._densityTarget = g.rhoNew;   // 达标时 g.rhoNew = 当前密度 → 保持
                 this._densityAutoLastEpoch = epochNow;
                 this._densityReachedNotified = false;
+                if (Math.abs(g.deltaRho) > 1e-9) this._logDensityDecision('retarget', g);   // 决策日志:真实重定目标
                 // 预测调密后的重介精煤灰分（仅展示，不参与实时计算；真实值以采样为准）
                 if (Math.abs(g.deltaRho) > 1e-9 && Math.abs(g.deltaA) > g.deadband) {
                     this._densityPredictAsh = +(g.heavyAsh + (g.rhoNew - g.rhoCur) / (g.K || 0.03)).toFixed(2);

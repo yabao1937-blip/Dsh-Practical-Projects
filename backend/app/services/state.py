@@ -26,6 +26,7 @@ AUTO_STATE_KEYS = [
     "amountInputs", "ashInputs", "instrumentInputs",
     "heavyAshInput", "coarseAshInput", "floatAshInput",
     "coarseCalc", "coarseAshEma", "autoState", "heavyAshBackcalc",
+    "densityDecisionLog",   # 密度决策日志(工况条件化 Stage 0)
 ]
 
 

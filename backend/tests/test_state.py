@@ -45,3 +45,30 @@ def test_state_stale_guard():
     assert len(client.get("/api/v1/state").json()["coarseCoal"]) == 10
     # 恢复种子供后续用例
     client.put("/api/v1/state?force=true", json=SEED)
+
+
+def test_decision_log_roundtrip():
+    """密度决策日志(Stage 0)经 auto_state 持久化:PUT 后 GET 应原样返回。"""
+    st = json.loads(json.dumps(SEED))
+    st["densityDecisionLog"] = [{
+        "ts": "2026-09-10 10:00:00", "trigger": "density_set",
+        "scheme": "total", "target": 8.5, "tol": 0.1,
+        "rhoCur": 1.49, "rhoNew": 1.48, "deltaRho": -0.01, "deltaA": 0.2,
+        "kUsed": 0.075, "kSource": "default", "heavyAsh": 7.85, "totalAsh": 8.46,
+        "ctx": {"coalAmount": 800, "rawAsh": 39.15, "desl473": 1, "desl474": 0,
+                "miningFace": "6303", "levelTail": 55},
+        "response": None,
+    }]
+    r = client.put("/api/v1/state", json=st)
+    assert r.json()["ok"] is True
+    got = client.get("/api/v1/state").json()
+    entry = got["densityDecisionLog"][0]
+    assert entry["rhoNew"] == 1.48 and entry["ctx"]["rawAsh"] == 39.15
+    # 响应补记同样无损
+    st["densityDecisionLog"][0]["response"] = {"ts": "2026-09-10 11:00:00", "rhoNow": 1.48,
+                                               "heavyAshNow": 7.72, "dRhoActual": -0.01, "dAActual": -0.13}
+    client.put("/api/v1/state", json=st)
+    entry2 = client.get("/api/v1/state").json()["densityDecisionLog"][0]
+    assert entry2["response"]["dAActual"] == -0.13
+    # 恢复种子
+    client.put("/api/v1/state?force=true", json=SEED)
