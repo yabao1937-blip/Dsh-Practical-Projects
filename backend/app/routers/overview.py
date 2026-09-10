@@ -19,11 +19,16 @@ def dashboard(db: Session = Depends(get_db)):
     scheme = store.get("guideScheme", "total")
     heavy_ash = resolvers.get_heavy_ash(store)
     rho_cur = resolvers.resolve_density(store)
-    actual_total = resolvers.resolve_total_ash(store)
+    total_ex = resolvers.resolve_total_ash_ex(store)
+    actual_total = total_ex["value"]
+    # 总灰分若落到"501 常量"（501 未接入、无任何真实数据源）→ 标记为常量，
+    # 供 compute_density_guidance 拒绝据此给出密度建议
+    total_is_constant = (total_ex["source"] == "ash501"
+                         and resolvers.ash501_layer(store) == "none")
     density_k = fit_density_gain(store)          # 数据驱动 K（表3 配对，分系统）
 
     g_state = {"rho_cur": rho_cur, "heavy_ash": heavy_ash, "actual_total": actual_total,
-               "scheme": scheme, "tol": tol}
+               "scheme": scheme, "tol": tol, "actual_total_is_constant": total_is_constant}
     if density_k["valid"]:
         g_state["k"] = density_k["k"]
     if scheme == "heavy":

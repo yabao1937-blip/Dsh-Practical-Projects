@@ -26,7 +26,9 @@ SCALE_502 = 235.2
 TOTAL_AMT = round(SCALE_501 + SCALE_502, 1)  # 503.7
 # 2026-09 工艺确认:501=总混配(在线总灰分),502=仅重介(在线重介灰分);
 # 默认值随之校正(旧 8.52/10.68 方向颠倒)。heavy_ash 走 get_heavy_ash(502 在线链)。
-DEF = {"ash501": 8.8, "ash502": 7.9, "density": 1.450, "level": 55, "floatAsh": 9.85}
+# 注意：ash501 **没有**默认值 —— 501 未接入时该列留空，不用常量冒充实测
+# （实测依据：真实库 360 条 ash_density 全部 belt=502、零条 501）。
+DEF = {"ash502": 7.9, "density": 1.450, "level": 55, "floatAsh": 9.85}
 FRESH_SECONDS = 24 * 3600   # 三表续传窗口：超过视为该表在本小时无数据（与前端 FRESH_MS 一致）
 
 
@@ -153,7 +155,7 @@ def build_hourly_brief(store: dict) -> dict:
         float_ash = _num(cur_float.get("ash_content")) if cur_float else None
         float_ash = float_ash if float_ash is not None else DEF["floatAsh"]
         float_amt = _num(cur_float.get("coal_amount")) if cur_float else None
-        ash501 = cur_ash501 if cur_ash501 is not None else DEF["ash501"]
+        ash501 = cur_ash501   # 无该小时的 501 记录 → None → 该列留空（不打印常量冒充实测）
         ash502 = cur_ash502 if cur_ash502 is not None else DEF["ash502"]
         density = cur_density if cur_density is not None else DEF["density"]
 
@@ -182,9 +184,12 @@ def build_hourly_brief(store: dict) -> dict:
 
         if formula_ok:
             total_ash = round(calc_total_ash(heavy_ash, heavy_amt, float_ash, float_amt, coarse_model, COARSE_AMT), 2)
-        else:
+        elif ash501 is not None:
             # 501 承载总混配,其读数即总灰分直读;502(重介组分)不混入(避免重复计入)
             total_ash = round(ash501, 2)
+        else:
+            # 公式不完整且无在线总灰分 → 留空：常量灰分不得作为实测值出现在导出表里
+            total_ash = None
 
         rho_new = None
         if formula_ok:

@@ -1344,16 +1344,38 @@ const App = {
         // 数据驱动 K（表3 配对分系统拟合）优先，无有效估计回退展示常数 K_PREDICT
         const kData = this.densityGainK();
         const kUsed = (kData && kData.valid && isFinite(kData.k) && kData.k > 0) ? kData.k : this.K_PREDICT;
+        // K 三态：data=数据可辨识 / unidentifiable=样本够但斜率被物理约束拒掉 / insufficient=样本不足。
+        // 区分这两者是关键：实测两系统斜率均为负(约 -0.022/-0.020, R²≈0.05)，
+        // 属"闭环数据不可辨识"，不是"样本不够"——现场看到负斜率才会理解为什么要做阶跃实验。
+        const kState = (kData && kData.valid) ? 'data'
+                     : ((kData && kData.totalPoints >= 5) ? 'unidentifiable' : 'insufficient');
+        // 常量灰分不得驱动控制建议：501 未接入时总灰分是默认常量，
+        // 照它算 deltaA（如 8.8−8.5=0.3 超容差）会推出"下调密度"——用编造的灰分指挥现场操作。
+        const totalIsConstant = this.totalAshIsConstant();
         const r = {
-            valid: actualTotal != null && isFinite(actualTotal),
+            valid: actualTotal != null && isFinite(actualTotal) && !totalIsConstant,
             rhoCur, K: kUsed, kSource: (kUsed === this.K_PREDICT) ? 'default' : 'data',
-            kInfo: (kData && kData.valid) ? { n: kData.n, source: kData.source } : null,
+            kInfo: {
+                state: kState,
+                n: (kData && kData.valid) ? kData.n : ((kData && kData.totalPoints) || 0),
+                source: (kData && kData.valid) ? kData.source : 'none',
+                systems: (kData && kData.systems) || {},
+            },
             heavyAsh,
             targetTotal: targetTotalAsh, actualTotal, scheme,
             targetHeavy: null, deltaAHeavy: null,
             deltaA: null, deltaRho: 0, rhoNew: rhoCur, direction: 'stable', reason: '',
             deadband: tol, maxStep: g.maxStep,
         };
+        // 常量灰分不得驱动控制建议（与后端 compute_density_guidance 同序同文案）：
+        // 501 未接入时总灰分是默认常量，照它算 deltaA（如 8.8−8.5=0.3 超容差）会推出"下调密度"。
+        // 必须排在「数据不完整」通用判定之前，否则与后端给出的 reason 不一致。
+        if (totalIsConstant) {
+            r.valid = false;
+            r.reason = '501 皮带灰分仪尚未接入（无在线总灰分数据），当前总灰分取默认常量、非实测 —— '
+                     + '不做密度调整建议；请录入总灰分实测值，或等 501 数据接入';
+            return r;
+        }
         if (!r.valid) { r.reason = '总精煤灰分数据不完整，暂无密度调整建议'; return r; }
         if (scheme === 'heavy') {
             const heavyAmt = this.resolveAmount('denseAmount');
@@ -1430,7 +1452,9 @@ const App = {
         const TOTAL_AMT = +(SCALE_501 + SCALE_502).toFixed(1);   // 503.7
         // 2026-09 工艺确认:501=总混配(在线总灰分),502=仅重介(在线重介灰分);
         // 默认值随之校正(旧 8.52/10.68 方向颠倒)。heavyAsh 走 getHeavyAsh(502 在线链)。
-        const DEF = { ash501: 8.8, ash502: 7.9, density: 1.450, level: 55, floatAsh: 9.85 };
+        // 注意：ash501 **没有**默认值 —— 501 未接入时该列留空，不用常量冒充实测
+        // （与后端 brief.DEF 一致：真实库 360 条 ash_density 全部 belt=502、零条 501）
+        const DEF = { ash502: 7.9, density: 1.450, level: 55, floatAsh: 9.85 };
 
         const toTs = t => { const d = new Date(t); return isNaN(d) ? null : d.getTime(); };
 
@@ -1505,7 +1529,7 @@ const App = {
             const level = (curCoarse && typeof curCoarse.level === 'number') ? curCoarse.level : DEF.level;
             const floatAsh = (curFloat && typeof curFloat.ash_content === 'number') ? curFloat.ash_content : DEF.floatAsh;
             const floatAmt = (curFloat && typeof curFloat.coal_amount === 'number') ? curFloat.coal_amount : null;
-            const ash501 = curAsh501 != null ? curAsh501 : DEF.ash501;
+            const ash501 = curAsh501;   // 无该小时的 501 记录 → null → 该列留空（不打印常量冒充实测）
             const ash502 = curAsh502 != null ? curAsh502 : DEF.ash502;
             const density = curDensity != null ? curDensity : DEF.density;
 
@@ -1535,8 +1559,10 @@ const App = {
             let totalAsh = null;
             if (formulaOk) {
                 totalAsh = +this.calcTotalAsh(heavyAsh, heavyAmt, floatAsh, floatAmt, coarseModel, COARSE_AMT).toFixed(2);
-            } else {
+            } else if (ash501 != null) {
                 totalAsh = +ash501.toFixed(2);
+            } else {
+                totalAsh = null;   // 公式不完整且无在线总灰分 → 留空（常量不得作为实测值出现在导出表里）
             }
 
             // 建议密度：仅公式完整(有粗灰数据)时计算；缺粗灰数据时留空（避免仪表加权失真顶到1.60）
@@ -1761,6 +1787,33 @@ const App = {
         } catch (e) { /* 日志失败不影响主流程 */ }
     },
 
+    // K 的一句话结论（给操作员看的，不是统计量堆砌）
+    kStateText(kInfo) {
+        const st = (kInfo && kInfo.state) || 'insufficient';
+        if (st === 'data') {
+            const how = (kInfo.source === 'per_system') ? '分系统加权' : '合并回归';
+            return `表3配对数据驱动（n=${kInfo.n}，${how}）`;
+        }
+        if (st === 'unidentifiable') {
+            return `数据不可辨识 → 回退经验值 ${this.K_PREDICT}：表3配对的回归斜率越出物理约束`
+                 + `（密度↑→灰分↑）已被拒，属闭环数据固有性质，需按《密度阶跃实验》开环标定`;
+        }
+        return `样本不足（表3有效配对 ${(kInfo && kInfo.n) || 0} 点 < 5）→ 回退经验值 ${this.K_PREDICT}`;
+    },
+
+    // K 的分系统明细（悬停查看：每套系统的斜率、样本数、R²、是否被采用）
+    kSystemsText(kInfo) {
+        const sys = (kInfo && kInfo.systems) || {};
+        const keys = Object.keys(sys).sort();
+        if (!keys.length) return '无分系统拟合结果（表3 有效配对数不足）';
+        return '分系统拟合明细：' + keys.map(k => {
+            const e = sys[k] || {};
+            const kk = (typeof e.k === 'number' && isFinite(e.k)) ? e.k.toFixed(4) : '—';
+            const r2 = (typeof e.r2 === 'number' && isFinite(e.r2)) ? e.r2.toFixed(3) : '—';
+            return `系统${k || '(空)'} k=${kk} n=${e.n} R²=${r2}${e.used ? '' : '（斜率不合物理约束，已拒）'}`;
+        }).join('；');
+    },
+
     // 同步按钮文案/样式到当前开关状态
     _syncDensityAutoBtn() {
         const btn = document.getElementById('btn-density-auto');
@@ -1918,20 +1971,43 @@ const App = {
         return +this.calcTotalAsh(this.getHeavyAsh(), heavyAmt, floatAsh, floatAmt, coarseAsh, coarseAmt).toFixed(4);
     },
 
-    // 总精煤灰分：手动(化验) > 公式计算(给定重介/浮/粗后推出) > 录入(导入/补录) > 501直读
-    resolveTotalAsh() {
+    // 501 灰分的来源层级：'manual' | 'online' | 'none'（与后端 resolvers.ash501_layer 一致）。
+    // 'none' = 三层都没有真实数据源，回落到 INSTRUMENT_DEFAULT 常量 8.8。
+    // 实测依据：真实库 360 条 ash_density 记录全部 belt=502、零条 501（PLC 未接入）。
+    ash501Layer() {
+        const cfg = (this.store.instrumentInputs && this.store.instrumentInputs.ash_501) || {};
+        const m = cfg.manual;
+        if (typeof m === 'number' && isFinite(m) && m >= 0) return 'manual';
+        if (this.latestCalcValue('ash_meter', '501') != null) return 'online';
+        if (this.latestBeltAsh('501') != null) return 'online';
+        return 'none';
+    },
+
+    // 总精煤灰分 + 来源层级（'manual'|'formula'|'entry'|'ash501'|'none'）。
+    // 与后端 resolvers.resolve_total_ash_ex 逐值一致；来源用于判断这个数是不是常量。
+    resolveTotalAshEx() {
         const cfg = (this.store.ashInputs && this.store.ashInputs.totalAsh) || {};
         const manual = (typeof cfg.manual === 'number' && isFinite(cfg.manual) && cfg.manual >= 0) ? cfg.manual : null;
-        if (manual != null && this._manualValid(cfg, 'totalAsh')) return manual;
+        if (manual != null && this._manualValid(cfg, 'totalAsh')) return { value: manual, source: 'manual' };
         const formula = this.formulaTotalAsh();
-        if (formula != null) { this._autoBump('totalAsh', formula); return formula; }
+        if (formula != null) { this._autoBump('totalAsh', formula); return { value: formula, source: 'formula' }; }
         const entry = this.totalAshEntry();
-        if (entry != null) { this._autoBump('totalAsh', entry); return entry; }
+        if (entry != null) { this._autoBump('totalAsh', entry); return { value: entry, source: 'entry' }; }
         // 2026-09 工艺确认:501 承载的就是总精煤混配(重介+浮精+粗),其灰分仪读数
         // 即在线总灰分直读;502(重介组分)不再混入平均(否则重介灰分被重复计入)。
         const dv = +this.resolveInstrument('ash_501').toFixed(4);
         this._autoBump('totalAsh', dv);
-        return dv;
+        return { value: dv, source: 'ash501' };
+    },
+
+    // 总精煤灰分：手动(化验) > 公式计算(给定重介/浮/粗后推出) > 录入(导入/补录) > 501直读
+    resolveTotalAsh() {
+        return this.resolveTotalAshEx().value;
+    },
+
+    // 当前总灰分是否为"常量"（501 无任何真实数据源却落到了 501 兜底）
+    totalAshIsConstant() {
+        return this.resolveTotalAshEx().source === 'ash501' && this.ash501Layer() === 'none';
     },
 
     totalAshEntry() {
@@ -1957,7 +2033,10 @@ const App = {
         }
         if (kind === 'totalAsh' && this.formulaTotalAsh() != null) return '公式计算';
         const entry = kind === 'totalAmount' ? this.totalAmountEntry() : this.totalAshEntry();
-        return entry != null ? '录入' : '默认(仪表)';
+        if (entry != null) return '录入';
+        // 标成"默认(仪表)"会让人以为有仪表在读：501 无数据源时它其实是硬编码常量
+        if (kind === 'totalAsh' && this.ash501Layer() === 'none') return '默认常量(501未接入)';
+        return '默认(仪表)';
     },
 
     // ============================================================

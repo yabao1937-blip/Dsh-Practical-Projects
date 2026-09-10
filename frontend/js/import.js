@@ -244,11 +244,17 @@ const ImportPage = {
                 if (rule === 'timestamp') {
                     const tsIdx = headers.findIndex(h => h && h.includes('时间'));
                     const sysIdx = headers.findIndex(h => h && h.includes('系统'));
-                    const fmtTs = (v) => String(v);
-                    if (tsIdx >= 0 && sysIdx >= 0) {
-                        key = fmtTs(row[tsIdx]) + '|' + String(row[sysIdx]);
+                    // 键必须用**归一化后**的时间戳：原实现直接用单元格原文，
+                    // 于是 "8:00" / "08:00" / "08:00:00" 判不出重复，但入库后是同一时间戳
+                    // → 重复检测形同虚设，同一条记录仍会互相覆盖。
+                    let tsKey = null;
+                    if (tsIdx >= 0) {
+                        try { tsKey = this.normalizeTs(row[tsIdx]); } catch (e) { tsKey = null; }
+                    }
+                    if (tsKey) {
+                        key = tsKey + '|' + (sysIdx >= 0 ? String(row[sysIdx]) : '');
                     } else if (tsIdx >= 0) {
-                        key = fmtTs(row[tsIdx]);
+                        key = String(row[tsIdx]);            // 无法归一化 → 退回原文（避免全部撞成同键）
                     } else {
                         key = row.join('|');
                     }
@@ -699,7 +705,7 @@ const ImportPage = {
             density: hdr.findIndex(h => h.includes('密度')),
         };
 
-        let imported = 0, failed = 0, skipped = 0;
+        let imported = 0, failed = 0, skipped = 0, replaced = 0;
         const errors = [];
 
         // 灰分单元格解析：空白 /「-」「—」「？」/ 纯文本 一律返回 null，绝不用 `|| 0` 兜底。
@@ -744,6 +750,20 @@ const ImportPage = {
                     newDensity = (dv && dv !== '-' && dv !== '') ? parseFloat(dv) : null;
                     if (newDensity != null && !(newDensity >= 1.3 && newDensity <= 1.6)) newDensity = null;
                 }
+
+                // 覆盖计数：重新导入修正表时按时间戳覆盖是必需功能，但不能静默——
+                // 统计本次有几行替换了已有记录，写进导入日志与提示（旧实现只删不报）
+                const willReplace = (category === 'coarse_magnetic')
+                    ? (App.store.coarseCoal.some(c => c.timestamp === ts)
+                       || App.store.magneticTail.some(m => m.timestamp === ts))
+                    : (category === 'float_ash')
+                        ? App.store.floatCoal.some(f => f.timestamp === ts)
+                        : App.store.calcLogs.some(l => {
+                            if (!(l.calc_type === 'ash_density' && l.timestamp === ts)) return false;
+                            try { return (JSON.parse(l.input_json || '{}').system || '') === system; }
+                            catch (e) { return false; }
+                        });
+                if (willReplace) replaced++;
 
                 // 同时间戳覆盖：先移除目标数组中同时间的旧导入记录，避免重复与旧值残留
                 if (category === 'coarse_magnetic') {
@@ -893,6 +913,7 @@ const ImportPage = {
             success: imported,
             failed: failed,
             skipped: skipped,
+            replaced: replaced,          // 本次替换掉已有记录的行数（重新导入修正表时 > 0）
             status: failed > 0 ? '部分失败' : '成功',
             errors: errors
         };
@@ -907,7 +928,8 @@ const ImportPage = {
 
         this.cancelImport();
         this.loadLogs();
-        App.showToast(`导入完成：成功${imported}条，失败${failed}条，跳过${skipped}条`,
+        App.showToast(`导入完成：成功${imported}条，失败${failed}条，跳过${skipped}条`
+            + (replaced > 0 ? `，覆盖已有记录${replaced}条` : ''),
             failed > 0 ? 'warning' : 'success');
     },
 

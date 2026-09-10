@@ -13,6 +13,12 @@ EXPERT_ADJUST = {
 }
 
 # 专家经验反推的物理增益 K（仅用于"调密后重介灰分预测"展示，不参与调整量）
+
+# 501 未接入时常量灰分不得驱动建议（与前端 computeDensityGuidance 同文案）
+REASON_CONSTANT_TOTAL_ASH = (
+    "501 皮带灰分仪尚未接入（无在线总灰分数据），当前总灰分取默认常量、非实测 —— "
+    "不做密度调整建议；请录入总灰分实测值，或等 501 数据接入"
+)
 K_PREDICT = 0.075
 
 DENSITY_GUIDE = {
@@ -69,6 +75,15 @@ def compute_density_guidance(state: dict, target_total_ash: float) -> dict:
         "deltaA": None, "deltaRho": 0.0, "rhoNew": rho_cur, "direction": "stable",
         "reason": "", "deadband": tol, "maxStep": max_step,
     }
+    # 常量灰分不得驱动控制建议：501 皮带灰分仪尚未接入时，总灰分取的是默认常量，
+    # 若照它算 deltaA（如 8.8−8.5=0.3 超容差）会推出"下调密度"——用编造的灰分指挥现场操作。
+    # 宁可不给建议，也不给一个基于常量的建议。
+    # 必须排在「数据不完整」通用判定之前：否则两侧会给出不同的 reason（前端曾因此不一致）。
+    if state.get("actual_total_is_constant"):
+        r["valid"] = False
+        r["reason"] = REASON_CONSTANT_TOTAL_ASH
+        return r
+
     if not r["valid"]:
         r["reason"] = "总精煤灰分数据不完整，暂无密度调整建议"
         return r

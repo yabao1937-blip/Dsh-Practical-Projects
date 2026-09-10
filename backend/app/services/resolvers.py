@@ -217,23 +217,51 @@ def formula_total_ash(store):
     return round(calc_total_ash(get_heavy_ash(store), heavy_amt, float_ash, float_amt, coarse_ash, coarse_amt), 4)
 
 
-def resolve_total_ash(store):
+def ash501_layer(store) -> str:
+    """501 灰分的来源层级：'manual' | 'online' | 'none'。
+
+    'none' = 三层都没有真实数据源，回落到 INSTRUMENT_DEFAULT 常量 8.8。
+    此时该值**不得**用于推导"建议密度"，也不应在简报里冒充仪表读数。
+    实测依据：真实库 360 条 ash_density 记录全部 belt=502、零条 501，
+    即 501 尚无在线数据（PLC 未接入），ash_501 一直是常量。
+    """
+    cfg = (store.get("instrumentInputs") or {}).get("ash_501") or {}
+    manual = cfg.get("manual")
+    if _is_num(manual) and manual >= 0:
+        return "manual"
+    if _latest_calc_value(store, "ash_meter", "501") is not None:
+        return "online"
+    if _latest_belt_ash(store, "501") is not None:
+        return "online"
+    return "none"
+
+
+def resolve_total_ash_ex(store) -> dict:
+    """总灰分 + 来源层级（'manual'|'formula'|'entry'|'ash501'|'none'）。
+
+    拆出来是为了让调用方知道值是怎么来的：'ash501' 且 ash501_layer=='none' 时
+    这个数是常量，不能当实测用（见 ash501_layer 说明）。
+    """
     cfg = (store.get("ashInputs") or {}).get("totalAsh") or {}
     manual = cfg.get("manual")
     if _is_num(manual) and manual >= 0:
-        return manual
+        return {"value": manual, "source": "manual"}
     formula = formula_total_ash(store)
     if formula is not None:
-        return formula
+        return {"value": formula, "source": "formula"}
     entry = cfg.get("entry")
     if _is_num(entry) and entry >= 0:
-        return entry
+        return {"value": entry, "source": "entry"}
     # 2026-09 工艺确认:501 皮带承载的就是总精煤混配(重介+浮精+粗),
     # 其灰分仪读数即在线总灰分直读;502(重介组分)不再混入平均(否则重介被重复计入)。
     a501 = resolve_instrument(store, "ash_501")
     if a501 is None:
-        return None
-    return round(a501, 4)
+        return {"value": None, "source": "none"}
+    return {"value": round(a501, 4), "source": "ash501"}
+
+
+def resolve_total_ash(store):
+    return resolve_total_ash_ex(store)["value"]
 
 
 def resolve_density(store):
