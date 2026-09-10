@@ -149,9 +149,11 @@ const App = {
     },
 
     // 用服务器 state 覆盖本地数据集合(纯本地键保留),供手动/自动两条路径复用
+    // __merged / __fixes 必须保留：它们是「本地已执行过的一次性动作」标记，
+    // 被服务器数据清掉会导致种子重灌或历史清理重复执行。
     _applyServerState(st) {
         const localOnly = ['manualEntries', 'importLogs', 'alerts', 'regressionModels',
-                           'coarseModelHistory', 'heavySamples', 'rawSlime', '__merged'];
+                           'coarseModelHistory', 'heavySamples', 'rawSlime', '__merged', '__fixes'];
         const keep = {};
         localOnly.forEach(k => { if (this.store[k] !== undefined) keep[k] = this.store[k]; });
         this.store = Object.assign({}, this.store, st, keep);
@@ -560,7 +562,7 @@ const App = {
         if (card) card.classList.remove('alert-active');
 
         if (hasData) {
-            // 任务三：重介精煤灰分用反推值（默认8.50兜底），三量走量数据面板
+            // 任务三：重介精煤灰分用反推值（手动采样 > 502在线 > 默认7.9 兜底），三量走量数据面板
             const heavyAsh = this.getHeavyAsh();
             const heavyAmt = this.resolveAmount('denseAmount');
             const floatAmt = this.resolveAmount('floatAmount');
@@ -1356,7 +1358,7 @@ const App = {
         const target = (this.store.ashTarget != null) ? this.store.ashTarget : 8.50;
         const scheme = (this.store.guideScheme === 'heavy') ? 'heavy' : 'total';
         const lim = this.getDensityGuide();
-        const heavyAsh = this.getHeavyAsh();          // 静态初始值/采样值（重介灰分恒值 8.50）
+        const heavyAsh = this.getHeavyAsh();          // 手动采样 > 502在线 > 默认7.9（不再恒值 8.50）
         const COARSE_AMT = 40;                        // 粗精煤泥量恒值（三表无数据源，沿用当前默认）
         const SCALE_501 = 268.5, SCALE_502 = 235.2;   // 皮带秤恒值（三表无数据源）
         const TOTAL_AMT = +(SCALE_501 + SCALE_502).toFixed(1);   // 503.7
@@ -1514,14 +1516,16 @@ const App = {
     // ============================================================
     //  密度决策日志(工况条件化 Stage 0 观测):
     //  记录每次真实密度决策(自动重定目标/操作员设定)时的工况上下文(带煤量/原煤灰分/
-    //  脱粉/系统组合/工作面/精磁尾液位),并在决策45分钟后自动补记灰分响应——
-    //  每次真实调整 = 一个 mini 阶跃实验点(Δρ_actual, ΔA_actual),
-    //  供 K(工况) 标定。闭环常规数据不可辨识 K,只有这类"决策+响应"对有效。
+    //  脱粉/系统组合/工作面/精磁尾液位),并在决策满45分钟、期间无新决策时,
+    //  用「决策后第一条人工化验」补记灰分响应——
+    //  每次真实调整 = 一个 mini 阶跃实验点(Δρ_actual, ΔA_actual),供 K(工况) 标定。
+    //  注意:闭环常规数据不可辨识 K(见 densityGainK 恒 valid=false),响应量必须取人工采样;
+    //  502 在线值是被控量本身,回路会把灰分拉回目标,用它算 ΔA 恒接近 0。
     //  存储:store.densityDecisionLog(auto_state 持久化,上限 200 条)。
     //  查看:GET /api/v1/state → densityDecisionLog。
     // ============================================================
     DECISION_LOG_MAX: 200,
-    DECISION_RESPONSE_MIN_AGE_MS: 45 * 60000,   // 决策后等过程到位再补记响应
+    DECISION_RESPONSE_MIN_AGE_MS: 45 * 60000,   // 决策后等过程到位再找人工化验补记响应
 
     _decisionCtx() {
         let last = null, lastT = '';
@@ -1569,24 +1573,76 @@ const App = {
         } catch (e) { console.warn('决策日志写入失败:', e); }
     },
 
-    // 补记响应:决策满45分钟且未闭环的条目,记录 实际Δρ 与 重介灰分ΔA —— K 标定的原料
+    // 决策时间戳(本地时间字符串) → 毫秒
+    _decisionMs(e) {
+        const t = new Date(String(e && e.ts || '').replace(' ', 'T')).getTime();
+        return isFinite(t) ? t : null;
+    },
+
+    // 决策之后的第一条「人工化验」重介灰分采样(用于 K 标定的响应量)。
+    // 为什么不用在线仪表：502 在线值就是本回路的被控量，闭环下回路会把灰分拉回目标，
+    // ΔA 恒接近 0（斜率估计系统性偏小甚至为负）——这正是 densityGainK() 在真实数据上
+    // 恒为 valid=false 的原因。只有人工采样(t≈开环阶跃响应)才带得出真实 ΔA。
+    _heavySampleAfter(t0) {
+        // ① 采样记录表(heavySamples)：取决策之后最早的一条
+        let best = null;
+        (this.store.heavySamples || []).forEach(s => {
+            const at = new Date(String(s && s.timestamp || '').replace(' ', 'T')).getTime();
+            if (!isFinite(at) || at <= t0) return;
+            if (typeof s.ash_content !== 'number' || !isFinite(s.ash_content)) return;
+            if (!best || at < best.at) {
+                const rho = (typeof s.rho === 'number' && isFinite(s.rho)) ? s.rho : null;
+                best = { at, ash: s.ash_content, rho, source: 'heavySamples' };
+            }
+        });
+        if (best) return best;
+        // ② 在线仪表行的手动重介灰分(采样/手写录入)：manualAt 晚于决策即视为决策后化验
+        const cfg = this.store.heavyAshInput || {};
+        const at = cfg.manualAt || 0;
+        if (at > t0 && typeof cfg.manual === 'number' && isFinite(cfg.manual)) {
+            return { at, ash: cfg.manual, rho: this.resolveDensity(), source: 'heavyAshInput' };
+        }
+        return null;
+    },
+
+    // 补记响应:决策满45分钟、且期间没有新的密度决策、且拿到了决策后的人工化验值时,
+    // 记录 实际Δρ 与 重介灰分ΔA —— K 标定的原料。
+    // 三种"不可用"情况都显式标记，避免把被污染的数据当成有效阶跃点：
+    //   · 窗口内又发生了新的密度决策 → 累积量会算到本条上(invalidated)
+    //   · 一直等不到人工化验 → 保持未闭环(response=null)，等下次页面打开再试
     _completeDensityDecisionResponses() {
         try {
             const log = this.store.densityDecisionLog;
             if (!log || !log.length) return;
             const now = Date.now();
+            let lastDecisionMs = -Infinity;
+            log.forEach(e => { const t = this._decisionMs(e); if (t !== null) lastDecisionMs = Math.max(lastDecisionMs, t); });
             let changed = false;
             log.forEach(e => {
                 if (e.response) return;
-                const t0 = new Date(String(e.ts).replace(' ', 'T')).getTime();
-                if (!isFinite(t0) || now - t0 < this.DECISION_RESPONSE_MIN_AGE_MS) return;
-                const rhoNow = this.resolveDensity();
-                const ashNow = this.getHeavyAsh();
+                const t0 = this._decisionMs(e);
+                if (t0 === null) {
+                    e.response = { invalidated: true, reason: '决策时间戳无法解析' };
+                    changed = true;
+                    return;
+                }
+                // 本条之后又出现了新的密度决策：密度已被再次改动，响应不再属于本条
+                if (t0 < lastDecisionMs) {
+                    e.response = { invalidated: true, reason: '窗口内出现后续密度决策，累积量无法归属' };
+                    changed = true;
+                    return;
+                }
+                if (now - t0 < this.DECISION_RESPONSE_MIN_AGE_MS) return;   // 过程尚未到位
+                const sample = this._heavySampleAfter(t0);
+                if (!sample) return;                                        // 等人工化验，保持未闭环
+                const rhoSample = (sample.rho != null) ? sample.rho : this.resolveDensity();
                 e.response = {
-                    ts: this.formatDate(new Date()),
-                    rhoNow, heavyAshNow: ashNow,
-                    dRhoActual: +(rhoNow - e.rhoCur).toFixed(4),
-                    dAActual: +(ashNow - e.heavyAsh).toFixed(3),
+                    ts: this.formatDate(new Date(sample.at)),
+                    lagMin: Math.round((sample.at - t0) / 60000),
+                    source: sample.source,              // heavySamples | heavyAshInput
+                    rhoNow: rhoSample, heavyAshNow: sample.ash,
+                    dRhoActual: +(rhoSample - e.rhoCur).toFixed(4),
+                    dAActual: +(sample.ash - e.heavyAsh).toFixed(3),
                 };
                 changed = true;
             });

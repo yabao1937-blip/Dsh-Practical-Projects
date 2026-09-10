@@ -383,7 +383,9 @@ const CollectPage = {
                 const ash = parseFloat(values.ash_content) || 0;
                 const amt = parseFloat(values.coal_amount) || 0;
                 const press = values.filter_press === '运行' ? 1 : 0;
-                const influence = (ash - 8.5) * amt / (250 + amt + 15);
+                // 重介灰分走统一口径（手动采样 > 502在线 > 默认7.9），不再写死 8.5
+                const hAshBase = App.getHeavyAsh();
+                const influence = (ash - hAshBase) * amt / (250 + amt + 15);
                 App.store.floatCoal.push({
                     id: App.store.floatCoal.length + 1,
                     timestamp: time,

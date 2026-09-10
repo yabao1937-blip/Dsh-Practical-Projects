@@ -354,11 +354,23 @@ const ImportPage = {
             if (iso) return { m: +iso[2], d: +iso[3] };
             const dot = s.match(/^(\d{1,2})\.(\d{1,2})$/);                  // "6.16" / "6.3"
             if (dot) {
-                const m = +dot[1], frac = +dot[2];
-                return fixDay(m, frac < 10 ? frac * 10 : frac);
+                const m = +dot[1], fracStr = dot[2];
+                // 单个小数位 = 手写「省略尾零」写法（6.3 可能是 30 日），需 fixDay 补偿
+                if (fracStr.length === 1) return fixDay(m, +fracStr * 10);
+                // 两位小数是显式日：6.02→2 日、6.10→10 日、6.16→16 日。
+                // 旧实现「frac<10 就 ×10」把 "6.02" 读成 20 日，"6.10" 又撞上 fixDay 的
+                // dd100==10 特例被读成 1 日 —— 与同内容的数值单元格(6.02→2 日)自相矛盾。
+                const d = +fracStr;
+                return (d >= 1 && d <= 31) ? { m, d } : fixDay(m, d);
             }
-            const p = s.split(/[\/\-]/);                                    // "6/16" / "6-16"
-            if (p.length >= 2 && +p[0] >= 1 && +p[0] <= 12) return { m: +p[0], d: +p[1] };
+            // "6/16" / "6-16"：两段都必须是纯数字且落在合法范围内，否则返回 null。
+            // 旧实现只校验 p[0]，"6-16(早班)" / "7-" / "6/abc" 会生成
+            // timestamp = "2026-06-NaN 09:00:00" 的毒行入库（后端同位置直接抛异常）。
+            const p = s.split(/[\/\-]/);
+            if (p.length >= 2 && /^\d+$/.test(p[0]) && /^\d+$/.test(p[1])
+                && +p[0] >= 1 && +p[0] <= 12 && +p[1] >= 1 && +p[1] <= 31) {
+                return { m: +p[0], d: +p[1] };
+            }
             return null;
         };
         // 「M.f 单个小数位」歧义识别:6.3 可能是 6月30(省尾零)也可能是 6月3;
@@ -378,6 +390,8 @@ const ImportPage = {
         // 带序列上下文的日期解析(与后端 importer.extract_date_seq 一致):
         // 候选={f, f*10},取「不早于前一行日期的最小候选」——
         // 6.29 后的 6.3→30;9.1 后的 9.2→2(旧规则会错解析成 9.20)
+        // 本月候选全不合格时再试下个月:手写表跨月常忘记改月份(6.29→6.30→「6.4」应为 7月4日),
+        // 不加这一步会退回旧 fixDay 得到 6月4日,比前一行倒退 26 天。
         const extractDateSeq = (dc, prev) => {
             const legacy = extractDate(dc);
             if (!legacy) return null;
@@ -385,8 +399,14 @@ const ImportPage = {
             if (!amb || !prev) return legacy;
             const [m, f] = amb;
             const cands = [...new Set([f, f * 10])].sort((a, b) => a - b);
+            const ge = (mm, d) => (mm > prev.m || (mm === prev.m && d >= prev.d));
             for (const d of cands) {
-                if (d >= 1 && d <= 31 && (m > prev.m || (m === prev.m && d >= prev.d))) return { m, d };
+                if (d >= 1 && d <= 31 && ge(m, d)) return { m, d };
+            }
+            if (m + 1 <= 12) {
+                for (const d of cands) {
+                    if (d >= 1 && d <= 31 && ge(m + 1, d)) return { m: m + 1, d };
+                }
             }
             return legacy;
         };
@@ -458,7 +478,7 @@ const ImportPage = {
     async confirmImportFactors() {
         const recs = this.parsedFactors || [];
         if (recs.length === 0) { App.showToast('无可导入的多因素数据', 'warning'); return; }
-        const heavyAsh = 8.50, heavyAmt = 250, fAsh = 0, fAmt = 0;
+        const heavyAsh = App.getHeavyAsh(), heavyAmt = 250, fAsh = 0, fAmt = 0;   // 重介灰分走统一口径（不再写死 8.50）
         const baseTotal = App.calcTotalAsh(heavyAsh, heavyAmt, fAsh, fAmt, 0, 0);
         let imported = 0;
         recs.forEach(rec => {
@@ -496,15 +516,32 @@ const ImportPage = {
             success: imported, failed: 0, skipped: 0, status: '成功', errors: []
         });
 
-        // 一次性数据修复(2026-09):旧 fixDay 规则的两类历史遗留,导入时清除——
+        // 一次性数据修复(2026-09):旧 fixDay 规则的两类历史遗留——
         // ① 7.2/7.3 曾被误解析成 7月20/30 日(源表实为 7月2/3 日,修正解析已写回正确日期);
         // ② "7.10"被 Excel 归一化成 7.1,旧解析把第二组 7.1(实为7.10的4行)错标在 07-01,
         //    与修正后写入的 07-10 行构成重复(时间/灰分/煤量完全一致),按时间戳模式清除。
-        const badTs = /^2026-07-(20|30) /;
-        const strayTs = /^2026-07-01 (00:47|02:23|08:12|10:41):/;
-        if (App.store.coarseCoal.some(c => badTs.test(c.timestamp) || strayTs.test(c.timestamp))) {
-            App.store.coarseCoal = App.store.coarseCoal.filter(c => !badTs.test(c.timestamp) && !strayTs.test(c.timestamp));
-            App.store.magneticTail = App.store.magneticTail.filter(c => !badTs.test(c.timestamp) && !strayTs.test(c.timestamp));
+        // 必须只跑一次：这段正则匹配的是固定时间戳，7-20/7-30 本身是正常生产日，
+        // 常驻在生产导入路径上会把将来真实的 7月20/30 日采样静默删掉（后端没有对应过滤，两轨会分叉）。
+        // 标志位 __fixes 与 __merged 一样只存本地（见 App._applyServerState 的 localOnly），
+        // 不会被「从服务器恢复数据」清掉，从而不会重复执行。
+        if (!(App.store.__fixes && App.store.__fixes.julStray)) {
+            const badTs = /^2026-07-(20|30) /;
+            const strayTs = /^2026-07-01 (00:47|02:23|08:12|10:41):/;
+            const hit = c => badTs.test(c.timestamp) || strayTs.test(c.timestamp);
+            const removed = App.store.coarseCoal.filter(hit).length + App.store.magneticTail.filter(hit).length;
+            if (removed > 0) {
+                App.store.coarseCoal = App.store.coarseCoal.filter(c => !hit(c));
+                App.store.magneticTail = App.store.magneticTail.filter(c => !hit(c));
+                // 只记录日志，不弹误导性提示；导出「导入错误记录」时可追溯
+                App.store.importLogs.push({
+                    id: App.store.importLogs.length + 1, timestamp: App.formatDate(new Date()),
+                    category: 'migration', fileName: '一次性修复:7月日期遗留',
+                    total: removed, success: 0, failed: 0, skipped: removed,
+                    status: '已清理', errors: []
+                });
+                console.info(`[一次性修复] 清除 7 月日期遗留记录 ${removed} 条`);
+            }
+            App.store.__fixes = Object.assign({}, App.store.__fixes, { julStray: 1 });
         }
 
         App.saveStore();
@@ -696,7 +733,9 @@ const ImportPage = {
                             source: 'import'
                         });
                         // 同步写入 coarseCoal，供粗精煤泥分析页面使用
-                        const heavyAsh = 8.50, heavyAmt = 250, fAsh = 0, fAmt = 0;
+                        // 重介灰分不再写死 8.50：口径已改为「手动采样 > 502在线 > 默认7.9」，
+                        // 硬编码会让影响值与页面其它地方（动态取值）不同源
+                        const heavyAsh = App.getHeavyAsh(), heavyAmt = 250, fAsh = 0, fAmt = 0;
                         const baseTotal = App.calcTotalAsh(heavyAsh, heavyAmt, fAsh, fAmt, 0, 0);
                         const curTotal = App.calcTotalAsh(heavyAsh, heavyAmt, fAsh, fAmt, cAsh, cAmt);
                         App.store.coarseCoal.push({
@@ -715,7 +754,7 @@ const ImportPage = {
                         const pressVal = String(row[col.press >= 0 ? col.press : 4] || '');
                         const flAsh = parseFloat(row[col.ash >= 0 ? col.ash : 2]) || 0;
                         const flAmt = parseFloat(row[col.amount >= 0 ? col.amount : 3]) || 0;
-                        const hAsh = 8.50, hAmt = 250, csAsh = 13.0, csAmt = 15;
+                        const hAsh = App.getHeavyAsh(), hAmt = 250, csAsh = 13.0, csAmt = 15;   // 重介灰分走统一口径
                         const flBaseTotal = App.calcTotalAsh(hAsh, hAmt, 0, 0, csAsh, csAmt);
                         const flCurTotal = App.calcTotalAsh(hAsh, hAmt, flAsh, flAmt, csAsh, csAmt);
                         App.store.floatCoal.push({
@@ -916,16 +955,53 @@ const ImportPage = {
     // ========================================
     // 推测简报：三表 1h 对齐 + 建议密度 + 粗精煤泥灰分模型推测
     // ========================================
+    // 三表各自最近一条记录的时间（用于 0 行时告诉用户到底缺哪张表）
+    _briefLastTs() {
+        const last = arr => {
+            let m = '';
+            (arr || []).forEach(r => { const t = (r && (r.timestamp || r.ts)) || ''; if (t > m) m = t; });
+            return m;
+        };
+        const ad = (App.store.calcLogs || []).filter(l => l.calc_type === 'ash_density');
+        return { coarse: last(App.store.coarseCoal), float: last(App.store.floatCoal), ad: last(ad) };
+    },
+
     generateBrief() {
         const brief = App.buildHourlyBrief();
         this.briefResult = brief;
         if (!brief.rows.length) {
-            App.showToast('暂无可对齐的三表数据，请先导入三张表', 'warning');
+            // 0 行有两种完全不同的原因，必须分开提示，否则会被误读成"简报生成失败"
+            const t = this._briefLastTs();
+            const empty = [t.coarse, t.float, t.ad].filter(x => !x).length;
+            if (empty > 0) {
+                App.showToast(`三表数据不齐（粗精煤泥 ${t.coarse || '无'} / 浮精 ${t.float || '无'} / 灰分密度 ${t.ad || '无'}），请先导入缺失的表`, 'warning');
+            } else {
+                App.showToast(`三表时间窗未落在同一天内，无法成行。各表最近：粗精煤泥 ${t.coarse} / 浮精 ${t.float} / 灰分密度 ${t.ad}`
+                    + `（成行规则：三表在该小时内 24h 内均有记录）`, 'warning');
+            }
+            App.openModal('推测简报（三表1h对齐）', `
+                <div style="line-height:2;font-size:13px">
+                    <p><strong>未生成任何行</strong>，原因如下：</p>
+                    <p>• 成行规则：某一小时要成行，<strong>粗精煤泥 / 浮精 / 灰分密度三张表都必须在该小时结束前 24 小时内各有一条记录</strong>；
+                       任一表超窗，该小时整行跳过（不再用陈旧数据续传凑行）。</p>
+                    <p>• 本机各表最近一条记录：</p>
+                    <table class="data-table" style="margin:4px 0 12px">
+                        <tr><td>粗精煤泥（表1）</td><td>${t.coarse || '— 无数据'}</td></tr>
+                        <tr><td>浮精（表2）</td><td>${t.float || '— 无数据'}</td></tr>
+                        <tr><td>灰分密度（表3）</td><td>${t.ad || '— 无数据'}</td></tr>
+                    </table>
+                    <p>• 常见原因：三张表来自不同时间段（例如表1是 6-7 月、表2/表3 只有 5 月），时间窗不重叠；
+                       浮精表是每天化验 1 次，因此只有每次浮精采样之后的 24 小时内才会成行。</p>
+                </div>`,
+                '<button class="btn" onclick="App.closeModal()">关闭</button>');
             return;
         }
         const schemeName = (App.store.guideScheme === 'heavy') ? '重介精煤灰分版' : '总灰分版';
         const target = (App.store.ashTarget != null ? App.store.ashTarget : 8.50).toFixed(2);
         const tol = (App.store.ashTargetTol != null ? App.store.ashTargetTol : 0.1);
+        // 重介灰分不再写死 8.50：展示当前实际取值与层级来源
+        const heavyAshVal = App.getHeavyAsh();
+        const heavyAshLayer = App.heavyAshLayer();
         const thead = `<tr><th>#</th>${brief.headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
         const tbody = brief.rows.map((row, i) =>
             `<tr><td>${i + 1}</td>${row.map(c => `<td>${c === '' ? '-' : c}</td>`).join('')}</tr>`).join('');
@@ -934,7 +1010,9 @@ const ImportPage = {
                 共 <strong>${brief.rows.length}</strong> 个 1h 间隔 ·
                 建议密度口径：<strong>${schemeName}</strong> ·
                 目标灰分 <strong>${target}%</strong> · 达标容差 ±<strong>${tol}%</strong><br>
-                <span style="color:var(--accent-orange)">三表无数据源项按恒值处理：粗精煤泥量 40 t/h · 501/502皮带秤 268.5/235.2 t/h · 重介灰分 8.50%</span>
+                成行规则：粗精煤泥 / 浮精 / 灰分密度三表在该小时结束前 <strong>24h 内均有记录</strong>才成行，任一表超窗则整行跳过<br>
+                重介精煤灰分：<strong>${heavyAshVal.toFixed(2)}%</strong>（${heavyAshLayer}）<br>
+                <span style="color:var(--accent-orange)">三表无数据源项按恒值处理：粗精煤泥量 40 t/h · 501/502皮带秤 268.5/235.2 t/h</span>
             </div>
             <div class="table-scroll" style="max-height:60vh">
                 <table class="data-table">

@@ -591,6 +591,10 @@ class Chart {
 
         const gap = chartW / n;
         const barW = Math.min(36, gap * 0.65);
+        // 自定义刻度标签（与折线图同一约定）：非空才绘制，相邻过近（<38px）跳过防重叠。
+        // 柱状图原先无条件给每根柱画一个标签，稀疏/长时间跨度的数据会糊成一片。
+        const customTicks = Array.isArray(this.xTickLabels) && this.xTickLabels.length === n ? this.xTickLabels : null;
+        let lastLabelX = -Infinity;
         for (let i = 0; i < n; i++) {
             const x = padding.left + gap * i + (gap - barW) / 2;
             const barH = (Math.abs(data[i]) / yMax) * chartH;
@@ -613,7 +617,17 @@ class Chart {
             ctx.fillStyle = '#7b8da6';
             ctx.textAlign = 'center';
             ctx.font = '11px Microsoft YaHei, sans-serif';
-            ctx.fillText(labels[i] || '', x + barW / 2, h - padding.bottom + 20);
+            const tickLabel = customTicks ? (customTicks[i] || '') : (labels[i] || '');
+            if (tickLabel) {
+                const cx = x + barW / 2;
+                // 防重叠阈值按标签实测宽度算（"08-23" 约 30px，"08-23 07:19" 约 66px）：
+                // 固定 38px 对长标签不够，相邻标签仍会叠在一起
+                const need = Math.max(38, ctx.measureText(tickLabel).width + 8);
+                if (cx - lastLabelX >= need) {
+                    ctx.fillText(tickLabel, cx, h - padding.bottom + 20);
+                    lastLabelX = cx;
+                }
+            }
 
             // Record bar position for tooltip
             this._pointPositions.push({

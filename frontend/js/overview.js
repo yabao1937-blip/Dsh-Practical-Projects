@@ -18,13 +18,14 @@ const OverviewPage = {
         // 双击恢复：实际灰分→清空在线仪表总灰分手动值(回公式计算)；目标灰分→恢复默认8.50
         const actualEl0 = document.getElementById('actual-ash-total');
         if (actualEl0) {
-            actualEl0.title = '双击清空手动值（重介版：恢复默认8.50；总灰分版：恢复公式计算）';
+            actualEl0.title = '双击清空手动值（重介版：恢复502在线/默认7.9；总灰分版：恢复公式计算）';
             actualEl0.style.cursor = 'pointer';
             actualEl0.addEventListener('dblclick', (e) => {
                 e.stopPropagation();
                 if (App.store.guideScheme === 'heavy') {
                     App.setHeavyAshInput({ manual: null });
-                    App.showToast('重介精煤灰分手动值已清空，恢复默认8.50', 'info');
+                    // 清空后落到哪一层由取值链决定（502在线 > 默认7.9），文案随之动态生成
+                    App.showToast(`重介精煤灰分手动值已清空，恢复${App.heavyAshLayer()}（${App.getHeavyAsh().toFixed(2)}%）`, 'info');
                 } else {
                     App.setAshInput('totalAsh', { manual: null });
                     App.showToast('总精煤灰分手动值已清空，恢复公式计算', 'info');
@@ -123,7 +124,7 @@ const OverviewPage = {
 
         // 计算总灰分（粗精煤泥灰分采用多因素模型"前馈预测"值，先于化验值给出，实现密度精准预判）
         // 三个量走"录入+输入"：由 resolveAmount 解析（录入/自动/计算）
-        const heavyAsh = App.getHeavyAsh();        // 任务三：反推重介精煤灰分（默认8.50兜底）
+        const heavyAsh = App.getHeavyAsh();        // 任务三：重介精煤灰分（手动采样 > 502在线 > 默认7.9）
         const heavyAmt = App.resolveAmount('denseAmount');        // 重介精煤量（录入或计算）
         const coarseAmt = App.resolveAmount('coarseAmount');      // 粗精煤泥量（录入）
         // 粗精灰分/浮精灰分：与在线仪表统一解析（时间最新 + 手动覆盖），全链路相通
@@ -363,7 +364,7 @@ const OverviewPage = {
     showCardDetail(sysId) {
         App.backCalcHeavyAsh();   // 反推重介灰分仅展示用（不参与密度建议）
         const defaultTarget = (App.store.ashTarget != null) ? App.store.ashTarget : 8.50;
-        const heavyAsh = App.getHeavyAsh();      // 静态初始值（手写/导入/采样，默认8.50）
+        const heavyAsh = App.getHeavyAsh();      // 重介精煤灰分（手动采样 > 502在线 > 默认7.9）
         const heavyAmt = App.resolveAmount('denseAmount');      // 重介精煤量（录入或计算）
         const coarseData = App.store.coarseCoal;
         const floatData = App.store.floatCoal;
@@ -407,7 +408,7 @@ const OverviewPage = {
                 <p><strong>一、基础参数</strong></p>
                 <table class="data-table" style="margin:4px 0 12px">
                     <tr><td>目标灰分</td><td>${target}%</td></tr>
-                    <tr><td>重介精煤灰分</td><td>${heavyAsh}%${App.heavyAshLayer() === '手动(采样)' ? '（手动/采样）' : '（默认8.50）'}</td></tr>
+                    <tr><td>重介精煤灰分</td><td>${heavyAsh}%（${App.heavyAshLayer()}）</td></tr>
                     <tr><td>重介精煤量(录入/计算)</td><td>${heavyAmt == null ? '—' : heavyAmt + ' t/h'}</td></tr>
                     <tr><td>粗精灰分(化验实测)</td><td>${latestCoarse ? latestCoarse.ash_content.toFixed(2) + '%' : '暂无数据'}</td></tr>
                     <tr><td>粗精灰分(前馈预测)</td><td>${latestCoarse ? coarseAsh.toFixed(2) + '%' : '暂无数据'}</td></tr>

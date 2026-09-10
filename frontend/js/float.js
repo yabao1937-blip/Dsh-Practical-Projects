@@ -46,6 +46,98 @@ const FloatPage = {
         });
     },
 
+    // 时间轴刻度标签：先把每个数据点格式化成"能塞得下"的短标签（跨天只写 MM-DD），
+    // 再按可用的像素宽度自动抽取刻度间隔（1/2/3/7/14/30 天…），密集处必然被跳过，
+    // 所以不会出现多个标签叠在同一处。原因：浮精化验数据是"每天 1 个点、有时隔几十天再采"
+    // 的稀疏数据，若每个点都标完整时间，靠得近的点标签会横向挤在一起糊成一片。
+    // indexBased=true 表示目标图的 X 位置按数据序号等距（柱状图），此时像素位置也按序号算——
+    // 否则"按时间比例算出来的位置"与图上实际位置不一致，抽出来的刻度会与实际布局错位。
+    _timeTickLabels(data, times, chartPx, indexBased) {
+        const pad = n => String(n).padStart(2, '0');
+        const n = data.length;
+        const out = new Array(n).fill('');
+
+        let t0 = null, t1 = null;
+        for (let i = 0; i < n; i++) {
+            const t = times[i];
+            if (typeof t !== 'number' || !isFinite(t)) continue;
+            if (t0 === null) t0 = t;
+            t1 = t;
+        }
+        if (t0 === null) return out;                       // 时间戳无法解析：交给通用刻度兜底
+        const span = t1 - t0;
+        const w = chartPx || 640;
+        const DAY = 86400000;
+        const HOUR = 3600000;
+        // 某点在目标图上的像素位置：柱状图按序号等距（与 chart-lite._drawBar 的柱心一致），
+        // 折线图按时间比例（与 chart-lite._drawLine 的 xTimes 布局一致）
+        const xAt = (i, t) => indexBased
+            ? ((i + 0.5) / (n || 1)) * w
+            : ((t - t0) / (span || 1)) * w;
+        if (span < DAY) {                                  // 数据集中在 1 天内：按"时:分"标刻度
+            const hm = t => {
+                const d = new Date(t);
+                return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            };
+            const candsH = [HOUR, 2 * HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR];
+            const need0 = 56, gap0 = 32;
+            const pxPerHour = w / (span / HOUR);
+            for (let ci = 0; ci < candsH.length; ci++) {
+                const dt = candsH[ci];
+                if (dt * pxPerHour / HOUR < need0) continue;   // 间隔太密，换更大的（candsH 单位是"小时"）
+                let lastT = -Infinity, lastX = -Infinity;
+                for (let i = 0; i < n; i++) {
+                    const t = times[i];
+                    if (typeof t !== 'number' || !isFinite(t)) continue;
+                    if (t - lastT < dt) continue;
+                    const x = xAt(i, t);
+                    if (x - lastX < gap0) continue;
+                    out[i] = hm(t);
+                    lastT = t;
+                    lastX = x;
+                }
+                return out;
+            }
+            if (n) out[0] = hm(t0);
+            return out;
+        }
+
+        const labelOf = t => {
+            const d = new Date(t);
+            let s = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+            if (span <= 3 * DAY) s += ` ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            return s;
+        };
+
+        // 候选间隔（天）：1/2/3/7/14/30；跨度超过 3 个月再放大到 6/12/18/24 天
+        const cands = [1, 2, 3, 7, 14, 30];
+        if (span > 92 * DAY) cands.push(60, 90);
+        // 从最小的刻度间隔往上试，第一个"放得下"的就用它
+        const needPx = 88;                                 // 相邻刻度标签之间的最小像素距离
+        const minGapPx = 76;                               // "MM-DD" 约 36px 宽 + 40px 呼吸位
+        const pxPerDay = w / (span / DAY);
+        for (let ci = 0; ci < cands.length; ci++) {
+            const dt = cands[ci] * DAY;
+            if (dt * pxPerDay / DAY < needPx) continue;    // 间隔太密，换更大的（cands 单位是"天"）
+            let lastLabelT = -Infinity, lastLabelX = -Infinity;
+            for (let i = 0; i < n; i++) {
+                const t = times[i];
+                if (typeof t !== 'number' || !isFinite(t)) continue;
+                if (t - lastLabelT < dt) continue;
+                const x = xAt(i, t);
+                if (x - lastLabelX < minGapPx) continue;   // 双保险：离上一个标签太近仍跳过
+                out[i] = labelOf(t);
+                lastLabelT = t;
+                lastLabelX = x;
+            }
+            return out;
+        }
+        // 兜底：跨度很短但点多时，按像素均匀地隔几个点标一个
+        const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(w / needPx))));
+        for (let i = 0; i < n; i += step) out[i] = labelOf(times[i]);
+        return out;
+    },
+
     initTimeRange() {
         const now = new Date();
         const start = new Date(now.getTime() - 24 * 3600000);
@@ -232,6 +324,7 @@ const FloatPage = {
         const data = this._uniqueByTime(this._sortByTime(App.store.floatCoal));
         const heavyAmt = 250;
         const pad = n => String(n).padStart(2, '0');
+        // 完整时间既用于悬停提示，也用于 X 轴定位（按真实时间间隔比例分布，与数据条数无关）
         const times = [];
         const labels = data.map(d => {
             const dt = new Date(d.timestamp);
@@ -241,19 +334,16 @@ const FloatPage = {
                 ? `${pad(dt.getMonth()+1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`
                 : String(d.timestamp || '');
         });
+        // X 轴刻度标签：不逐点标完整时间（密集段会叠成一团），只标合适的时间间隔
+        const chartPx = Math.max(360, ((this.linkageChart && this.linkageChart.width) || 900) - 130);
         this.linkageChart.xTimes = times;
-        this.distChart.xTimes = times;
+        this.linkageChart.xTickLabels = this._timeTickLabels(data, times, chartPx);
         const floatAsh = data.map(d => d.ash_content);
         const totalAsh = data.map(d => {
             const hAsh = App.getAshByTime(d.timestamp) ?? 8.50;   // 超窗记缺失回退默认
             return App.calcTotalAsh(hAsh, heavyAmt, d.ash_content, d.coal_amount, 0, 0);
         });
-        const influenceValues = data.map(d => {
-            const hAsh = App.getAshByTime(d.timestamp) ?? 8.50;   // 超窗记缺失回退默认
-            const base = App.calcTotalAsh(hAsh, heavyAmt, 0, 0, 0, 0);
-            const withF = App.calcTotalAsh(hAsh, heavyAmt, d.ash_content, d.coal_amount, 0, 0);
-            return +(withF - base).toFixed(3);
-        });
+        const influenceValues = data.map(d => this._influenceOf(d, heavyAmt));
 
         this.linkageChart.data.labels = labels;
         this.linkageChart.data.datasets[0].data = floatAsh;
@@ -263,14 +353,31 @@ const FloatPage = {
 
         // 分布图（最近12个时段）
         const recentLabels = labels.slice(-12);
+        const recentTimes = times.slice(-12);
         const recentInfluence = influenceValues.slice(-12);
         const colors = recentInfluence.map(v =>
             v > 0.15 ? '#ef4444' : v > 0.05 ? '#f59e0b' : '#10b981'
         );
+        // 柱状图标签原先无条件画在每根柱下方（无防重叠处理），所以同样只标合适的时间间隔。
+        // 第 4 个参数 true = 柱状图按序号等距，像素位置须与 _drawBar 的柱心口径一致。
+        const distPx = Math.max(200, ((this.distChart && this.distChart.width) || 380) - 120);
+        this.distChart.xTickLabels = this._timeTickLabels(recentLabels, recentTimes, distPx, true);
         this.distChart.data.labels = recentLabels;
         this.distChart.data.datasets[0].data = recentInfluence;
         this.distChart.data.datasets[0].backgroundColor = colors;
         this.distChart.update('none');
+    },
+
+    // 浮精影响值（唯一口径）：图上与表上必须同源。
+    // 重介灰分按该点时刻动态取（App.getAshByTime），超窗才回退默认；
+    // 之前表格/详情用的是导入时按写死 8.50 存下的 d.influence_value，与图上的实时值不同源，
+    // 重介灰分默认口径改为「502在线/7.9」后两者差距进一步放大，故统一到本函数。
+    _influenceOf(d, heavyAmt) {
+        const amt = (heavyAmt == null) ? 250 : heavyAmt;
+        const hAsh = App.getAshByTime(d.timestamp) ?? 8.50;
+        const base = App.calcTotalAsh(hAsh, amt, 0, 0, 0, 0);
+        const withF = App.calcTotalAsh(hAsh, amt, d.ash_content, d.coal_amount, 0, 0);
+        return +(withF - base).toFixed(3);
     },
 
     renderTable() {
@@ -282,13 +389,14 @@ const FloatPage = {
                 '<span class="annotate-tag normal">正常</span>';
             const annTag = d.annotation && d.annotation !== '正常' ?
                 `<span class="annotate-tag abnormal">${d.annotation}</span>` : '';
-            const infClass = d.influence_value > 0.1 ? 'text-up' : d.influence_value < -0.1 ? 'text-down' : '';
+            const inf = this._influenceOf(d);   // 与图表同源（不再用导入时存下的旧口径值）
+            const infClass = inf > 0.1 ? 'text-up' : inf < -0.1 ? 'text-down' : '';
             return `<tr>
                 <td style="font-size:12px">${d.timestamp}</td>
                 <td>${d.ash_content.toFixed(2)}</td>
                 <td>${d.coal_amount.toFixed(1)}</td>
                 <td>${pressTag}</td>
-                <td class="${infClass}">${d.influence_value > 0 ? '+' : ''}${d.influence_value.toFixed(3)}</td>
+                <td class="${infClass}">${inf > 0 ? '+' : ''}${inf.toFixed(3)}</td>
                 <td>${annTag || pressTag}</td>
                 <td>
                     <button class="link-btn" onclick="FloatPage.showDetail(${d.id})">详情</button>
@@ -307,7 +415,7 @@ const FloatPage = {
                 <p><strong>浮精灰分：</strong>${d.ash_content.toFixed(2)}%</p>
                 <p><strong>浮精煤量：</strong>${d.coal_amount.toFixed(1)} t/h</p>
                 <p><strong>压滤机状态：</strong>${d.filter_press_running ? '运行中' : '停止'}</p>
-                <p><strong>影响值：</strong>${d.influence_value.toFixed(3)}%</p>
+                <p><strong>影响值：</strong>${this._influenceOf(d).toFixed(3)}%</p>
                 <p><strong>工况标注：</strong>${d.annotation || '无'}</p>
                 <hr style="border-color:var(--border-color);margin:12px 0">
                 <p><strong>计算方式：</strong></p>
