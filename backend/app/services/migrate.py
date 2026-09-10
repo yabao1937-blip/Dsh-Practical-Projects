@@ -242,26 +242,57 @@ def apply(store: dict) -> dict:
         db.close()
 
 
+def _record_vector(db) -> dict:
+    """现库的「业务记录向量」：按测量类别细分，供防回退守卫逐项比较。
+
+    不含 manual_entries / import_logs / alerts：这些是日志类数据，
+    前端「删除单条补录」「清空补录历史」会**合法地**让它们变少
+    （collect.js clearHistory → saveStore → PUT /state），
+    纳入守卫会把正常操作误判成回退。
+    """
+    vec = {cat: db.query(CoalRecord).filter(CoalRecord.category == cat).count()
+           for cat in ("coarse", "float", "ash_density")}
+    vec["calc_logs"] = db.query(CalcLog).count()
+    vec["heavy_samples"] = db.query(HeavySample).count()
+    return vec
+
+
+def _plan_vector(p: dict) -> dict:
+    """待入库快照的同口径向量（键与 _record_vector 一一对应）。"""
+    vec = {cat: 0 for cat in ("coarse", "float", "ash_density")}
+    for r in p["coal_records"]:
+        cat = r.get("category")
+        if cat in vec:
+            vec[cat] += 1
+    vec["calc_logs"] = len(p["calc_logs"])
+    vec["heavy_samples"] = len(p["heavy_samples"])
+    return vec
+
+
 def replace(store: dict, force: bool = False) -> dict:
     """清空业务表后整体重写（PUT /state 整库快照用）。
 
     清表与写入在同一事务内：若写入失败回滚，清表也一并回滚，不会清库后丢数据。
 
-    防回退守卫（force=False 时）：入库三表记录数少于现库 → 拒绝写入。
+    防回退守卫（force=False 时）：任一业务记录数少于现库 → 拒绝写入。
     双轨架构中旧 localStorage 的浏览器任何 saveStore 都会整库镜像,不加守卫会
     把服务器侧导入/训练的新数据洗回旧状态。显式 force=true 用于清空/恢复备份
     等有意回退场景。
+
+    为什么按类别细分而不是只比总数：总数相等也可能已经回退
+    （如 ash_density 少 20 条、coarse 多 20 条 → 总数不变，只比总数的旧规则会放行）。
     """
     p = _plan(store)
     db: Session = SessionLocal()
     try:
         if not force:
-            incoming = len(p["coal_records"])
-            current = db.query(CoalRecord).count()
-            if current > 0 and incoming < current:
-                return {"ok": False, "stale": True,
-                        "error": f"stale_store: 入库记录 {incoming} < 现库 {current},拒绝整库回退"
-                                 f"(防旧浏览器覆盖服务器新数据;确需回退请 force=true)"}
+            incoming, current = _plan_vector(p), _record_vector(db)
+            regressed = {k: (incoming[k], current[k]) for k in current if incoming[k] < current[k]}
+            if sum(current.values()) > 0 and regressed:
+                detail = "、".join(f"{k} {inc}<{cur}" for k, (inc, cur) in regressed.items())
+                return {"ok": False, "stale": True, "regressed": regressed,
+                        "error": f"stale_store: 以下记录数将回退（{detail}），拒绝整库回退"
+                                 f"（防旧浏览器覆盖服务器新数据；确需回退请 force=true）"}
         for t in (CoalRecord, CalcLog, CoarseModelHistory, RegressionModel, HeavySample,
                   ManualEntry, Alert, ImportLog, CoarseModel, Setting, AutoState):
             db.query(t).delete()

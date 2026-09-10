@@ -3,6 +3,9 @@
    - Excel(.xlsx/.csv) 导入三表数据，导入后自动训练 MLR/PLS 模型
    ======================================== */
 
+// 手写表无年份时的默认年（与后端 importer.DEFAULT_YEAR 一致；跨年由 resolveYmd 递推）
+const DEFAULT_YEAR = 2026;
+
 const ImportPage = {
     parsedData: null,
     rawData: null,
@@ -279,7 +282,7 @@ const ImportPage = {
             }
         }
         if (hIdx < 0) {
-            errors.push({ row: 0, msg: '未识别到多因素表头（需含“原煤灰分/315灰分/精磁尾液位”）' });
+            errors.push({ row: 0, col: 0, msg: '未识别到多因素表头（需含“原煤灰分/315灰分/精磁尾液位”）' });
             return { records, errors, previewHeaders: [], previewRows: [] };
         }
         const hRow = raw[hIdx] || [];
@@ -342,7 +345,7 @@ const ImportPage = {
             if (typeof dc === 'number') {
                 if (dc >= 1000) {   // Excel 日期序列（1900纪元）
                     const d = new Date(Math.round((dc - 25569) * 86400 * 1000));
-                    return isNaN(d) ? null : { m: d.getMonth() + 1, d: d.getDate() };
+                    return isNaN(d) ? null : { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() };
                 }
                 const m = Math.floor(dc);
                 const dd100 = Math.round((dc - m) * 100);   // 6.16→16；6.3→30；7.4→40
@@ -351,7 +354,7 @@ const ImportPage = {
             }
             const s = String(dc);
             const iso = s.match(/(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);   // "2026-06-16"
-            if (iso) return { m: +iso[2], d: +iso[3] };
+            if (iso) return { y: +iso[1], m: +iso[2], d: +iso[3] };   // 保留单元格里的年份（旧实现只取月日）
             const dot = s.match(/^(\d{1,2})\.(\d{1,2})$/);                  // "6.16" / "6.3"
             if (dot) {
                 const m = +dot[1], fracStr = dot[2];
@@ -410,10 +413,22 @@ const ImportPage = {
             }
             return legacy;
         };
-        const parseTs = (dc, tc, prevMd) => {
-            const md = extractDateSeq(dc, prevMd);
-            const t = extractTime(tc);
-            return md ? `2026-${pad(md.m)}-${pad(md.d)} ${t}` : `${String(dc || '').trim()} ${t}`;
+        // 年份解析（与后端 importer.resolve_ymd 一致）：
+        // 单元格自带年份（ISO 写法 / Excel 真实日期序列）优先，否则沿用上一行年份、再退回 DEFAULT_YEAR；
+        // **仅当上一行是 12 月、本行月份小于 12** 时年份 +1（12.30 之后接 1.1 = 次年）。
+        // 刻意不用「月份变小就跨年」的宽规则：手写表里月份偶尔写乱（7月里混一行 6.02）很常见，
+        // 宽规则会把这类乱序行整批抬到下一年，比时间戳略早更严重。
+        const resolveYmd = (dc, prev) => {
+            const md = extractDateSeq(dc, prev ? { m: prev[1], d: prev[2] } : null);
+            if (!md) return null;
+            let y = md.y || (prev ? prev[0] : null) || DEFAULT_YEAR;
+            if (prev && md.m < prev[1] && prev[1] === 12) y += 1;
+            return [y, md.m, md.d];
+        };
+        const fmtTs = (ymd, tc) => `${ymd[0]}-${pad(ymd[1])}-${pad(ymd[2])} ${extractTime(tc)}`;
+        const parseTs = (dc, tc, prevYmd) => {
+            const ymd = resolveYmd(dc, prevYmd);
+            return ymd ? fmtTs(ymd, tc) : `${String(dc || '').trim()} ${extractTime(tc)}`;
         };
         const systemInfo = row => {
             const on = [];
@@ -425,12 +440,15 @@ const ImportPage = {
         };
 
         let lastRawAsh = null;
-        let lastMd = null;   // 上一行解析出的 {m,d},供 extractDateSeq 消歧
+        let lastYmd = null;   // 上一行解析出的 [y,m,d]，供序列消歧与跨年判断
         const dataRows = raw.slice(hIdx + 2).filter(r => r && r.some(c => c !== null && c !== '' && c !== undefined));
         const previewRows = [];
         dataRows.forEach((row) => {
-            const md = extractDateSeq(row[dateCol], lastMd);
-            if (md) lastMd = md;
+            const ymd = resolveYmd(row[dateCol], lastYmd);
+            if (ymd) lastYmd = ymd;
+            // 日期解析失败时回退原始文本（不再产生 "2026-06-NaN" 毒行）
+            const rowTs = ymd ? fmtTs(ymd, row[timeCol])
+                              : `${String(row[dateCol] || '').trim()} ${extractTime(row[timeCol])}`;
             const ash = col.ash >= 0 ? toNum(row[col.ash]) : NaN;
             if (isNaN(ash)) return;                       // 无灰分行跳过
             if (ash < 1 || ash > 40) return;              // 异常灰分跳过（如时间误填成1899-12-30被读成1899）
@@ -442,7 +460,7 @@ const ImportPage = {
             const moist = col.moisture >= 0 ? toNum(row[col.moisture]) : NaN;
             const onSys = systemInfo(row);
             const rec = {
-                timestamp: parseTs(row[dateCol], row[timeCol], lastMd),
+                timestamp: rowTs,
                 system: '合并',   // 界面合并显示；系统开关内部保留在 sysA..sys402
                 ash_content: +ash.toFixed(4),
                 coal_amount: isNaN(coal) ? 0 : +coal,
@@ -643,11 +661,11 @@ const ImportPage = {
             const mm = +m[1], frac = +m[2];
             const dd100 = frac < 10 ? frac * 10 : frac;
             const d = dd100 === 10 ? 1 : (dd100 >= 1 && dd100 <= 31 ? dd100 : Math.floor(dd100 / 10));
-            return `2026-${pad(mm)}-${pad(d)} ${pad(+m[3])}:${pad(+m[4])}:${pad(+(m[5] || 0))}`;
+            return `${DEFAULT_YEAR}-${pad(mm)}-${pad(d)} ${pad(+m[3])}:${pad(+m[4])}:${pad(+(m[5] || 0))}`;
         }
         // 斜杠记法（无补偿，6/3=6月3日）
         m = s.match(/^(\d{1,2})\/(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/);
-        if (m) return `2026-${pad(+m[1])}-${pad(+m[2])} ${pad(+m[3])}:${pad(+m[4])}:${pad(+(m[5] || 0))}`;
+        if (m) return `${DEFAULT_YEAR}-${pad(+m[1])}-${pad(+m[2])} ${pad(+m[3])}:${pad(+m[4])}:${pad(+(m[5] || 0))}`;
         return null;
     },
 

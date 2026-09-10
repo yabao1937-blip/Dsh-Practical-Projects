@@ -102,6 +102,31 @@ var XLSX = {
         if (!styleEntry) return dateStyles;
 
         const xml = await this._inflate(data, styleEntry);
+
+        // 自定义数字格式：<numFmts><numFmt numFmtId="176" formatCode="m&quot;月&quot;d&quot;日&quot;"/></numFmts>
+        // 旧实现只认内置 ID（14-22/27-36/45-47/50-58），而 openpyxl 是按格式**字符串**判定
+        // （含 [dmhys] 即视为日期）—— 同一单元格若套了自定义日期格式，浏览器会把 6.16 当数字
+        // 解析成 6月16日、后端解析成 1月6日，双轨分叉。
+        const customFmt = {};
+        const numFmtsMatch = xml.match(/<numFmts[^>]*>([\s\S]*?)<\/numFmts>/);
+        if (numFmtsMatch) {
+            const re = /<numFmt[^>]*numFmtId="(\d+)"[^>]*formatCode="([^"]*)"/g;
+            let m;
+            while ((m = re.exec(numFmtsMatch[1])) !== null) {
+                customFmt[parseInt(m[1], 10)] = this._decodeXml(m[2]);
+            }
+        }
+        // 与 openpyxl.styles.stylesheet.is_date_format 同规则：
+        // 去掉 [条件/颜色/区域] 段、去掉引号内字面量、去掉转义字符后，含 d/m/h/y/s 即日期
+        const isDateCode = code => {
+            if (!code) return false;
+            const stripped = String(code)
+                .replace(/\[[^\]]*\]/g, '')
+                .replace(/"[^"]*"/g, '')
+                .replace(/\\./g, '');
+            return /[dmhys]/i.test(stripped);
+        };
+
         const cellXfsMatch = xml.match(/<cellXfs[^>]*>([\s\S]*?)<\/cellXfs>/);
         if (!cellXfsMatch) return dateStyles;
 
@@ -110,12 +135,14 @@ var XLSX = {
 
         allXf.forEach((xf, idx) => {
             const fmtMatch = xf.match(/numFmtId="(\d+)"/);
-            const fmtId = fmtMatch ? parseInt(fmtMatch[1]) : 0;
+            const fmtId = fmtMatch ? parseInt(fmtMatch[1], 10) : 0;
             // Excel内置日期格式ID: 14-22, 27-36, 45-47, 50-58
             if ((fmtId >= 14 && fmtId <= 22) || (fmtId >= 27 && fmtId <= 36) ||
                 (fmtId >= 45 && fmtId <= 47) || (fmtId >= 50 && fmtId <= 58)) {
                 dateStyles.add(idx);
+                return;
             }
+            if (customFmt[fmtId] !== undefined && isDateCode(customFmt[fmtId])) dateStyles.add(idx);
         });
         return dateStyles;
     },

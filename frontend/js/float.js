@@ -368,16 +368,9 @@ const FloatPage = {
         this.distChart.update('none');
     },
 
-    // 浮精影响值（唯一口径）：图上与表上必须同源。
-    // 重介灰分按该点时刻动态取（App.getAshByTime），超窗才回退默认；
-    // 之前表格/详情用的是导入时按写死 8.50 存下的 d.influence_value，与图上的实时值不同源，
-    // 重介灰分默认口径改为「502在线/7.9」后两者差距进一步放大，故统一到本函数。
+    // 浮精影响值：口径统一在 App.influenceOfFloat（图表/表格/详情/存量重算同一份公式）。
     _influenceOf(d, heavyAmt) {
-        const amt = (heavyAmt == null) ? 250 : heavyAmt;
-        const hAsh = App.getAshByTime(d.timestamp) ?? 8.50;
-        const base = App.calcTotalAsh(hAsh, amt, 0, 0, 0, 0);
-        const withF = App.calcTotalAsh(hAsh, amt, d.ash_content, d.coal_amount, 0, 0);
-        return +(withF - base).toFixed(3);
+        return App.influenceOfFloat(d);
     },
 
     renderTable() {

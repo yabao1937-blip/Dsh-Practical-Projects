@@ -23,7 +23,7 @@ def test_extract_date_string():
     assert extract_date("6.16") == {"m": 6, "d": 16}
     assert extract_date("6.3") == {"m": 6, "d": 30}   # 个位天数省略尾零
     assert extract_date("7.4") == {"m": 7, "d": 4}
-    assert extract_date("2026-06-16") == {"m": 6, "d": 16}
+    assert extract_date("2026-06-16") == {"y": 2026, "m": 6, "d": 16}   # 年份由单元格提供，不再被 DEFAULT_YEAR 顶掉
     assert extract_date("6/16") == {"m": 6, "d": 16}
 
 
@@ -193,8 +193,8 @@ def test_excel_serial_out_of_range_returns_none():
     故返回 None（该行回退原始文本）。Excel 真实日期序列在 1~60000 之间，不受影响。
     """
     assert extract_date(9999999) is None
-    assert extract_date(45292) == {"m": 1, "d": 1}       # 2024-01-01（正常序列，与 JS 一致）
-    assert extract_date(25569 + 19723) == {"m": 1, "d": 1}
+    assert extract_date(45292) == {"y": 2024, "m": 1, "d": 1}   # 2024-01-01（正常序列，与 JS 一致）
+    assert extract_date(25569 + 19723) == {"y": 2024, "m": 1, "d": 1}
 
 
 def test_parse_coarse_factors_malformed_date_no_crash():
@@ -235,6 +235,27 @@ GOLDEN_ROWS = [
     ["8.23", 10, "11:00:00", "6303\n3309", 38.22, 700, 1, 0, 1, 0, "停", "停", "？", 26.0, 60],
 ]
 
+# 年份 fixture：12月 → 次年 1月（跨年），末行用自带年份的 ISO 写法验证「单元格年份优先」。
+# 必须与 backend/scripts/dump_import_js.js 的 YEAR_ROWS 逐字一致。
+YEAR_ROWS = [
+    ["粗精煤泥的灰分影响因素"],
+    ["日期", "序号", "时间", "入洗工作面", "原煤灰分（%）", "小时带煤量（t/h）",
+     "开启的系统", None, None, None, "脱粉", None, "315灰分（%）", "315全水分（%）", "精磁尾液位（%）"],
+    [None, None, None, None, None, None, "A", "B", "401", "402", "473", "474"],
+    ["12.30", 1, "08:00:00", "3309", 31.8, 900, 1, 1, 0, 1, "开", "开", 12.0, 25.0, 55],
+    ["1.1", 2, "09:00:00", "3309", 31.8, 900, 1, 1, 0, 1, "开", "开", 12.1, 25.0, 55],
+    ["1.2", 3, "10:00:00", "3309", 31.8, 900, 1, 1, 0, 1, "开", "开", 12.2, 25.0, 55],
+    ["2027-03-05", 4, "11:00:00", "3309", 31.8, 900, 1, 1, 0, 1, "开", "开", 12.3, 25.0, 55],
+]
+
+# 坏表头 fixture：既无「原煤灰分」也无「液位」→ 两侧都应报同一条错误、零记录。
+# 必须与 backend/scripts/dump_import_js.js 的 BAD_HEADER_ROWS 逐字一致。
+BAD_HEADER_ROWS = [
+    ["某某表"],
+    ["日期", "灰分", "煤量"],
+    ["6.16", 12.5, 900],
+]
+
 
 def test_golden_fixture_dates():
     """golden fixture 自身的关键断言：把日期语义钉死，避免两侧一起改错还"对拍通过"。"""
@@ -252,8 +273,23 @@ def test_golden_fixture_dates():
     ]
 
 
+def _diff_records(py_records, js_records, tag):
+    assert len(py_records) == len(js_records), (
+        f"{tag} 记录数不一致: py={len(py_records)} js={len(js_records)}")
+    for i, (p, j) in enumerate(zip(py_records, js_records)):
+        for k in sorted(set(p) | set(j)):
+            pv, jv = p.get(k, "<missing>"), j.get(k, "<missing>")
+            if isinstance(pv, (int, float)) and isinstance(jv, (int, float)) and not isinstance(pv, bool):
+                assert abs(pv - jv) < 1e-9, f"{tag} 记录[{i}].{k}: py={pv} js={jv}"
+            else:
+                assert pv == jv, f"{tag} 记录[{i}].{k}: py={pv!r} js={jv!r}"
+
+
 def test_import_golden_vs_js():
-    """全量逐字段 diff：后端 parse_coarse_factors 与前端 parseCoarseFactors 在同一 fixture 上一致。
+    """全量逐字段 diff：后端 parse_coarse_factors 与前端 parseCoarseFactors 一致。
+
+    覆盖三组 fixture：主 fixture（日期语义）、年份 fixture（跨年+单元格年份优先）、
+    坏表头 fixture（错误结构对齐）。errors 现在两侧都是 {row,col,msg}，故逐条对拍。
 
     golden(import_js.json) 由 scripts/dump_import_js.js 生成（需 Edge）；
     文件缺失时跳过，保证无浏览器环境下 CI 仍可运行。
@@ -262,17 +298,40 @@ def test_import_golden_vs_js():
     if not js_path.exists():
         return
     js = json.loads(js_path.read_text(encoding="utf-8"))
-    py = parse_coarse_factors(GOLDEN_ROWS)
 
-    assert len(py["records"]) == len(js["records"]), (
-        f"记录数不一致: py={len(py['records'])} js={len(js['records'])}")
-    assert len(py["errors"]) == len(js["errors"]), (
-        f"错误行数不一致: py={len(py['errors'])} js={len(js['errors'])}")
+    main = parse_coarse_factors(GOLDEN_ROWS)
+    _diff_records(main["records"], js["records"], "主fixture")
+    assert main["errors"] == js["errors"], f"主fixture errors: py={main['errors']} js={js['errors']}"
 
-    for i, (p, j) in enumerate(zip(py["records"], js["records"])):
-        for k in sorted(set(p) | set(j)):
-            pv, jv = p.get(k, "<missing>"), j.get(k, "<missing>")
-            if isinstance(pv, (int, float)) and isinstance(jv, (int, float)) and not isinstance(pv, bool):
-                assert abs(pv - jv) < 1e-9, f"记录[{i}].{k}: py={pv} js={jv}"
-            else:
-                assert pv == jv, f"记录[{i}].{k}: py={pv!r} js={jv!r}"
+    year = parse_coarse_factors(YEAR_ROWS)
+    _diff_records(year["records"], js["yearRecords"], "年份fixture")
+    assert year["errors"] == js["yearErrors"], f"年份fixture errors: py={year['errors']} js={js['yearErrors']}"
+
+    bad = parse_coarse_factors(BAD_HEADER_ROWS)
+    _diff_records(bad["records"], js["badHeaderRecords"], "坏表头fixture")
+    assert bad["errors"] == js["badHeaderErrors"], (
+        f"坏表头 errors: py={bad['errors']} js={js['badHeaderErrors']}")
+
+
+def test_golden_year_crossing():
+    """跨年：12.30 → 1.1 应为次年；单元格自带年份优先于上一行年份。
+
+    旧实现年份写死 DEFAULT_YEAR → 这三行都会落在 2026 年，1月的数据被排到 12月之前。
+    """
+    ts = [r["timestamp"] for r in parse_coarse_factors(YEAR_ROWS)["records"]]
+    assert ts == [
+        "2026-12-30 08:00:00",
+        "2027-01-01 09:00:00",     # 上一行是 12 月且本行月份变小 → 年份 +1
+        "2027-01-02 10:00:00",     # 沿用上一行年份
+        "2027-03-05 11:00:00",     # ISO 写法自带年份，优先生效
+    ]
+
+
+def test_golden_bad_header_error_shape():
+    """表头识别失败：零记录 + 一条 {row,col,msg} 错误（此前后端只给裸字符串）。"""
+    r = parse_coarse_factors(BAD_HEADER_ROWS)
+    assert r["records"] == []
+    assert len(r["errors"]) == 1
+    err = r["errors"][0]
+    assert isinstance(err, dict) and set(err) == {"row", "col", "msg"}
+    assert "未识别到多因素表头" in err["msg"]

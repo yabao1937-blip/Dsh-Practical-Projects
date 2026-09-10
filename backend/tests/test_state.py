@@ -47,6 +47,38 @@ def test_state_stale_guard():
     client.put("/api/v1/state?force=true", json=SEED)
 
 
+def test_stale_guard_per_category_totals_equal():
+    """守卫按类别细分：总数不变但某一类回退，也必须拒绝。
+
+    构造：ash_density 少 1 条、coarse 多 1 条 → 总数相同。
+    只比总数的旧规则会放行，从而静默洗掉服务器侧的灰分密度记录。
+    """
+    client.put("/api/v1/state?force=true", json=SEED)
+    st = json.loads(json.dumps(SEED))
+    st["coarseCoal"] = st["coarseCoal"] + [dict(st["coarseCoal"][0], timestamp="2026-07-15 09:00:00")]
+    st["calcLogs"] = st["calcLogs"][:-1]          # ash_density 少一条
+    j = client.put("/api/v1/state", json=st).json()
+    assert j["ok"] is False and j.get("stale") is True
+    assert "ash_density" in j["error"]             # 错误里点名是哪一类回退
+    assert j["regressed"]["ash_density"][0] < j["regressed"]["ash_density"][1]
+    # 现库未被改动
+    got = client.get("/api/v1/state").json()
+    assert len(got["calcLogs"]) == 124
+    client.put("/api/v1/state?force=true", json=SEED)
+
+
+def test_stale_guard_allows_log_shrink():
+    """守卫不含日志类数据：前端「清空补录历史」会合法地让 manualEntries 变少，不得被拒。"""
+    client.put("/api/v1/state?force=true", json=SEED)
+    assert len(SEED.get("manualEntries") or []) > 0
+    st = json.loads(json.dumps(SEED))
+    st["manualEntries"] = []                      # 相当于 CollectPage.clearHistory()
+    j = client.put("/api/v1/state", json=st).json()
+    assert j["ok"] is True, j
+    assert client.get("/api/v1/state").json().get("manualEntries", []) == []
+    client.put("/api/v1/state?force=true", json=SEED)
+
+
 def test_decision_log_roundtrip():
     """密度决策日志(Stage 0)经 auto_state 持久化:PUT 后 GET 应原样返回。"""
     st = json.loads(json.dumps(SEED))

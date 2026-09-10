@@ -1,13 +1,20 @@
 """三表 Excel 导入解析（逐值对齐前端 import.js 的 normalizeTs / parseCoarseFactors）。
 
 关键：M.DD 手写日期语义补偿（个位天数省略尾零：6.3=6月30日、7.4=7月4日、6.1=6月1日）。
+
+年份：手写表无年份按 DEFAULT_YEAR；单元格自带年份（ISO 写法 / Excel 真实日期序列）优先；
+解析出的月日早于上一行时年份 +1（跨年）。与前端同名函数逐值一致。
 """
 import math
 import re
 from datetime import datetime, timedelta
 
-# 手写表无年份，统一按 2026（与前端 import.js 一致；接入跨年数据时需调整）
+# 手写表无年份，统一按 2026（与前端 import.js 的 DEFAULT_YEAR 一致；跨年由 resolve_ymd 递推）
 DEFAULT_YEAR = 2026
+
+# 表头识别失败的错误文案：必须与前端 import.js 的同名字符串逐字一致，
+# 否则导入跨语言 golden 无法逐条对拍 errors（此前后端是裸字符串、前端是 {row,col,msg} 对象）
+UNRECOGNIZED_HEADER_MSG = "未识别到多因素表头（需含“原煤灰分/315灰分/精磁尾液位”）"
 
 
 def _pad(n) -> str:
@@ -44,7 +51,9 @@ def _excel_serial_to_date(serial: float) -> dict | None:
         # Excel 真实日期序列在 1~60000 之间，出现这种数字说明该单元格不是日期；
         # 旧实现会抛 OverflowError 冒泡成 500，这里返回 None（该行回退原始文本）。
         return None
-    return {"m": dt.month, "d": dt.day}
+    # 带上年份：Excel 单元格里若写了真实日期（如 2027-01-05），年份必须保留，
+    # 否则会被 DEFAULT_YEAR 顶掉成 2026-01-05
+    return {"y": dt.year, "m": dt.month, "d": dt.day}
 
 
 def extract_date(dc) -> dict | None:
@@ -64,7 +73,8 @@ def extract_date(dc) -> dict | None:
     s = str(dc).strip()
     iso = re.match(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", s)
     if iso:
-        return {"m": int(iso.group(2)), "d": int(iso.group(3))}
+        # 保留单元格里的年份（旧实现只取月日，ISO 写法里的年份被无声丢弃）
+        return {"y": int(iso.group(1)), "m": int(iso.group(2)), "d": int(iso.group(3))}
     dot = re.match(r"^(\d{1,2})\.(\d{1,2})$", s)
     if dot:
         m = int(dot.group(1))
@@ -108,8 +118,19 @@ def _ambiguous_frac(dc):
     return None
 
 
-def extract_date_seq(dc, prev: dict | None = None) -> dict | None:
+def _prev_md(prev):
+    """上一行日期归一成 (月, 日)：兼容 (y,m,d) 元组与 {"y","m","d"} 字典两种形式。"""
+    if prev is None:
+        return None
+    if isinstance(prev, (tuple, list)):
+        return (prev[-2], prev[-1])
+    return (prev["m"], prev["d"])
+
+
+def extract_date_seq(dc, prev=None) -> dict | None:
     """带序列上下文的日期解析（与前端 import.js extractDateSeq 一致）。
+
+    prev 可为 (y,m,d) 元组或 {"m","d"} 字典；只用到月日。
 
     背景：同一手写表中「6.3」跟在 6.29 后=6月30日,而「7.1~7.9」「9.1~9.3」
     就是 1~9 日本身——旧 fixDay 一律按"省略尾零"把 7.2/7.3/9.2/9.3 解析成
@@ -125,17 +146,18 @@ def extract_date_seq(dc, prev: dict | None = None) -> dict | None:
     legacy = extract_date(dc)
     if legacy is None:
         return None
+    pmd = _prev_md(prev)
     amb = _ambiguous_frac(dc)
-    if amb is None or prev is None:
+    if amb is None or pmd is None:
         return legacy
     m, f = amb
     cands = sorted({f, f * 10})
     for d in cands:
-        if 1 <= d <= 31 and (m, d) >= (prev["m"], prev["d"]):
+        if 1 <= d <= 31 and (m, d) >= pmd:
             return {"m": m, "d": d}
     if m + 1 <= 12:
         for d in cands:
-            if 1 <= d <= 31 and (m + 1, d) >= (prev["m"], prev["d"]):
+            if 1 <= d <= 31 and (m + 1, d) >= pmd:
                 return {"m": m + 1, "d": d}
     return legacy
 
@@ -159,10 +181,33 @@ def extract_time(tc) -> str:
     return "00:00:00"
 
 
-def parse_ts(dc, tc, prev: dict | None = None) -> str:
+def resolve_ymd(dc, prev=None) -> tuple | None:
+    """把日期单元格解析成 (年, 月, 日)，与前端 import.js resolveYmd 一致。
+
+    年份规则（旧实现一律写死 DEFAULT_YEAR，跨年数据会整批错一年）：
+    - 单元格自带年份（ISO 写法 / Excel 真实日期序列）→ 用它；
+    - 否则沿用上一行的年份，再退回 DEFAULT_YEAR；
+    - **仅当上一行是 12 月、本行月份小于 12** 时年份 +1（12.30 之后接 1.1 = 次年）。
+      刻意不采用「月份变小就跨年」的宽规则：手写表里月份偶尔写乱（7月里混一行 6.02）
+      很常见，宽规则会把这类乱序行整批抬到下一年，比时间戳略早更严重。
+    """
     md = extract_date_seq(dc, prev)
-    t = extract_time(tc)
-    return f"{DEFAULT_YEAR}-{_pad(md['m'])}-{_pad(md['d'])} {t}" if md else f"{str(dc or '').strip()} {t}"
+    if md is None:
+        return None
+    y = md.get("y") or (prev[0] if prev else None) or DEFAULT_YEAR
+    if prev is not None and md["m"] < prev[1] and prev[1] == 12:
+        y += 1
+    return (y, md["m"], md["d"])
+
+
+def fmt_ts(ymd, tc) -> str:
+    """(年,月,日) + 时间单元格 → "YYYY-MM-DD HH:MM:SS"。"""
+    return f"{ymd[0]}-{_pad(ymd[1])}-{_pad(ymd[2])} {extract_time(tc)}"
+
+
+def parse_ts(dc, tc, prev=None) -> str:
+    ymd = resolve_ymd(dc, prev)
+    return fmt_ts(ymd, tc) if ymd else f"{str(dc or '').strip()} {extract_time(tc)}"
 
 
 def normalize_ts(raw) -> str | None:
@@ -241,7 +286,7 @@ def parse_coarse_factors(raw: list) -> dict:
                 h_idx = i
                 break
     if h_idx < 0:
-        errors.append("未识别到多因素表头")
+        errors.append({"row": 0, "col": 0, "msg": UNRECOGNIZED_HEADER_MSG})
         return {"records": records, "errors": errors}
 
     h_row = raw[h_idx]
@@ -284,15 +329,18 @@ def parse_coarse_factors(raw: list) -> dict:
         return row[c] if c is not None and c >= 0 and c < len(row) else None
 
     last_raw_ash = None
-    last_md = None   # 上一行解析出的 {m, d},供 extract_date_seq 消歧
+    last_ymd = None   # 上一行解析出的 (y, m, d)，供序列消歧与跨年判断
     data_rows = raw[h_idx + 2:]
     for row in data_rows:
         if not row or not any(c not in (None, "") for c in row):
             continue
         dc_raw = cell(row, date_col)
-        md = extract_date_seq(dc_raw, last_md)
-        if md is not None:
-            last_md = md
+        ymd = resolve_ymd(dc_raw, last_ymd)
+        if ymd is not None:
+            last_ymd = ymd
+        time_cell = cell(row, time_col)
+        # 日期解析失败时回退原始文本（不再造出 NaN 时间戳毒行）
+        ts = fmt_ts(ymd, time_cell) if ymd else f"{str(dc_raw or '').strip()} {extract_time(time_cell)}"
         ash = _to_num(cell(row, col["ash"]))
         if math.isnan(ash) or ash < 1 or ash > 40:
             continue
@@ -313,7 +361,7 @@ def parse_coarse_factors(raw: list) -> dict:
         face_raw = cell(row, col["face"]) if col["face"] >= 0 else None
         face = str("" if face_raw is None else face_raw).replace("&#10;", "\n").split("\n")[0].strip()
         rec = {
-            "timestamp": parse_ts(dc_raw, cell(row, time_col), last_md),
+            "timestamp": ts,
             "system": "合并",
             "ash_content": round(ash, 4),
             "coal_amount": 0.0 if math.isnan(coal) else coal,

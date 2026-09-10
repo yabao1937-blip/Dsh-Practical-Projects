@@ -45,6 +45,27 @@ const GOLDEN_ROWS = [
 const edge = spawn(EDGE, ['--headless=new', '--disable-gpu', '--no-first-run', '--allow-file-access-from-files', `--user-data-dir=${UD}`, `--remote-debugging-port=${PORT}`, '--window-size=1680,1200', URL], { stdio: 'ignore' });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+// 年份 fixture：12 月 → 次年 1 月（跨年），再跟一条自带年份的 ISO 写法。
+// 与 tests/test_importer.py 的 YEAR_ROWS 逐字一致。
+const YEAR_ROWS = [
+    ['粗精煤泥的灰分影响因素'],
+    ['日期', '序号', '时间', '入洗工作面', '原煤灰分（%）', '小时带煤量（t/h）',
+     '开启的系统', null, null, null, '脱粉', null, '315灰分（%）', '315全水分（%）', '精磁尾液位（%）'],
+    [null, null, null, null, null, null, 'A', 'B', '401', '402', '473', '474'],
+    ['12.30', 1, '08:00:00', '3309', 31.8, 900, 1, 1, 0, 1, '开', '开', 12.0, 25.0, 55],
+    ['1.1', 2, '09:00:00', '3309', 31.8, 900, 1, 1, 0, 1, '开', '开', 12.1, 25.0, 55],
+    ['1.2', 3, '10:00:00', '3309', 31.8, 900, 1, 1, 0, 1, '开', '开', 12.2, 25.0, 55],
+    ['2027-03-05', 4, '11:00:00', '3309', 31.8, 900, 1, 1, 0, 1, '开', '开', 12.3, 25.0, 55],
+];
+
+// 坏表头 fixture：既无「原煤灰分」也无「液位」→ 两侧都应报同一条错误、零记录。
+// 与 tests/test_importer.py 的 BAD_HEADER_ROWS 逐字一致。
+const BAD_HEADER_ROWS = [
+    ['某某表'],
+    ['日期', '灰分', '煤量'],
+    ['6.16', 12.5, 900],
+];
+
 (async () => {
     try {
         let page;
@@ -69,11 +90,21 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         };
         // 只取 records / errors：previewHeaders / previewRows 是纯 UI 结构，后端无对应物
         const dumped = JSON.parse(await evalJs(
-            `JSON.stringify((() => { const r = ImportPage.parseCoarseFactors(${JSON.stringify(GOLDEN_ROWS)});
-                return { records: r.records, errors: r.errors }; })())`));
+            `JSON.stringify((() => {
+                const run = rows => { const r = ImportPage.parseCoarseFactors(rows);
+                    return { records: r.records, errors: r.errors }; };
+                const main = run(${JSON.stringify(GOLDEN_ROWS)});
+                const year = run(${JSON.stringify(YEAR_ROWS)});
+                const bad = run(${JSON.stringify(BAD_HEADER_ROWS)});
+                return { records: main.records, errors: main.errors,
+                         yearRecords: year.records, yearErrors: year.errors,
+                         badHeaderRecords: bad.records, badHeaderErrors: bad.errors };
+            })())`));
         fs.writeFileSync(OUT, JSON.stringify(dumped, null, 1));
         console.log('records:', dumped.records.length, 'errors:', dumped.errors.length);
         dumped.records.forEach(r => console.log('  ', r.timestamp, '| ash', r.ash_content, '| face', JSON.stringify(r.mining_face)));
+        console.log('yearRecords:', dumped.yearRecords.map(r => r.timestamp).join(' , '));
+        console.log('badHeader: records=%d errors=%s', dumped.badHeaderRecords.length, JSON.stringify(dumped.badHeaderErrors));
         ws.close();
     } catch (e) {
         console.error('ERROR:', e.message);

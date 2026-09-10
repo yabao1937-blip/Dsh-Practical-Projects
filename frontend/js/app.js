@@ -142,6 +142,8 @@ const App = {
         this.autoPullIfStale();
         // 补记历史密度决策的灰分响应(页面打开时兜底一次)
         this._completeDensityDecisionResponses();
+        // 存量 influence_value 一次性重算（旧口径写死 8.50 → 当前口径），__fixes.influence 标记只跑一次
+        this.recomputeInfluenceValues();
 
         this.checkAlerts();
         // 只初始化首页（当前可见页）
@@ -162,19 +164,41 @@ const App = {
         this.refreshAllPages();
     },
 
-    // http 模式加载:服务器三表记录总数多于本地 → 自动拉取(异步,不阻塞首屏;
-    // 完成后刷新页面)。本地更多或相等时不动作(本地为最新)。
+    // 「测量记录向量」：与后端防回退守卫的判据同口径（migrate._record_vector）。
+    // 只数三类测量记录（coal_records 的三个 category），不含 manualEntries/importLogs/alerts
+    // —— 那些是用户可清空的日志类数据，纳入比较会把正常清空误判成"服务器更新"。
+    // store.calcLogs 同时装 ash_density 与其它补录，这里只取 ash_density 与后端对齐。
+    _measureVector(store) {
+        const s = store || this.store || {};
+        return {
+            coarse: (s.coarseCoal || []).length,
+            float: (s.floatCoal || []).length,
+            ash_density: (s.calcLogs || []).filter(l => l && l.calc_type === 'ash_density').length,
+        };
+    },
+
+    // http 模式加载：服务器在**每一类**测量记录上都不少于本地、且至少一类更多 → 自动拉取。
+    // 旧判据是「三数组总数多者胜」，与守卫（按记录数逐表比较）不同口径，可能出现
+    // 「自动拉取判定服务器更新并覆盖本地」而「镜像被守卫拒绝」的静默不一致；
+    // 且总数相等也可能已经回退（一类多、另一类少）。
+    // 任一类本地更多 → 不动本地（本地为最新）。
     async autoPullIfStale() {
         if (!window.location.protocol.startsWith('http') || !window.Api) return;
         try {
             const st = await window.Api.getState();
             if (!st || !Array.isArray(st.coarseCoal)) return;
-            const serverN = st.coarseCoal.length + (st.floatCoal || []).length + (st.calcLogs || []).length;
-            const localN = (this.store.coarseCoal || []).length + (this.store.floatCoal || []).length
-                         + (this.store.calcLogs || []).length;
-            if (serverN > localN) {
+            const sv = this._measureVector(st), lv = this._measureVector(this.store);
+            const keys = Object.keys(lv);
+            const serverWinsAll = keys.every(k => sv[k] >= lv[k]);
+            const serverMore = keys.some(k => sv[k] > lv[k]);
+            const localMore = keys.some(k => lv[k] > sv[k]);
+            if (serverWinsAll && serverMore) {
+                const fmt = v => keys.map(k => `${k} ${v[k]}`).join(' / ');
                 this._applyServerState(st);
-                this.showToast(`检测到服务器有较新数据（${serverN} 条 > 本地 ${localN} 条），已自动同步`, 'info');
+                this.showToast(`检测到服务器有较新数据（${fmt(sv)} > 本地 ${fmt(lv)}），已自动同步`, 'info');
+            } else if (serverMore && localMore) {
+                // 两侧各有更全的部分：不自动覆盖，避免把本地较新的那类记录洗掉
+                console.warn('服务器与本地各有更新的部分，已跳过自动同步', { server: sv, local: lv });
             }
         } catch (e) { /* 后端未启动时静默 */ }
     },
@@ -816,6 +840,48 @@ const App = {
         const total = heavyAmt + floatAmt + coarseAmt;
         if (total === 0) return 0;
         return (heavyAsh * heavyAmt + floatAsh * floatAmt + coarseAsh * coarseAmt) / total;
+    },
+
+    // 「影响值」唯一口径（浮精页图表/表格/详情 + 存量重算都走这里）。
+    // 重介灰分按该点时刻动态取（getAshByTime），超窗才回退 8.50；
+    // 旧实现有两套：导入时按写死的 8.50 存进 influence_value，渲染时又按时刻重算，
+    // 同一个数在表格与图表上不一致，重介灰分默认口径改成「502在线/7.9」后差距更大。
+    INFLUENCE_HEAVY_AMT: 250,
+    influenceOfFloat(rec) {
+        const amt = this.INFLUENCE_HEAVY_AMT;
+        const hAsh = this.getAshByTime(rec.timestamp) ?? 8.50;   // 超窗记缺失回退默认
+        const base = this.calcTotalAsh(hAsh, amt, 0, 0, 0, 0);
+        const withF = this.calcTotalAsh(hAsh, amt, rec.ash_content, rec.coal_amount, 0, 0);
+        return +(withF - base).toFixed(3);
+    },
+    // 粗精煤泥记录的影响值：同一基准下把粗精煤泥作为第三组分计入
+    influenceOfCoarse(rec) {
+        const amt = this.INFLUENCE_HEAVY_AMT;
+        const hAsh = this.getAshByTime(rec.timestamp) ?? 8.50;
+        const base = this.calcTotalAsh(hAsh, amt, 0, 0, 0, 0);
+        const withC = this.calcTotalAsh(hAsh, amt, 0, 0, rec.ash_content, rec.coal_amount);
+        return +(withC - base).toFixed(3);
+    },
+
+    // 一次性迁移：把存量 influence_value 从旧口径（写死 8.50）重算到当前口径。
+    // 显示层已改为实时重算、不再读它，但该字段仍随整库镜像对外提供，留着旧值会持续误导下游。
+    recomputeInfluenceValues() {
+        if (this.store.__fixes && this.store.__fixes.influence) return 0;   // 已执行过
+        let n = 0;
+        (this.store.floatCoal || []).forEach(r => {
+            if (typeof r.ash_content !== 'number' || typeof r.coal_amount !== 'number') return;
+            const v = this.influenceOfFloat(r);
+            if (r.influence_value !== v) { r.influence_value = v; n++; }
+        });
+        (this.store.coarseCoal || []).forEach(r => {
+            if (typeof r.ash_content !== 'number' || typeof r.coal_amount !== 'number') return;
+            const v = this.influenceOfCoarse(r);
+            if (r.influence_value !== v) { r.influence_value = v; n++; }
+        });
+        this.store.__fixes = Object.assign({}, this.store.__fixes, { influence: 1 });
+        this.saveStore();
+        if (n) console.info(`[一次性修复] 重算 influence_value（旧口径 8.50 → 当前口径）${n} 条`);
+        return n;
     },
 
     // 根据时间动态查找重介灰分（从 calcLogs 中查找最近的 ash_density 记录）
@@ -1577,6 +1643,51 @@ const App = {
     _decisionMs(e) {
         const t = new Date(String(e && e.ts || '').replace(' ', 'T')).getTime();
         return isFinite(t) ? t : null;
+    },
+
+    // 决策日志导出（Excel）：每行一条决策 + 其响应，直接作为 K(工况) 标定的输入表。
+    // 不做导出的话日志只能通过 GET /api/v1/state 看 JSON，现场拿不到、进不了标定流程。
+    exportDensityDecisionLog() {
+        const log = this.store.densityDecisionLog || [];
+        if (!log.length) { this.showToast('暂无密度决策记录（真实调整密度后才会生成）', 'warning'); return; }
+        const SRC = { heavySamples: '采样记录', heavyAshInput: '在线仪表手动录入' };
+        const head = ['决策时间', '触发', '方案', '目标灰分', '容差',
+                      'ρ旧', 'ρ新', 'Δρ建议', 'ΔA等效', 'K', 'K来源', '重介灰分', '总灰分',
+                      '带煤量', '原煤灰分', '脱粉473', '脱粉474', '系统A', '系统B', '系统401', '系统402',
+                      '工作面', '精磁尾液位',
+                      '响应状态', '响应时间', '滞后(分)', '响应来源', 'ρ实测', '重介灰分实测', 'Δρ实测', 'ΔA实测'];
+        const rows = log.map(e => {
+            const c = e.ctx || {};
+            const r = e.response;
+            const state = !r ? '待补记(未等到人工化验)'
+                        : r.invalidated ? `作废(${r.reason || ''})` : '已闭环';
+            return [
+                e.ts, e.trigger, e.scheme === 'heavy' ? '重介版' : '总灰分版', e.target, e.tol,
+                e.rhoCur, e.rhoNew, e.deltaRho, e.deltaA, e.kUsed, e.kSource, e.heavyAsh, e.totalAsh,
+                c.coalAmount ?? '', c.rawAsh ?? '', c.desl473 ?? '', c.desl474 ?? '',
+                c.sysA ?? '', c.sysB ?? '', c.sys401 ?? '', c.sys402 ?? '', c.miningFace ?? '', c.levelTail ?? '',
+                state, r ? (r.ts || '') : '', r ? (r.lagMin ?? '') : '', r ? (SRC[r.source] || r.source || '') : '',
+                r ? (r.rhoNow ?? '') : '', r ? (r.heavyAshNow ?? '') : '',
+                r ? (r.dRhoActual ?? '') : '', r ? (r.dAActual ?? '') : '',
+            ];
+        });
+        const ws = XLSX.utils.aoa_to_sheet([head, ...rows]);
+        ws['!cols'] = head.map(h => ({ wch: Math.max(10, String(h).length * 2) }));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, '密度决策日志');
+        // 附一张口径说明，避免拿到表的人误读 invalidated 行
+        const notes = [
+            ['字段', '说明'],
+            ['触发', 'retarget=系统按目标灰分重定密度；density_set=操作员手动设定密度'],
+            ['Δρ建议 / ΔA等效', '决策当时算出的建议修正量与等效总灰分偏差'],
+            ['K / K来源', 'K来源=default 表示数据不可辨识（闭环斜率非正）而回退经验值 0.075'],
+            ['响应状态', '待补记=决策后尚未出现人工化验；作废=窗口内又发生了新的密度决策，累积量无法归属'],
+            ['响应来源', '只取人工化验（采样记录 / 在线仪表手动录入）；不用在线仪表自动值——那是被控量，闭环下 ΔA≈0'],
+            ['滞后(分)', '从决策到取样化验的分钟数，用于判断过程是否已到位'],
+        ];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(notes), '口径说明');
+        XLSX.writeFile(wb, `密度决策日志_${rows.length}条.xlsx`);
+        this.showToast(`密度决策日志已导出（${rows.length} 条）`, 'success');
     },
 
     // 决策之后的第一条「人工化验」重介灰分采样(用于 K 标定的响应量)。
