@@ -2,6 +2,11 @@
 
 时间戳用字符串 "YYYY-MM-DD HH:MM:SS"，字符串序 == 时间序（中国无夏令时，
 与前端 new Date().getTime() 的 UTC 整点切桶 + 本地显示等价）。
+
+行存在规则（2026-09 用户确认：三表齐全才成行）：某小时的 粗精煤泥/浮精/灰分密度
+各自最近一条记录距该小时结束 ≤ FRESH_SECONDS(24h) 才生成该行，否则跳过——
+三表时间窗不重叠的时段（如种子数据的 6-7月只有表1）不再用陈旧续传凑行。
+其余列（皮带秤/粗精煤泥量等三表无数据源的常量）仍用默认值。
 """
 import math
 from datetime import datetime, timedelta
@@ -20,6 +25,14 @@ SCALE_501 = 268.5
 SCALE_502 = 235.2
 TOTAL_AMT = round(SCALE_501 + SCALE_502, 1)  # 503.7
 DEF = {"ash501": 8.52, "ash502": 10.68, "density": 1.450, "level": 55, "floatAsh": 9.85}
+FRESH_SECONDS = 24 * 3600   # 三表续传窗口：超过视为该表在本小时无数据（与前端 FRESH_MS 一致）
+
+
+def _epoch(ts: str) -> float:
+    try:
+        return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").timestamp()
+    except (ValueError, TypeError):
+        return float("-inf")
 
 
 def _hour_of(ts: str) -> str:
@@ -89,6 +102,7 @@ def build_hourly_brief(store: dict) -> dict:
 
     i_coarse = i_float = i_ad = 0
     cur_coarse = cur_float = None
+    cur_coarse_e = cur_float_e = cur_ad_e = float("-inf")
     prev_coarse = None
     est_coarse = None
     prev_forecast = None
@@ -102,11 +116,14 @@ def build_hourly_brief(store: dict) -> dict:
     rows = []
     for hh in hours:
         h_end = _next_hour(hh)
+        h_end_e = datetime.strptime(h_end, "%Y-%m-%d %H:%M").timestamp()
         while i_coarse < len(coarse_recs) and coarse_recs[i_coarse]["timestamp"] < h_end:
             cur_coarse = coarse_recs[i_coarse]
+            cur_coarse_e = _epoch(cur_coarse["timestamp"])
             i_coarse += 1
         while i_float < len(float_recs) and float_recs[i_float]["timestamp"] < h_end:
             cur_float = float_recs[i_float]
+            cur_float_e = _epoch(cur_float["timestamp"])
             i_float += 1
         density_before = cur_density
         while i_ad < len(ad_recs) and ad_recs[i_ad]["ts"] < h_end:
@@ -117,7 +134,16 @@ def build_hourly_brief(store: dict) -> dict:
                 cur_ash502 = a["ash"]
             if a["density"] is not None:
                 cur_density = a["density"]
+            cur_ad_e = _epoch(a["ts"])
             i_ad += 1
+
+        # 行存在规则(三表齐全才成行,24h 续传窗口):任一表超窗 → 跳过该小时。
+        # 跳过时递归状态(prev_forecast/prev_coarse/est_coarse)不推进,空窗后新采样自然重新锚定。
+        three_ok = (cur_coarse is not None and h_end_e - cur_coarse_e <= FRESH_SECONDS
+                    and cur_float is not None and h_end_e - cur_float_e <= FRESH_SECONDS
+                    and h_end_e - cur_ad_e <= FRESH_SECONDS)
+        if not three_ok:
+            continue
         density_measured = cur_density if (cur_density is not None and cur_density != density_before) else None
 
         level = _num(cur_coarse.get("level")) if cur_coarse else None
@@ -187,5 +213,6 @@ def build_hourly_brief(store: dict) -> dict:
         prev_forecast = forecast
         prev_coarse = cur_coarse
 
-    brief_rows = [r for r in rows if r[12] != "" and r[14] != ""]
-    return {"headers": BRIEF_HEADERS, "rows": brief_rows}
+    # 行存在性由"三表齐全(24h内)"规则决定,不再事后过滤;数据对齐但公式缺项的行
+    # 保留(数据列有意义,建议密度列留空)
+    return {"headers": BRIEF_HEADERS, "rows": rows}

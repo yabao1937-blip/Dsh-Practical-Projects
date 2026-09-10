@@ -1374,12 +1374,14 @@ const App = {
         const hours = [];
         for (let h = hMin; h <= hMax; h++) hours.push(h);
 
-        // 前向填充游标（每表独立）
+        // 前向填充游标(每表独立);各表当前记录的时间戳用于 24h 新鲜度判定
+        const FRESH_MS = 24 * 3600000;   // 三表续传窗口:超过视为该表在本小时无数据
         let iCoarse = 0, iFloat = 0, iAd = 0;
         let curCoarse = null, curFloat = null;
-        let prevCoarse = null;     // 上一小时桶的 表1 记录（判断是否新采样）
+        let curCoarseT = -Infinity, curFloatT = -Infinity, curAdT = -Infinity;
+        let prevCoarse = null;     // 上一成行的 表1 记录（判断是否新采样）
         let estCoarse = null;      // 递归软测量值（粗精煤泥灰分预测值）
-        let prevForecast = null;   // 上一小时的模型原始预测（用于增量）
+        let prevForecast = null;   // 上一成行的模型原始预测（用于增量）
         let curAsh501 = null, curAsh502 = null, curDensity = null;
 
         const pad = n => String(n).padStart(2, '0');
@@ -1389,16 +1391,27 @@ const App = {
         const rows = [];
         for (const h of hours) {
             const hEnd = (h + 1) * 3600000;
-            while (iCoarse < coarseRecs.length && coarseRecs[iCoarse].t < hEnd) { curCoarse = coarseRecs[iCoarse].r; iCoarse++; }
-            while (iFloat < floatRecs.length && floatRecs[iFloat].t < hEnd) { curFloat = floatRecs[iFloat].r; iFloat++; }
+            while (iCoarse < coarseRecs.length && coarseRecs[iCoarse].t < hEnd) { curCoarse = coarseRecs[iCoarse].r; curCoarseT = coarseRecs[iCoarse].t; iCoarse++; }
+            while (iFloat < floatRecs.length && floatRecs[iFloat].t < hEnd) { curFloat = floatRecs[iFloat].r; curFloatT = floatRecs[iFloat].t; iFloat++; }
             const densityBefore = curDensity;
             while (iAd < adRecs.length && adRecs[iAd].t < hEnd) {
                 const a = adRecs[iAd];
                 if (a.belt === '501' && a.ash != null) curAsh501 = a.ash;
                 if (a.belt === '502' && a.ash != null) curAsh502 = a.ash;
                 if (a.density != null) curDensity = a.density;
+                curAdT = a.t;
                 iAd++;
             }
+
+            // 行存在规则(2026-09 用户确认:三表齐全才成行):粗精煤泥/浮精/灰分密度
+            // 各自最近一条记录距本小时结束 ≤ 24h 才生成该行,否则跳过——
+            // 三表时间窗不重叠的时段(如 6-7月只有表1)不再用陈旧续传凑行。
+            // 跳过时递归状态(prevForecast/prevCoarse/estCoarse)不推进,空窗后新采样自然重新锚定。
+            const threeOk = (curCoarse != null && hEnd - curCoarseT <= FRESH_MS
+                          && curFloat != null && hEnd - curFloatT <= FRESH_MS
+                          && hEnd - curAdT <= FRESH_MS);
+            if (!threeOk) continue;
+
             // 实测密度：仅本小时有表3新密度测量时有值（稀疏），用于与建议密度对照
             const densityMeasured = (curDensity != null && curDensity !== densityBefore) ? curDensity : null;
 
@@ -1469,9 +1482,9 @@ const App = {
             prevCoarse = curCoarse;
         }
 
-        // 只保留能给出「建议密度」和「粗精煤泥灰分(预测)」的行；两者都无法给出的行不生成
-        const briefRows = rows.filter(r => r[12] !== '' && r[14] !== '');
-        return { headers: this.BRIEF_HEADERS, rows: briefRows };
+        // 行存在性由"三表齐全(24h内)"规则决定,不再事后过滤;数据对齐但公式缺项的行
+        // 保留(数据列有意义,建议密度列留空)
+        return { headers: this.BRIEF_HEADERS, rows };
     },
 
     // ============================================================

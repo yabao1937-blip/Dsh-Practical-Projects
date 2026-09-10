@@ -43,16 +43,18 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
             const measuredFilled = rows.filter(r => r[15] !== '').length;
             const firstMeasuredIdx = rows.findIndex(r => r[15] !== '');
             const firstMeasured = firstMeasuredIdx >= 0 ? rows[firstMeasuredIdx] : null;
-            const continuousOk = rows.length >= 2 && (() => {
-                const h0 = Math.floor(new Date(rows[0][0].replace(' ', 'T')).getTime() / 3600000);
-                const h1 = Math.floor(new Date(rows[rows.length - 1][0].replace(' ', 'T')).getTime() / 3600000);
-                return rows.length === (h1 - h0 + 1);
+            // 2026-09 行存在规则(三表齐全才成行)后,行允许时间缺口(如某表断档>24h的时段):
+            // 检查改为"时间严格递增且为整点",不再要求无缝连续
+            const monotonicOk = rows.length >= 2 && (() => {
+                const toH = s => Math.floor(new Date(s.replace(' ', 'T')).getTime() / 3600000);
+                for (let i = 1; i < rows.length; i++) if (toH(rows[i][0]) <= toH(rows[i - 1][0])) return false;
+                return true;
             })();
             return JSON.stringify({
                 n: rows.length, hLen: b.headers.length,
                 rowLenOk: rows.every(r => r.length === 16),
                 timeOk: rows.every(r => r[0].endsWith(':00')),
-                continuousOk,
+                monotonicOk,
                 h0: b.headers[0], hRho: b.headers[12], hDensity: b.headers[13], hModel: b.headers[14], hMeasured: b.headers[15],
                 coarseAmtUniq: uniq(3), scale501Uniq: uniq(1), scale502Uniq: uniq(2),
                 heavyUniq: uniq(4), totalAmtUniq: uniq(5),
@@ -66,7 +68,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         check('存在对齐行', info.n > 0, `n=${info.n}`);
         check('每行16列', info.rowLenOk, 'rowLenOk=' + info.rowLenOk);
         check('时间列整点(:00)', info.timeOk, 'timeOk=' + info.timeOk);
-        check('连续1h输出', info.continuousOk, `n=${info.n}, first=${info.first[0]}, last=${info.last[0]}`);
+        check('时间严格递增(规则允许缺口)', info.monotonicOk, `n=${info.n}, first=${info.first[0]}, last=${info.last[0]}`);
         check('首列=时间', info.h0 === '时间', info.h0);
         check('建议密度列', info.hRho === '建议密度(g/cm³)', info.hRho);
         check('实测密度列', info.hDensity === '实测密度(g/cm³)', info.hDensity);
