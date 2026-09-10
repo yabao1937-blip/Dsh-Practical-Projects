@@ -241,14 +241,26 @@ def apply(store: dict) -> dict:
         db.close()
 
 
-def replace(store: dict) -> dict:
+def replace(store: dict, force: bool = False) -> dict:
     """清空业务表后整体重写（PUT /state 整库快照用）。
 
     清表与写入在同一事务内：若写入失败回滚，清表也一并回滚，不会清库后丢数据。
+
+    防回退守卫（force=False 时）：入库三表记录数少于现库 → 拒绝写入。
+    双轨架构中旧 localStorage 的浏览器任何 saveStore 都会整库镜像,不加守卫会
+    把服务器侧导入/训练的新数据洗回旧状态。显式 force=true 用于清空/恢复备份
+    等有意回退场景。
     """
     p = _plan(store)
     db: Session = SessionLocal()
     try:
+        if not force:
+            incoming = len(p["coal_records"])
+            current = db.query(CoalRecord).count()
+            if current > 0 and incoming < current:
+                return {"ok": False, "stale": True,
+                        "error": f"stale_store: 入库记录 {incoming} < 现库 {current},拒绝整库回退"
+                                 f"(防旧浏览器覆盖服务器新数据;确需回退请 force=true)"}
         for t in (CoalRecord, CalcLog, CoarseModelHistory, RegressionModel, HeavySample,
                   ManualEntry, Alert, ImportLog, CoarseModel, Setting, AutoState):
             db.query(t).delete()

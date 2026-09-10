@@ -42,6 +42,9 @@
             </nav>
         </div>
         <div class="top-bar-right">
+            <button class="btn btn-sm" id="btn-pull-server" style="display:none;margin-right:10px"
+                    onclick="App.pullFromServer()"
+                    title="用服务器数据库内容覆盖本地浏览器数据（本地未同步到服务器的改动会丢失）">&#8681; 从服务器恢复数据</button>
             <div class="sys-status">
                 <span class="status-dot online"></span>
                 <span id="sys-time">--</span>
@@ -767,8 +770,8 @@
     <div class="toast-container" id="toast-container"></div>
 
     <script src="js/seed_data.js?v=9"></script>
-    <script src="js/api.js?v=1"></script>
-    <script src="js/app.js?v=65"></script>
+    <script src="js/api.js?v=2"></script>
+    <script src="js/app.js?v=67"></script>
     <script src="js/overview.js?v=38"></script>
     <script src="js/collect.js?v=22"></script>
     <script src="js/coarse.js?v=19"></script>

@@ -30,3 +30,17 @@ def test_state_feeds_dashboard():
     d = client.get("/api/v1/overview/dashboard").json()
     assert abs(d["totalAsh"] - 8.8956) < 1e-6
     assert abs(d["coarseAsh"] - 13.67) < 1e-6
+
+
+def test_state_stale_guard():
+    """防回退守卫:入库记录少于现库 → 拒绝;force=true 可越过。"""
+    small = {"coarseCoal": SEED["coarseCoal"][:10], "floatCoal": [], "calcLogs": []}
+    j = client.put("/api/v1/state", json=small).json()
+    assert j["ok"] is False and j.get("stale") is True
+    # 被拒绝后现库数据完好
+    assert len(client.get("/api/v1/state").json()["coarseCoal"]) == 113
+    # force 覆盖
+    assert client.put("/api/v1/state?force=true", json=small).json()["ok"] is True
+    assert len(client.get("/api/v1/state").json()["coarseCoal"]) == 10
+    # 恢复种子供后续用例
+    client.put("/api/v1/state?force=true", json=SEED)

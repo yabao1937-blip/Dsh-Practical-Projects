@@ -70,6 +70,8 @@ const App = {
         if (this.store.__merged !== 2) {
             this.applySeedStore();
         }
+        // —— 以下启动期默认值补齐/迁移仅写本地(saveStore(true)),不镜像到服务器:
+        //    旧浏览器/全新 profile 打开页面时,不得用本地旧数据覆盖服务器新数据 ——
         // 老数据无 amountInputs 时补默认（录入+输入）
         if (!this.store.amountInputs) {
             this.store.amountInputs = {
@@ -78,71 +80,131 @@ const App = {
                 coarseAmount: { mode: 'manual', manual: 40 },   // 粗精煤泥量 t/h
                 denseAmount:  { mode: 'calc',   manual: null }, // 重介精煤量 = 总 − 浮 − 粗
             };
-            this.saveStore();
+            this.saveStore(true);
         }
         // 老数据无 ashInputs 时补默认（任务三）
         if (!this.store.ashInputs) {
             this.store.ashInputs = { totalAsh: { mode: 'auto', manual: null } };
-            this.saveStore();
+            this.saveStore(true);
         }
         // 任务四：录入层字段补齐（手动>录入>默认）
         if (this.store.amountInputs && this.store.amountInputs.totalAmount && this.store.amountInputs.totalAmount.entry === undefined) {
             this.store.amountInputs.totalAmount.entry = null;
-            this.saveStore();
+            this.saveStore(true);
         }
         if (this.store.ashInputs && this.store.ashInputs.totalAsh && this.store.ashInputs.totalAsh.entry === undefined) {
             this.store.ashInputs.totalAsh.entry = null;
-            this.saveStore();
+            this.saveStore(true);
         }
         // 在线仪表可修改项补齐
-        if (!this.store.coarseAshInput) { this.store.coarseAshInput = { manual: null }; this.saveStore(); }
-        if (!this.store.heavyAshInput) { this.store.heavyAshInput = { manual: null }; this.saveStore(); }
-        if (this.store.ashTarget == null) { this.store.ashTarget = 8.50; this.saveStore(); }
-        if (!this.store.coarseTrainRange) { this.store.coarseTrainRange = 'jun_jul'; this.saveStore(); }
+        if (!this.store.coarseAshInput) { this.store.coarseAshInput = { manual: null }; this.saveStore(true); }
+        if (!this.store.heavyAshInput) { this.store.heavyAshInput = { manual: null }; this.saveStore(true); }
+        if (this.store.ashTarget == null) { this.store.ashTarget = 8.50; this.saveStore(true); }
+        if (!this.store.coarseTrainRange) { this.store.coarseTrainRange = 'jun_jul'; this.saveStore(true); }
         // 出厂烘焙模型无 range 字段时回填当前训练范围
         if (this.store.coarseModel && !this.store.coarseModel.range) {
             this.store.coarseModel.range = this.store.coarseTrainRange || 'jun_jul';
-            this.saveStore();
+            this.saveStore(true);
         }
         // 手动有效期机制状态补齐
-        if (!this.store.autoState) { this.store.autoState = {}; this.saveStore(); }
+        if (!this.store.autoState) { this.store.autoState = {}; this.saveStore(true); }
         // 采样记录与达标容差补齐
-        if (!this.store.heavySamples) { this.store.heavySamples = []; this.saveStore(); }
-        if (this.store.ashTargetTol == null) { this.store.ashTargetTol = 0.1; this.saveStore(); }
+        if (!this.store.heavySamples) { this.store.heavySamples = []; this.saveStore(true); }
+        if (this.store.ashTargetTol == null) { this.store.ashTargetTol = 0.1; this.saveStore(true); }
         // 旧默认0.3迁移为专家经验版默认0.1（专家调整表在0.15%~0.25%区间内）
-        if (this.store.ashTargetTol === 0.3) { this.store.ashTargetTol = 0.1; this.saveStore(); }
+        if (this.store.ashTargetTol === 0.3) { this.store.ashTargetTol = 0.1; this.saveStore(true); }
         // 密度计：纯手动录入（每次采样时录入实际密度计数值），系统只给"建议密度"展示，不自动写入密度计
-        if (this.store.densityAutoOn == null) { this.store.densityAutoOn = false; this.saveStore(); }
-        if (!this.store.guideScheme) { this.store.guideScheme = 'total'; this.saveStore(); }
+        if (this.store.densityAutoOn == null) { this.store.densityAutoOn = false; this.saveStore(true); }
+        if (!this.store.guideScheme) { this.store.guideScheme = 'total'; this.saveStore(true); }
         this._syncGuideSchemeBtn();
         // 总灰分修改开关：默认关=公式计算级别；关闭状态下清掉遗留的手动总灰分
-        if (this.store.totalAshManualOn == null) { this.store.totalAshManualOn = false; this.saveStore(); }
+        if (this.store.totalAshManualOn == null) { this.store.totalAshManualOn = false; this.saveStore(true); }
         if (!this.store.totalAshManualOn) this.setAshInput('totalAsh', { manual: null });
         this._syncTotalAshBtn();
-        if (!this.store.floatAshInput) { this.store.floatAshInput = { manual: null }; this.saveStore(); }
-        if (!this.store.coarseCalc) { this.store.coarseCalc = { screen315: null, waterUnder: null }; this.saveStore(); }
+        if (!this.store.floatAshInput) { this.store.floatAshInput = { manual: null }; this.saveStore(true); }
+        if (!this.store.coarseCalc) { this.store.coarseCalc = { screen315: null, waterUnder: null }; this.saveStore(true); }
         if (!this.store.instrumentInputs) {
             this.store.instrumentInputs = {
                 ash_501: { manual: null }, ash_502: { manual: null },
                 scale_501: { manual: null }, scale_502: { manual: null },
                 density: { manual: null }, level_tail: { manual: null },
             };
-            this.saveStore();
+            this.saveStore(true);
         }
         this.bindNav();        this.startClock();
+
+        // 「从服务器恢复数据」按钮:仅后端托管(http://)模式显示
+        const pullBtn = document.getElementById('btn-pull-server');
+        if (pullBtn && window.location.protocol.startsWith('http') && window.Api) {
+            pullBtn.style.display = '';
+        }
+        // http 模式:服务器数据更多时自动反向同步(旧浏览器自愈,防止镜像覆盖服务器新数据)
+        this.autoPullIfStale();
 
         this.checkAlerts();
         // 只初始化首页（当前可见页）
         this.initPage('page-overview');
     },
 
+    // 用服务器 state 覆盖本地数据集合(纯本地键保留),供手动/自动两条路径复用
+    _applyServerState(st) {
+        const localOnly = ['manualEntries', 'importLogs', 'alerts', 'regressionModels',
+                           'coarseModelHistory', 'heavySamples', 'rawSlime', '__merged'];
+        const keep = {};
+        localOnly.forEach(k => { if (this.store[k] !== undefined) keep[k] = this.store[k]; });
+        this.store = Object.assign({}, this.store, st, keep);
+        this.saveStore();
+        this._onExternalInput();
+        this.refreshAllPages();
+    },
+
+    // http 模式加载:服务器三表记录总数多于本地 → 自动拉取(异步,不阻塞首屏;
+    // 完成后刷新页面)。本地更多或相等时不动作(本地为最新)。
+    async autoPullIfStale() {
+        if (!window.location.protocol.startsWith('http') || !window.Api) return;
+        try {
+            const st = await window.Api.getState();
+            if (!st || !Array.isArray(st.coarseCoal)) return;
+            const serverN = st.coarseCoal.length + (st.floatCoal || []).length + (st.calcLogs || []).length;
+            const localN = (this.store.coarseCoal || []).length + (this.store.floatCoal || []).length
+                         + (this.store.calcLogs || []).length;
+            if (serverN > localN) {
+                this._applyServerState(st);
+                this.showToast(`检测到服务器有较新数据（${serverN} 条 > 本地 ${localN} 条），已自动同步`, 'info');
+            }
+        } catch (e) { /* 后端未启动时静默 */ }
+    },
+
+    // 从服务器整库恢复（仅 http:// 后端托管模式,手动入口）：
+    // 双轨架构中 localStorage 为主存储、saveStore 单向镜像 PUT /state；服务器侧产生的
+    // 新数据（自动化导入脚本、API 重训练）本地看不到，此入口提供反向同步。
+    async pullFromServer() {
+        if (!window.location.protocol.startsWith('http') || !window.Api) {
+            this.showToast('仅在后端托管(http://)模式下可用', 'warning');
+            return;
+        }
+        if (!window.confirm('将用服务器数据覆盖本地浏览器数据（本地未同步到服务器的改动会丢失），是否继续？')) return;
+        try {
+            const st = await window.Api.getState();
+            if (!st || !Array.isArray(st.coarseCoal)) throw new Error('服务器 state 结构异常');
+            this._applyServerState(st);
+            this.showToast(`已从服务器恢复：粗精煤泥 ${this.store.coarseCoal.length} 条 / 浮精 ${this.store.floatCoal.length} 条 / 灰分密度 ${(this.store.calcLogs || []).length} 条`, 'success');
+        } catch (e) {
+            console.warn('pullFromServer 失败:', e);
+            this.showToast('从服务器恢复失败: ' + e.message, 'error');
+        }
+    },
+
     // 持久化：保存到 localStorage（http 访问时额外镜像到后端 /state）
-    saveStore() {
+    // skipMirror=true 仅写本地：用于启动期默认值补齐/种子灌入——旧本地数据
+    // 不能借启动流程镜像覆盖服务器上的新数据（服务器侧导入/训练成果）。
+    saveStore(skipMirror) {
         try {
             localStorage.setItem('dmcs_store', JSON.stringify(this.store));
         } catch (e) {
             console.warn('localStorage 保存失败:', e);
         }
+        if (skipMirror) return;
         try {
             if (window.Api && window.location.protocol.startsWith('http')) {
                 window.Api.putState(this.store);
@@ -155,7 +217,7 @@ const App = {
         const seed = window.DMCS_SEED_STORE;
         if (seed) {
             this.store = JSON.parse(JSON.stringify(seed));
-            this.saveStore();
+            this.saveStore(true);   // 种子灌入不镜像:首次运行时服务器可能有真实数据
         }
     },
 

@@ -59,8 +59,10 @@ python -m venv .venv
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q          # 48 用例
+.\.venv\Scripts\python.exe -m pytest -q          # 57 用例（临时库隔离,不触真实数据）
 node scripts\dump_train_js.js                     # 重生成训练 oracle（需 Edge）
+node scripts\import_xlsx_via_ui.js [目录]         # 通过真实 UI 路径批量导入三表 xlsx（需后端+Edge）
+node scripts\verify_pull_from_server.js           # 双向同步/防回退端到端验证
 ```
 
 ## 架构：前后端分离（双轨过渡）
@@ -72,6 +74,11 @@ node scripts\dump_train_js.js                     # 重生成训练 oracle（需
 | 后端不可用 | 无影响 | 训练/镜像自动回退本地 |
 
 前端保持原生 JS；`js/api.js` 做双轨：file:// 仅 localStorage，http:// 额外把整库镜像到后端。
+
+**双向同步与防回退（2026-09）**：
+- 旧浏览器打开页面时若服务器记录数更多 → `autoPullIfStale` 自动反向同步；顶栏「从服务器恢复数据」为手动入口；
+- `PUT /state` 带防回退守卫：入库记录数少于现库 → 拒绝（旧 localStorage 镜像不能洗掉服务器侧导入/训练的新数据），`?force=true` 供清空/恢复备份等有意回退；
+- 启动期默认值补齐/种子灌入仅写本地，不镜像。
 
 ## 数据模型（11 张表）
 
