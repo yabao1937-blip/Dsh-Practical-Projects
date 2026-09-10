@@ -9,6 +9,13 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 OUT = r"D:\dense-medium-density-control-system\docs\密度阶跃实验-实施方案与记录表.xlsx"
+# 文件被 Excel 占用时回退 v2 文件名(锁定检测:Windows 下 os.access 不可靠,必须实写探测)
+try:
+    with open(OUT, "ab"):
+        pass
+except OSError:
+    OUT = OUT.replace(".xlsx", "_v2.xlsx")
+    print("注意: 原文件被占用(Excel 打开中), 输出到 v2")
 
 HEAD_FILL = PatternFill("solid", fgColor="2F5597")
 HEAD_FONT = Font(name="微软雅黑", size=11, bold=True, color="FFFFFF")
@@ -73,6 +80,10 @@ rows = [
     [6, "时长与人力",
      "标准方案 6 阶段 × 2h = 12h(一个班次);最少可行方案 4 阶段(见实验方案 Sheet)。"
      "每阶段需要:密度调节 1 次、密度计/502灰分仪每 15min 抄表(各 8 点)、315 灰分化验 1~2 次。"],
+    [7, "工况记录(2026-09 补充)",
+     "每轮实验必须登记工况标签(见「工况点登记表」):工作面/原煤灰分/带煤量/脱粉配置/系统组合/精磁尾液位"
+     "(煤泥代理)/磁铁矿补加与分流(介质状态)/315与502平行样偏差;条件允许时每轮做一次原煤浮沉(可选性)试验。"
+     "轮内保持稳定、轮间刻意反差——K 结果按工况标签归档,才能回答「K 是否随工况变化」并支撑分档(Stage 2)。"],
 ]
 for r in rows:
     ws.append(r)
@@ -136,11 +147,36 @@ for r in rows3:
 style_sheet(ws3, [13, 7, 18, 40, 30, 30])
 style_body(ws3, center_cols=(1, 2))
 
+# ================= Sheet3b 工况点登记表 =================
+ws3b = wb.create_sheet("工况点登记表")
+ws3b.append(["轮次", "日期/班次", "工况点定位", "工作面", "原煤灰分(%)", "带煤量均值(t/h)",
+             "脱粉配置(473/474)", "系统组合", "精磁尾液位均值(%)", "磁铁矿补加(kg/h)",
+             "分流量/喷水状态", "原煤浮沉试验(有/无)", "315与502平行样偏差(%)", "备注"])
+ws3b.append(["示例:第1轮", "2026-09-12 白班", "高煤量×高灰分", "3309", "44.1", "890",
+             "双开", "A+B+401", "55", "—", "常规", "有(λ曲线见化验台账)", "0.08", "参考示例,正式行自行填写"])
+for k in range(1, 5):
+    ws3b.append([f"第{k}轮", "", "", "", "", "", "", "", "", "", "", "", "", ""])
+style_sheet(ws3b, [10, 14, 15, 9, 12, 13, 14, 11, 14, 12, 14, 14, 15, 16])
+for row in ws3b.iter_rows(min_row=2):
+    for cell in row:
+        cell.font = BODY_FONT
+        cell.border = BORDER
+        cell.alignment = CENTER
+        if cell.row >= 3:
+            cell.fill = INPUT_FILL
+ws3b.cell(row=8, column=1, value="登记规则:①每轮实验一行,K 结果按轮次贴工况标签(见 K计算表);②工况点定位从 2×2 网格选:"
+         "煤量(<800/≥800 t/h)×原煤灰分(<40/≥40%),四轮覆盖四个象限;③轮内这些量必须稳定(见前置条件),"
+         "轮间刻意反差——K 的工况差异才有信息量;④精磁尾液位是煤泥/介质状态的现成代理;磁铁矿补加量、分流量、"
+         "喷水状态为介质系统操作量,每阶段在采样记录表备注中确认;⑤原煤浮沉试验可选但强烈推荐:"
+         "λ曲线在分选密度附近的斜率就是「分选密度→精煤灰分」这段增益的机理值。").font = \
+    Font(name="微软雅黑", size=9, italic=True, color="808080")
+
 # ================= Sheet4 采样记录表 =================
 ws4 = wb.create_sheet("采样记录表")
 ws4.append(["阶段", "日期时间", "密度设定值(g/cm³)", "密度计实测(g/cm³)",
             "502灰分仪(%)", "315化验灰分(%)", "带煤量(t/h)", "浮精灰分(%)",
-            "原煤灰分(%)", "操作员", "备注"])
+            "原煤灰分(%)", "精磁尾液位(%)", "脱粉473", "脱粉474", "工作面",
+            "操作员", "备注(扰动/介质操作)"])
 # 预填阶段模板:每阶段 8 个抄表行(15min间隔)+ 化验行由抄表行兼任(填315列)
 phases = [("P1 基准期", "ρ0"), ("P2 阶跃↑", "ρ0+0.01"), ("P3 回基线", "ρ0"),
           ("P4 阶跃↓", "ρ0−0.01"), ("P5 回基线", "ρ0"), ("P6 加测(可选)", "ρ0±0.02")]
@@ -150,22 +186,25 @@ for name, setpt in phases:
         ws4.cell(row=r, column=1, value=name)
         ws4.cell(row=r, column=3, value=setpt)
         r += 1
-style_sheet(ws4, [13, 17, 15, 15, 12, 13, 11, 11, 11, 9, 18])
+style_sheet(ws4, [13, 17, 15, 15, 12, 13, 11, 11, 11, 13, 9, 9, 10, 9, 20])
 for row in ws4.iter_rows(min_row=2):
     for cell in row:
         cell.font = BODY_FONT
         cell.border = BORDER
         cell.alignment = CENTER
-        if cell.column in (2, 4, 5, 6, 7, 8, 9, 10, 11):
+        if cell.column in (2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15):
             cell.fill = INPUT_FILL
 ws4.cell(row=r + 1, column=1, value="填写说明:①每行=一次抄表(建议15min间隔);②315化验有结果时填第6列,"
-         "该行其余列照常抄;③密度计实测填调节到位后的稳定读数;④备注记录异常(停机/倒系统/加药变动)。").font = \
+         "该行其余列照常抄;③密度计实测填调节到位后的稳定读数;④精磁尾液位=煤泥/介质状态代理,每行必抄;"
+         "⑤脱粉/工作面逐行确认(变更即备注);⑥备注记录扰动(停机/倒系统/加药/带煤量波动>±10%)与介质操作"
+         "(磁铁矿补加/分流/喷水)——有扰动该阶段数据作废。").font = \
     Font(name="微软雅黑", size=9, italic=True, color="808080")
 
 # ================= Sheet5 K计算表 =================
 ws5 = wb.create_sheet("K计算表")
 ws5.append(["项目", "说明", "数值/公式"])
 calc_rows = [
+    ["轮次/工况标签", "从「工况点登记表」抄:轮次+工况点定位+工作面(如 第1轮/高煤量×高灰分/3309)", ""],
     ["ρ0 基线密度", "P1 稳态密度计均值(g/cm³)", ""],
     ["A0 基线灰分", "P1 稳态 502 仪均值(%)", ""],
     ["", "", ""],
@@ -182,21 +221,21 @@ calc_rows = [
 for r in calc_rows:
     ws5.append(r)
 # 行号布局(显式常量,避免错位):
-#   输入区: B2=ρ0, B3=A0, B6..B13 = P2/P3/P4/P6 的 稳态密度/稳态灰分
-#   计算区: 第16行表头, 17..20 = 四步, 21=K均值, 22=标准差, 23=CV, 24=对比, 25=结论
-ROW_HEADER, ROW_STEPS, ROW_MEAN, ROW_STD, ROW_CV, ROW_CMP, ROW_CONC = 16, 17, 21, 22, 23, 24, 25
-ws5.cell(row=14, column=1, value="自动计算区")
-ws5.cell(row=14, column=2, value="公式自动计算,无需填写")
+#   输入区: B2=轮次标签, B3=ρ0, B4=A0, B7..B14 = P2/P3/P4/P6 的 稳态密度/稳态灰分
+#   计算区: 第17行表头, 18..21 = 四步, 22=K均值, 23=标准差, 24=CV, 25=对比, 26=结论
+ROW_HEADER, ROW_STEPS, ROW_MEAN, ROW_STD, ROW_CV, ROW_CMP, ROW_CONC = 17, 18, 22, 23, 24, 25, 26
+ws5.cell(row=16, column=1, value="自动计算区")
+ws5.cell(row=16, column=2, value="公式自动计算,无需填写")
 steps = [
-    ("P2 ↑", 6, 7), ("P3 ↓(回基线)", 8, 9), ("P4 ↓", 10, 11), ("P6(可选)", 12, 13),
+    ("P2 ↑", 7, 8), ("P3 ↓(回基线)", 9, 10), ("P4 ↓", 11, 12), ("P6(可选)", 13, 14),
 ]
 for i, (name, r_rho, r_ash) in enumerate(steps):
     rr = ROW_STEPS + i
     ws5.cell(row=rr, column=1, value=name)
-    ws5.cell(row=rr, column=2, value=f'=IF(B{r_rho}="","",B{r_rho}-$B$2)')
-    ws5.cell(row=rr, column=3, value=f'=IF(B{r_ash}="","",B{r_ash}-$B$3)')
-    ws5.cell(row=rr, column=4, value=f'=IF(OR(B{r_rho}="",B{r_ash}=""),"",(B{r_rho}-$B$2)/(B{r_ash}-$B$3))')
-    ws5.cell(row=rr, column=5, value=f'=IF(D{rr}="","",IF((B{r_rho}-$B$2)*(B{r_ash}-$B$3)>0,"同向(密度↑灰分↑)","反向!检查数据"))')
+    ws5.cell(row=rr, column=2, value=f'=IF(B{r_rho}="","",B{r_rho}-$B$3)')
+    ws5.cell(row=rr, column=3, value=f'=IF(B{r_ash}="","",B{r_ash}-$B$4)')
+    ws5.cell(row=rr, column=4, value=f'=IF(OR(B{r_rho}="",B{r_ash}=""),"",(B{r_rho}-$B$3)/(B{r_ash}-$B$4))')
+    ws5.cell(row=rr, column=5, value=f'=IF(D{rr}="","",IF((B{r_rho}-$B$3)*(B{r_ash}-$B$4)>0,"同向(密度↑灰分↑)","反向!检查数据"))')
     ws5.cell(row=rr, column=6, value=f'=IF(D{rr}="","",IF(AND(D{rr}>0.005,D{rr}<0.2),"有效","越界(0.005~0.2),弃用"))')
 k_first, k_last = ROW_STEPS, ROW_STEPS + len(steps) - 1
 ws5.cell(row=ROW_MEAN, column=1, value="K 平均值")
@@ -213,12 +252,15 @@ ws5.cell(row=ROW_CONC, column=1, value="结论建议")
 ws5.cell(row=ROW_CONC, column=2, value=(
     f'=IF(B{ROW_MEAN}="","待填",IF(ABS(B{ROW_MEAN}-0.075)<0.02,"专家值得到验证,维持现行专家表",'
     f'IF(B{ROW_CV}>0.3,"信号不足:加做0.02步长(P6)或延长保持时间","建议按实测K修订专家表与K_PREDICT")))'))
+ws5.cell(row=ROW_CONC + 2, column=1, value="跨工况对比:每轮一张本表副本,按「工况点登记表」的轮次标签汇总各轮 K —— "
+         "轮间 K 差异 > 各轮合并 CV 才值得分档(Stage 2 分档专家表的判据)。").font = \
+    Font(name="微软雅黑", size=9, italic=True, color="808080")
 style_sheet(ws5, [17, 42, 15, 13, 20, 22])
 style_body(ws5, center_cols=(1,))
 # 填写/公式单元格着色
 for row in ws5.iter_rows(min_row=2):
     for cell in row:
-        if cell.column in (2, 3) and cell.row in (2, 3, 6, 7, 8, 9, 10, 11, 12, 13):
+        if cell.column in (2, 3) and cell.row in (2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14):
             cell.fill = INPUT_FILL
         if cell.row >= ROW_HEADER and cell.column >= 2:
             cell.fill = CALC_FILL
@@ -242,6 +284,10 @@ rows6 = [
     [6, "后续校准(可选)", "若实测 K 与 0.075 偏差 >0.02:把专家表锚点按 K 重算(0.01/K=灰分死区上沿等),"
      "并同步 K_PREDICT 常数——需要开发侧修改,先记录在案",
      "专家表当前锚点:|ΔA|0.15%→Δρ0.01、0.25%→0.02(反推 K=0.067~0.08)"],
+    [7, "与决策日志的协同", "实验期间的密度调节若通过系统界面执行(在线仪表区改密度),Stage 0 决策日志会自动记录"
+     "每次调整与当时的工况上下文(带煤量/原煤灰分/脱粉/工作面/液位),45分钟后自动补记灰分响应——"
+     "Excel 为正式记录,决策日志为自动备份,两边可互相校验",
+     "查看:GET /api/v1/state → densityDecisionLog;密度也可事后按表3格式补录"],
 ]
 for r in rows6:
     ws6.append(r)
