@@ -9,8 +9,12 @@ import math
 from .density import calc_total_ash
 from .modeling import predict_coarse_ash
 
-INSTRUMENT_DEFAULT = {"ash_501": 8.52, "ash_502": 10.68, "scale_501": 268.5,
-                      "scale_502": 235.2, "density": 1.450, "level_tail": 55, "float_ash": 9.85}
+INSTRUMENT_DEFAULT = {
+    # 2026-09 工艺确认:501=总混配皮带(重介+浮精+粗煤泥,灰分应略高于502);
+    # 502=仅重介精煤(在线重介灰分,实测均值≈7.85)。旧默认 8.52/10.68 方向颠倒,已校正。
+    "ash_501": 8.8, "ash_502": 7.9, "scale_501": 268.5,
+    "scale_502": 235.2, "density": 1.450, "level_tail": 55, "float_ash": 9.85,
+}
 
 
 def _is_num(v):
@@ -188,7 +192,9 @@ def _model(store):
 
 
 def get_heavy_ash(store):
-    """重介精煤灰分取值：manual 需为非负有限数值（排除 bool/NaN/inf），否则回退默认 8.50。
+    """重介精煤灰分取值：手动(采样/手写,非负有限数值,排除 bool/NaN/inf)
+    > 502 皮带灰分仪在线值(2026-09 工艺确认:502 只承载重介精煤,即在线重介灰分)
+    > 默认 7.9(502 实测均值)。
 
     brief 与取值链共用此函数，保证同一数据两处口径一致（GLM 发现的原不一致问题）。
     """
@@ -196,7 +202,7 @@ def get_heavy_ash(store):
     m = cfg.get("manual")
     if _is_num(m) and math.isfinite(m) and m >= 0:
         return m
-    return 8.50
+    return resolve_instrument(store, "ash_502")
 
 
 def formula_total_ash(store):
@@ -222,14 +228,12 @@ def resolve_total_ash(store):
     entry = cfg.get("entry")
     if _is_num(entry) and entry >= 0:
         return entry
+    # 2026-09 工艺确认:501 皮带承载的就是总精煤混配(重介+浮精+粗),
+    # 其灰分仪读数即在线总灰分直读;502(重介组分)不再混入平均(否则重介被重复计入)。
     a501 = resolve_instrument(store, "ash_501")
-    a502 = resolve_instrument(store, "ash_502")
-    w501 = resolve_instrument(store, "scale_501")
-    w502 = resolve_instrument(store, "scale_502")
-    denom = w501 + w502
-    if denom == 0:
+    if a501 is None:
         return None
-    return round((a501 * w501 + a502 * w502) / denom, 4)
+    return round(a501, 4)
 
 
 def resolve_density(store):

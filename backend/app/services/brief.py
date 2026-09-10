@@ -24,7 +24,9 @@ COARSE_AMT = 40
 SCALE_501 = 268.5
 SCALE_502 = 235.2
 TOTAL_AMT = round(SCALE_501 + SCALE_502, 1)  # 503.7
-DEF = {"ash501": 8.52, "ash502": 10.68, "density": 1.450, "level": 55, "floatAsh": 9.85}
+# 2026-09 工艺确认:501=总混配(在线总灰分),502=仅重介(在线重介灰分);
+# 默认值随之校正(旧 8.52/10.68 方向颠倒)。heavy_ash 走 get_heavy_ash(502 在线链)。
+DEF = {"ash501": 8.8, "ash502": 7.9, "density": 1.450, "level": 55, "floatAsh": 9.85}
 FRESH_SECONDS = 24 * 3600   # 三表续传窗口：超过视为该表在本小时无数据（与前端 FRESH_MS 一致）
 
 
@@ -181,7 +183,8 @@ def build_hourly_brief(store: dict) -> dict:
         if formula_ok:
             total_ash = round(calc_total_ash(heavy_ash, heavy_amt, float_ash, float_amt, coarse_model, COARSE_AMT), 2)
         else:
-            total_ash = round((ash501 * SCALE_501 + ash502 * SCALE_502) / (SCALE_501 + SCALE_502), 2)
+            # 501 承载总混配,其读数即总灰分直读;502(重介组分)不混入(避免重复计入)
+            total_ash = round(ash501, 2)
 
         rho_new = None
         if formula_ok:

@@ -51,7 +51,8 @@ def test_negative_manual_not_leaked():
 
 
 def test_total_ash_div_zero():
-    """GLM 发现的 bug：皮带秤和为 0 时不除零"""
+    """原 bug 回归:皮带秤和为 0 时总灰分不除零。皮带分工改造后兜底=501 直读
+    (501=总混配皮带),无数据时回落默认 8.8 —— 不再做任何加权除法。"""
     store = {
         "amountInputs": {}, "ashInputs": {},
         "instrumentInputs": {"scale_501": {"manual": 0}, "scale_502": {"manual": 0}},
@@ -59,4 +60,4 @@ def test_total_ash_div_zero():
         "heavyAshInput": {}, "coarseAshInput": {}, "floatAshInput": {},
         "coarseCalc": {}, "coarseAshEma": None, "autoState": {}, "coarseModel": None,
     }
-    assert resolvers.resolve_total_ash(store) is None
+    assert resolvers.resolve_total_ash(store) == 8.8

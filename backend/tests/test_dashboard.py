@@ -44,6 +44,7 @@ def test_dashboard_roundtrip():
     assert d["amounts"]["floatAmount"] == JS["floatAmt"]
     assert d["amounts"]["coarseAmount"] == JS["coarseAmt"]
     assert d["amounts"]["totalAmount"] == JS["totalAmt"]
-    # 建议密度：deltaA=0.396 → 下调 0.0346 → 1.49-0.0346=1.455
-    assert abs(d["guidance"]["rhoNew"] - 1.455) < 1e-6
-    assert d["guidance"]["direction"] == "down"
+    # 2026-09 皮带分工改造后:heavyAsh=502在线(8.1) → totalAsh=8.5488 → deltaA=0.049 ≤ 容差0.1
+    # → 已达标,密度保持 rhoCur(1.49)
+    assert abs(d["guidance"]["rhoNew"] - 1.49) < 1e-6
+    assert d["guidance"]["direction"] == "stable"

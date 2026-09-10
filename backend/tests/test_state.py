@@ -28,7 +28,8 @@ def test_state_roundtrip():
 def test_state_feeds_dashboard():
     client.put("/api/v1/state", json=SEED)
     d = client.get("/api/v1/overview/dashboard").json()
-    assert abs(d["totalAsh"] - 8.8956) < 1e-6
+    # 2026-09 皮带分工改造后:heavyAsh=502在线(8.1) → 公式 totalAsh=8.5488
+    assert abs(d["totalAsh"] - 8.5488) < 1e-6
     assert abs(d["coarseAsh"] - 13.67) < 1e-6
 
 

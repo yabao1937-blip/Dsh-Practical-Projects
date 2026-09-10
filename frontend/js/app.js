@@ -977,11 +977,13 @@ const App = {
     // ============================================================
     // 皮带秤默认值（PLC未接入时的仪表模拟值，与数据采集页在线仪表一致）
     SCALE_DEFAULT: { '501': 268.5, '502': 235.2 },
-    // 501/502 皮带灰分仪默认值（与数据采集页在线仪表死数据一致）
-    ASH_METER_DEFAULT: { '501': 8.52, '502': 10.68 },
+    // 501/502 皮带灰分仪默认值。2026-09 工艺确认:501=总混配皮带(重介+浮精+粗,
+    // 灰分应略高于502);502=仅重介精煤(在线重介灰分,实测均值≈7.85)。
+    // 旧默认 8.52/10.68 方向颠倒,已校正。
+    ASH_METER_DEFAULT: { '501': 8.8, '502': 7.9 },
     // 在线仪表全部默认值（PLC未接入时的死数据；PLC接入后替换）
     INSTRUMENT_DEFAULT: {
-        ash_501: 8.52, ash_502: 10.68, scale_501: 268.5, scale_502: 235.2,
+        ash_501: 8.8, ash_502: 7.9, scale_501: 268.5, scale_502: 235.2,
         density: 1.450, level_tail: 55, float_ash: 9.85,
     },
 
@@ -1343,7 +1345,9 @@ const App = {
         const COARSE_AMT = 40;                        // 粗精煤泥量恒值（三表无数据源，沿用当前默认）
         const SCALE_501 = 268.5, SCALE_502 = 235.2;   // 皮带秤恒值（三表无数据源）
         const TOTAL_AMT = +(SCALE_501 + SCALE_502).toFixed(1);   // 503.7
-        const DEF = { ash501: 8.52, ash502: 10.68, density: 1.450, level: 55, floatAsh: 9.85 };
+        // 2026-09 工艺确认:501=总混配(在线总灰分),502=仅重介(在线重介灰分);
+        // 默认值随之校正(旧 8.52/10.68 方向颠倒)。heavyAsh 走 getHeavyAsh(502 在线链)。
+        const DEF = { ash501: 8.8, ash502: 7.9, density: 1.450, level: 55, floatAsh: 9.85 };
 
         const toTs = t => { const d = new Date(t); return isNaN(d) ? null : d.getTime(); };
 
@@ -1444,12 +1448,12 @@ const App = {
             const heavyAmt = (floatAmt != null) ? +(TOTAL_AMT - floatAmt - COARSE_AMT).toFixed(1) : null;
             const formulaOk = (heavyAmt != null && heavyAmt > 0 && floatAmt != null && floatAsh != null && coarseModel != null);
 
-            // 总精煤灰分：公式优先（粗灰用递归软测量），否则表3仪表加权
+            // 总精煤灰分：公式优先（粗灰用递归软测量）；否则 501 直读（501=总混配皮带）
             let totalAsh = null;
             if (formulaOk) {
                 totalAsh = +this.calcTotalAsh(heavyAsh, heavyAmt, floatAsh, floatAmt, coarseModel, COARSE_AMT).toFixed(2);
             } else {
-                totalAsh = +((ash501 * SCALE_501 + ash502 * SCALE_502) / (SCALE_501 + SCALE_502)).toFixed(2);
+                totalAsh = +ash501.toFixed(2);
             }
 
             // 建议密度：仅公式完整(有粗灰数据)时计算；缺粗灰数据时留空（避免仪表加权失真顶到1.60）
@@ -1648,7 +1652,7 @@ const App = {
         return +this.calcTotalAsh(this.getHeavyAsh(), heavyAmt, floatAsh, floatAmt, coarseAsh, coarseAmt).toFixed(4);
     },
 
-    // 总精煤灰分：手动(化验) > 公式计算(给定重介/浮/粗后推出) > 录入(导入/补录) > 默认(仪表加权)
+    // 总精煤灰分：手动(化验) > 公式计算(给定重介/浮/粗后推出) > 录入(导入/补录) > 501直读
     resolveTotalAsh() {
         const cfg = (this.store.ashInputs && this.store.ashInputs.totalAsh) || {};
         const manual = (typeof cfg.manual === 'number' && isFinite(cfg.manual) && cfg.manual >= 0) ? cfg.manual : null;
@@ -1657,8 +1661,9 @@ const App = {
         if (formula != null) { this._autoBump('totalAsh', formula); return formula; }
         const entry = this.totalAshEntry();
         if (entry != null) { this._autoBump('totalAsh', entry); return entry; }
-        const w501 = this.resolveInstrument('scale_501'), w502 = this.resolveInstrument('scale_502');
-        const dv = +((this.resolveInstrument('ash_501') * w501 + this.resolveInstrument('ash_502') * w502) / (w501 + w502)).toFixed(4);
+        // 2026-09 工艺确认:501 承载的就是总精煤混配(重介+浮精+粗),其灰分仪读数
+        // 即在线总灰分直读;502(重介组分)不再混入平均(否则重介灰分被重复计入)。
+        const dv = +this.resolveInstrument('ash_501').toFixed(4);
         this._autoBump('totalAsh', dv);
         return dv;
     },
@@ -1666,16 +1671,13 @@ const App = {
     totalAshEntry() {
         const cfg = (this.store.ashInputs && this.store.ashInputs.totalAsh) || {};
         if (typeof cfg.entry === 'number' && isFinite(cfg.entry) && cfg.entry >= 0) return cfg.entry;
+        // 2026-09 工艺确认:501=总混配皮带,其灰分即总灰分;502(重介组分)不混入平均。
+        // 仿真:密度变化→灰分测量响应(simK)仍作用于 501 读数上。
         const a501 = this.latestBeltAsh('501');
-        const a502 = this.latestBeltAsh('502');
-        if (a501 == null && a502 == null) return null;
-        // 仿真：密度变化→灰分测量变化
+        if (a501 == null) return null;
         const rho = this.resolveInstrument('density');
         const d = (rho - this.getSimBaseRho()) / this.DENSITY_GUIDE.simK;
-        const w501 = this.resolveInstrument('scale_501'), w502 = this.resolveInstrument('scale_502');
-        if (a501 == null) return +(a502 + d).toFixed(4);        // 只有502皮带有数据时直接取
-        if (a502 == null) return +(a501 + d).toFixed(4);        // 只有501皮带有数据时直接取
-        return +(((a501 + d) * w501 + (a502 + d) * w502) / (w501 + w502)).toFixed(4);
+        return +(a501 + d).toFixed(4);
     },
 
     // 当前生效层级（在线仪表表来源列显示：手动/公式计算/录入/默认(仪表)）
@@ -1913,24 +1915,30 @@ const App = {
         return ash;
     },
 
-    // 取当前重介精煤灰分：静态初始值——手动(采样/手写) > 默认8.50（不参与实时反推演算；反推值仅展示）
+    // 取当前重介精煤灰分：手动(采样/手写) > 502皮带灰分仪在线值(502只承载重介精煤)
+    // > 默认7.9(502实测均值)。不参与实时反推演算;反推值仅展示。
     getHeavyAsh() {
         const cfg = (this.store.heavyAshInput && this.store.heavyAshInput) || {};
         const m = cfg.manual;
         if (typeof m === 'number' && isFinite(m) && m >= 0 && this._manualValid(cfg, 'heavyAsh')) return m;
-        return 8.50;
+        return this.resolveInstrument('ash_502');
     },
 
-    // 重介精煤灰分（在线仪表行）：手动 > 默认8.50
+    // 重介精煤灰分（在线仪表行）：手动 > 502在线 > 默认
     resolveHeavyAsh() { return this.getHeavyAsh(); },
 
     heavyAshLayer() {
         const cfg = (this.store.heavyAshInput && this.store.heavyAshInput) || {};
         const m = cfg.manual;
         if (typeof m === 'number' && isFinite(m) && m >= 0) {
-            return this._manualValid(cfg, 'heavyAsh') ? '手动(采样)' : '默认8.50';
+            return this._manualValid(cfg, 'heavyAsh') ? '手动(采样)' : this._heavyAutoLayer();
         }
-        return '默认8.50';
+        return this._heavyAutoLayer();
+    },
+
+    // 重介灰分自动层文案:502 在线值 > 默认
+    _heavyAutoLayer() {
+        return this.latestBeltAsh('502') != null ? '502在线' : '默认7.9';
     },
 
     setHeavyAshInput(patch) {

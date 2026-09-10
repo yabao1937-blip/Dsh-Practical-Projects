@@ -101,12 +101,12 @@ def test_one_table_stale_no_rows():
 
 
 def test_heavyash_invalid_manual_rejected():
-    """负数/布尔/NaN/inf 的重介精煤灰分 manual 不应进入简报，回退 8.50。"""
+    """负数/布尔/NaN/inf 的重介精煤灰分 manual 不应进入简报,回退 502 在线链(夹具最新 502 灰分=8.4)。"""
     for bad in (-5, True, float("nan"), float("inf")):
         s = fixture_store()
         s["heavyAshInput"] = {"manual": bad}
         first = build_hourly_brief(s)["rows"][0]
-        assert first[4] == "8.50", f"heavy_ash leaked for manual={bad!r}: {first[4]}"
+        assert first[4] == "8.40", f"heavy_ash leaked for manual={bad!r}: {first[4]}"
 
 
 def test_full_golden_diff():

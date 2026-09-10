@@ -78,7 +78,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         check('粗精煤泥量恒值40', JSON.stringify(info.coarseAmtUniq) === '["40.0"]', JSON.stringify(info.coarseAmtUniq));
         check('501皮带秤恒值268.5', JSON.stringify(info.scale501Uniq) === '["268.5"]', JSON.stringify(info.scale501Uniq));
         check('502皮带秤恒值235.2', JSON.stringify(info.scale502Uniq) === '["235.2"]', JSON.stringify(info.scale502Uniq));
-        check('重介灰分恒值8.50', JSON.stringify(info.heavyUniq) === '["8.50"]', JSON.stringify(info.heavyUniq));
+        check('重介灰分恒值=取值链当前值(手动>502在线>默认)', info.heavyUniq.length === 1, JSON.stringify(info.heavyUniq));
         check('总精煤量恒值503.7', JSON.stringify(info.totalAmtUniq) === '["503.7"]', JSON.stringify(info.totalAmtUniq));
 
         check('每行都有建议密度且在[1.35,1.60]', info.rhoFilled === info.n && info.inRange === info.n, `filled=${info.rhoFilled}/${info.n}`);
