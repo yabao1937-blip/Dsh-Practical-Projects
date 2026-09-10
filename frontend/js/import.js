@@ -684,6 +684,19 @@ const ImportPage = {
         let imported = 0, failed = 0, skipped = 0;
         const errors = [];
 
+        // 灰分单元格解析：空白 /「-」「—」「？」/ 纯文本 一律返回 null，绝不用 `|| 0` 兜底。
+        // 原因：0% 会被当成一条「真实读数」写进记录，而 resolve_float_ash / resolve_coarse_ash
+        // 取的是最新一条记录的灰分 —— 于是一个空单元格会静默进入总精煤灰分公式，
+        // 拉低总灰分并改变密度建议，而现场从界面上完全看不出来。
+        // 合法范围取 (0, 100]：灰分不可能为 0，上限只用于挡住把日期/序号误填进灰分列的情况。
+        const ashCell = v => {
+            if (v === null || v === undefined) return null;
+            const s = String(v).trim();
+            if (!s || s === '-' || s === '—' || s === '?' || s === '？') return null;
+            const n = parseFloat(s);
+            return (isFinite(n) && n > 0 && n <= 100) ? n : null;
+        };
+
         p.rows.forEach((row, i) => {
             if (skipDups && p.duplicates.includes(i)) { skipped++; return; }
             if (p.errors.some(e => e.row === i + 2)) { failed++; return; }
@@ -693,6 +706,16 @@ const ImportPage = {
 
                 // 系统字段：表3(灰分密度)保留系统列作内部参考；表2(浮精)无系统列按合并处理
                 const system = (category === 'ash_density') ? String((col.system >= 0 ? row[col.system] : row[1]) || '').trim() : '合并';
+
+                // 灰分校验必须在「同时间戳覆盖」之前：跳过该行时若旧记录已被删掉，就成了净丢数据。
+                // 覆盖的是表2/表1（表3 的灰分由下方范围校验处理，不走 ashCell）
+                const needAsh = (category === 'coarse_magnetic' || category === 'float_ash');
+                const ashNow = needAsh ? ashCell(row[col.ash >= 0 ? col.ash : 2]) : null;
+                if (needAsh && ashNow === null) {
+                    failed++;
+                    errors.push({ row: i + 2, msg: `灰分无法解析(空白/-/？)：${row[col.ash >= 0 ? col.ash : 2]}` });
+                    return;
+                }
 
                 // 同时间戳覆盖：先移除目标数组中同时间的旧导入记录，避免重复与旧值残留
                 if (category === 'coarse_magnetic') {
@@ -718,7 +741,9 @@ const ImportPage = {
                 switch (category) {
                     case 'coarse_magnetic':
                         // 按表头定位：灰分% / 煤量(t/h) / 水分% / 液位%
-                        const cAsh = parseFloat(row[col.ash >= 0 ? col.ash : 2]) || 0;
+                        // 灰分已在循环开头校验（ashNow），此处不再兜底成 0%；
+                        // 煤量/水分/液位沿用「缺失记 0」的既有约定（0 不参与灰分公式）
+                        const cAsh = ashNow;
                         const cAmt = parseFloat(row[col.amount >= 0 ? col.amount : 3]) || 0;
                         const cWater = parseFloat(row[col.water >= 0 ? col.water : 4]) || 0;
                         const cLevel = parseFloat(row[col.level >= 0 ? col.level : 5]) || 0;
@@ -751,8 +776,10 @@ const ImportPage = {
                         break;
                     case 'float_ash':
                         // 按表头定位：浮精灰分% / 浮精煤量(t/h) / 压滤机运行
+                        // 灰分已在循环开头校验（ashNow）：浮精灰分是 resolve_float_ash 的取值来源，
+                        // 一个空单元格若记成 0% 会直接进入总灰分公式（静默假数据）
+                        const flAsh = ashNow;
                         const pressVal = String(row[col.press >= 0 ? col.press : 4] || '');
-                        const flAsh = parseFloat(row[col.ash >= 0 ? col.ash : 2]) || 0;
                         const flAmt = parseFloat(row[col.amount >= 0 ? col.amount : 3]) || 0;
                         const hAsh = App.getHeavyAsh(), hAmt = 250, csAsh = 13.0, csAmt = 15;   // 重介灰分走统一口径
                         const flBaseTotal = App.calcTotalAsh(hAsh, hAmt, 0, 0, csAsh, csAmt);

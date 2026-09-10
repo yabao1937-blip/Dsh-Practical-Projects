@@ -225,7 +225,21 @@ var XLSX = {
                 let value = null;
                 let type = 'n';
 
-                if (rawVal === undefined || rawVal === null) {
+                // inlineStr（<c t="inlineStr"><is><t>…</t></is></c>）：部分导出器与 WPS 会这样写文本单元格。
+                // 旧实现只读 <v>，这类单元格在浏览器读到 null，而 openpyxl 能正常读到 ——
+                // 同一文件会出现「浏览器整列为空、后端有值」的双轨分叉（如入洗工作面列）。
+                // <is> 内可能有多个 <t>（富文本分段），需全部拼接。
+                const isInline = /\bt="inlineStr"/.test(attrs);
+                if (isInline) {
+                    const isMatch = cellBody.match(/<is>([\s\S]*?)<\/is>/);
+                    const scope = isMatch ? isMatch[1] : cellBody;
+                    let text = '';
+                    const tRe = /<t[^>]*>([\s\S]*?)<\/t>/g;
+                    let tm;
+                    while ((tm = tRe.exec(scope)) !== null) text += tm[1];
+                    value = this._decodeXml(text);
+                    type = 's';
+                } else if (rawVal === undefined || rawVal === null) {
                     value = null;
                 } else if (/\bt="s"/.test(attrs)) {
                     const idx = parseInt(rawVal);
@@ -270,9 +284,16 @@ var XLSX = {
     },
 
     _decodeXml(s) {
-        // 数字字符引用先解(如 &#10;=换行,Excel 多行单元格的标准存法);
-        // 先于命名实体,保证 "&amp;#10;" 正确还原为字面 "&#10;" 而非换行
-        return s.replace(/&#(\d+);/g, (_, d) => String.fromCharCode(parseInt(d, 10)))
+        // 数字字符引用先解（&#10; 与 &#x0A; 都表示换行，Excel 多行单元格两种写法都会出现）；
+        // 先于命名实体，保证 "&amp;#10;" 正确还原为字面 "&#10;" 而非换行。
+        // 十六进制形式此前未处理，导致 &#x0A; 原样留在文本里（同一修复的漏网之鱼）。
+        // 用 fromCodePoint 而非 fromCharCode：码点 > 0xFFFF 时后者会截断成错误字符。
+        return String(s).replace(/&#(x?[0-9A-Fa-f]+);/g, (whole, code) => {
+            const hex = (code[0] === 'x' || code[0] === 'X');
+            const cp = parseInt(hex ? code.slice(1) : code, hex ? 16 : 10);
+            if (!isFinite(cp) || cp < 0 || cp > 0x10FFFF) return whole;   // 越界原样保留
+            try { return String.fromCodePoint(cp); } catch (e) { return whole; }
+        })
             .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
             .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
     },
