@@ -725,14 +725,24 @@ const ImportPage = {
                 // 系统字段：表3(灰分密度)保留系统列作内部参考；表2(浮精)无系统列按合并处理
                 const system = (category === 'ash_density') ? String((col.system >= 0 ? row[col.system] : row[1]) || '').trim() : '合并';
 
-                // 灰分校验必须在「同时间戳覆盖」之前：跳过该行时若旧记录已被删掉，就成了净丢数据。
-                // 覆盖的是表2/表1（表3 的灰分由下方范围校验处理，不走 ashCell）
-                const needAsh = (category === 'coarse_magnetic' || category === 'float_ash');
-                const ashNow = needAsh ? ashCell(row[col.ash >= 0 ? col.ash : 2]) : null;
+                // 校验必须在「同时间戳覆盖」之前：跳过该行时若旧记录已被删掉，就成了净丢数据。
+                // 表3（ash_density）同样适用——它的灰分与密度也要先算出来再决定是否覆盖。
+                const ashCol = col.ash >= 0 ? col.ash : (category === 'ash_density' ? 3 : 2);
+                const needAsh = (category === 'coarse_magnetic' || category === 'float_ash' || category === 'ash_density');
+                const ashNow = needAsh ? ashCell(row[ashCol]) : null;
                 if (needAsh && ashNow === null) {
                     failed++;
-                    errors.push({ row: i + 2, msg: `灰分无法解析(空白/-/？)：${row[col.ash >= 0 ? col.ash : 2]}` });
+                    errors.push({ row: i + 2, msg: `灰分无法解析(空白/-/？)：${row[ashCol]}` });
                     return;
+                }
+                // 表3 的密度：同样在覆盖前算好。缺失/越界（1.3~1.6）按缺失处理——但**不能**因此把
+                // 旧记录里有效的密度抹掉：真实库 360 条 ash_density 中 77 条 density 为 NULL（全在 B 系统），
+                // 说明"有灰分无密度"是常态，直接覆盖会让已验证的密度降级成 null。
+                let newDensity = null;
+                if (category === 'ash_density') {
+                    const dv = row[col.density >= 0 ? col.density : 4];
+                    newDensity = (dv && dv !== '-' && dv !== '') ? parseFloat(dv) : null;
+                    if (newDensity != null && !(newDensity >= 1.3 && newDensity <= 1.6)) newDensity = null;
                 }
 
                 // 同时间戳覆盖：先移除目标数组中同时间的旧导入记录，避免重复与旧值残留
@@ -745,7 +755,19 @@ const ImportPage = {
                     // 同时间+同系统覆盖（表3含A/B两系统同时间记录，需各自保留一条）
                     App.store.calcLogs = App.store.calcLogs.filter(l => {
                         if (!(l.calc_type === 'ash_density' && l.timestamp === ts)) return true;
-                        try { return (JSON.parse(l.input_json || '{}').system || '') !== system; } catch (e) { return true; }
+                        let sys = '', oldDensity = null;
+                        try {
+                            const v = JSON.parse(l.input_json || '{}');
+                            sys = v.system || '';
+                            oldDensity = v.density;
+                        } catch (e) { return true; }
+                        if (sys !== system) return true;      // 不同系统各自保留一条
+                        // 新行缺/坏密度 → 保住旧记录里有效的密度，避免"坏值覆盖好值"
+                        if (newDensity == null && typeof oldDensity === 'number'
+                            && oldDensity >= 1.3 && oldDensity <= 1.6) {
+                            newDensity = oldDensity;
+                        }
+                        return false;                          // 同系统同时间 → 覆盖
                     });
                 }
 
@@ -815,11 +837,9 @@ const ImportPage = {
                         break;
                     case 'ash_density':
                         // 按表头定位：系统 / 皮带 / 灰分% / 密度值(g/cm³)
-                        const densityVal = row[col.density >= 0 ? col.density : 4];
-                        let density = (densityVal && densityVal !== '-' && densityVal !== '')
-                            ? parseFloat(densityVal) : null;
-                        // 缺测/坏值清洗：密度必须在 1.3~1.6 之间，否则按缺失处理
-                        if (density != null && !(density >= 1.3 && density <= 1.6)) density = null;
+                        // 灰分与密度均已在循环开头算好（ashNow / newDensity）：必须在「同时间戳覆盖」前算，
+                        // 否则坏值会先把旧的有效记录删掉再写入 null。灰分也不再 || 0 兜底——
+                        // 空白记成 0% 会经 getAshByTime 进入影响值与简报，属伪造读数。
                         App.store.calcLogs.push({
                             id: App.store.calcLogs.length + 1,
                             timestamp: ts,
@@ -827,8 +847,8 @@ const ImportPage = {
                             input_json: JSON.stringify({
                                 system: system,
                                 belt: String(row[col.belt >= 0 ? col.belt : 2] || ''),
-                                ash_content: parseFloat(row[col.ash >= 0 ? col.ash : 3]) || 0,
-                                density: density
+                                ash_content: ashNow,
+                                density: newDensity
                             }),
                             output_json: '{}'
                         });
