@@ -50,19 +50,20 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         const out = JSON.parse(await evalJs(expr, true));
         console.log('result:', JSON.stringify(out, null, 2));
 
-        // 判定：2026-09-09 重基线(日期消歧修复+156条数据+jun_jul n=117)。
-        // 当前后端数据训练的期望值(sklearn 版,range=jun_jul):
-        //   production=mlr, mlr.lambda≈11.6, pls.A=2, pls.intercept≈22.7339, predicted[0]≈14.1708
+        // 判定：2026-09-10 重基线(7.10 重复行清除,干净 113 条,jun_jul)。
+        // 有趣的回归验证:干净数据训练出的 PLS 与项目最初黄金值完全一致(同 113 样本,
+        // 日期修正只改行序不改数值);MLR λ 因行序变化挪了一格网格(1.12→11.2,合法)。
+        //   production=pls, pls.intercept≈23.0662, pls.A=2, mlr.lambda≈11.2, predicted[0]≈14.518
         const pls = out.plsIntercept;
-        const okRemote = Math.abs(pls - 22.733940594) < 1e-3;
+        const okRemote = Math.abs(pls - 23.066213398) < 1e-3;
         console.log('REMOTE_TRAINED:', okRemote ? 'PASS' : 'FAIL', '(pls.intercept=' + pls + ')');
         console.log('production:', out.production, '| mlr.lambda:', out.mlrLambda, '| pls.A:', out.plsA);
-        console.log('predicted[0]:', out.predicted0, '(期望 14.1708)');
+        console.log('predicted[0]:', out.predicted0, '(期望 14.518)');
         ws.close();
-        process.exitCode = (okRemote && out.production === 'mlr'
-            && Math.abs(out.mlrLambda - 11.6) < 1e-6
+        process.exitCode = (okRemote && out.production === 'pls'
+            && Math.abs(out.mlrLambda - 11.2) < 1e-6
             && out.plsA === 2
-            && Math.abs(out.predicted0 - 14.1708) < 1e-9) ? 0 : 1;
+            && Math.abs(out.predicted0 - 14.518) < 1e-9) ? 0 : 1;
     } catch (e) {
         console.error('ERROR:', e.message);
         process.exitCode = 1;

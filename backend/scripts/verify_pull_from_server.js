@@ -1,7 +1,7 @@
 // 端到端验证:「从服务器恢复数据」+ K 展示 + 导入幂等(headless Edge + CDP)
 // 场景 = 用户旧浏览器(全新 profile → 种子旧数据 113/5/124)在 http:// 模式下:
 //   1. 按钮可见性
-//   2. pullFromServer → 本地变 156/17/360
+//   2. pullFromServer → 本地变 152/17/360(2026-09-10 去 7.10 重复行后)
 //   3. 重导同一粗精煤泥文件 → 计数不变(幂等)
 //   4. 密度指导面板 K 来源展示
 const { spawn } = require('child_process');
@@ -55,8 +55,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         await sleep(800);
         const pulled = JSON.parse(await storeCounts());
         console.log('[3] pullFromServer 后:', JSON.stringify(pulled));
-        const pullOk = pulled.coarse === 156 && pulled.float === 17 && pulled.calcLogs === 360;
-        console.log('    数据恢复:', pullOk ? 'PASS (156/17/360)' : 'FAIL');
+        const pullOk = pulled.coarse === 152 && pulled.float === 17 && pulled.calcLogs === 360;
+        console.log('    数据恢复:', pullOk ? 'PASS (152/17/360)' : 'FAIL');
         console.log('    生产模型:', pulled.model);
 
         // K 来源展示(密度指导面板)
@@ -81,13 +81,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         await sleep(1000);
         const after = JSON.parse(await storeCounts());
         console.log('[5] 重导后:', JSON.stringify(after));
-        console.log('    幂等性:', after.coarse === 156 ? 'PASS (仍 156)' : 'FAIL (' + after.coarse + ')');
+        console.log('    幂等性:', after.coarse === 152 ? 'PASS (仍 152)' : 'FAIL (' + after.coarse + ')');
 
         // localStorage 持久化确认
         const ls = await evalJs(`(() => { const d = JSON.parse(localStorage.getItem('dmcs_store')); return d.coarseCoal.length + '/' + d.floatCoal.length + '/' + d.calcLogs.length; })()`);
         console.log('[6] localStorage:', ls);
 
-        const allPass = btnVisible && pullOk && after.coarse === 156;
+        const allPass = btnVisible && pullOk && after.coarse === 152;
         console.log(allPass ? 'ALL PASS' : 'HAS FAILURES');
         ws.close();
         process.exitCode = allPass ? 0 : 1;

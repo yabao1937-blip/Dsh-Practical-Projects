@@ -496,13 +496,15 @@ const ImportPage = {
             success: imported, failed: 0, skipped: 0, status: '成功', errors: []
         });
 
-        // 一次性数据修复(2026-09):旧 fixDay 规则曾把 7.2/7.3 误解析成 7月20/30 日,
-        // 种子/历史数据遗留的 2026-07-20/30 孤儿行在此清除(修正后的解析写回 07-02/03)。
-        // 源表(6.16-7.14)不存在 7月20/30 采样,可安全按时间戳模式清除。
+        // 一次性数据修复(2026-09):旧 fixDay 规则的两类历史遗留,导入时清除——
+        // ① 7.2/7.3 曾被误解析成 7月20/30 日(源表实为 7月2/3 日,修正解析已写回正确日期);
+        // ② "7.10"被 Excel 归一化成 7.1,旧解析把第二组 7.1(实为7.10的4行)错标在 07-01,
+        //    与修正后写入的 07-10 行构成重复(时间/灰分/煤量完全一致),按时间戳模式清除。
         const badTs = /^2026-07-(20|30) /;
-        if (App.store.coarseCoal.some(c => badTs.test(c.timestamp))) {
-            App.store.coarseCoal = App.store.coarseCoal.filter(c => !badTs.test(c.timestamp));
-            App.store.magneticTail = App.store.magneticTail.filter(c => !badTs.test(c.timestamp));
+        const strayTs = /^2026-07-01 (00:47|02:23|08:12|10:41):/;
+        if (App.store.coarseCoal.some(c => badTs.test(c.timestamp) || strayTs.test(c.timestamp))) {
+            App.store.coarseCoal = App.store.coarseCoal.filter(c => !badTs.test(c.timestamp) && !strayTs.test(c.timestamp));
+            App.store.magneticTail = App.store.magneticTail.filter(c => !badTs.test(c.timestamp) && !strayTs.test(c.timestamp));
         }
 
         App.saveStore();

@@ -25,9 +25,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         const evalJs = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true })).result.result.value;
         const out = JSON.parse(await evalJs(`JSON.stringify({jun: App.filterTrainRows('jun_jul').length, d30: App.filterTrainRows('30d').length, all: App.filterTrainRows('all').length})`));
         console.log('JS filterTrainRows:', JSON.stringify(out));
-        // 2026-09-09 重基线:日期序列消歧修复(7.2/7.3/9.2/9.3 不再误解析成 20/30 日)
-        // + 8-9月新批次导入后:jun=117(含修正的7月2/3日), d30=39(8.23~9.3 真实窗口), all=156
-        const EXPECT = { jun: 117, d30: 39, all: 156 };
+        // 2026-09-10 重基线:7.10 重复行清除后 jun=113(与源文件有效行一致),
+        // d30=39(8.23~9.3 真实窗口,8.30 灰分列损坏被正确拒绝), all=152
+        const EXPECT = { jun: 113, d30: 39, all: 152 };
         console.log('expect:', JSON.stringify(EXPECT));
         process.exitCode = (out.jun === EXPECT.jun && out.d30 === EXPECT.d30 && out.all === EXPECT.all) ? 0 : 1;
         ws.close();
