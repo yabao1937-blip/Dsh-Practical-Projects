@@ -1,0 +1,52 @@
+# 依赖锁文件（2026-09 生成）
+#
+# 来源：在"76 个 pytest 全绿"的 Windows/CPython 3.11.9 虚拟环境上 pip freeze 得到，
+#       即这一组版本组合已被验证可用。CI 与部署按本文件安装，保证可复现。
+#
+# requirements.txt 保留为"宽松声明"（>=，用于人工升级时看意图）；
+# 需要升级依赖时：改 requirements.txt → 升级 → 跑全量 pytest → 重新冻结本文件。
+#
+# 注意：本文件包含传递依赖（anysql/httptools 等），这是刻意的——
+#       锁文件的意义就是连间接依赖一起固定。
+alembic==1.19.2
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.14.2
+certifi==2026.7.22
+click==8.5.0
+cloudpickle==3.1.2
+colorama==0.4.6
+et_xmlfile==2.0.0
+fastapi==0.141.1
+greenlet==3.5.5
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+idna==3.19
+iniconfig==2.3.0
+joblib==1.6.0
+Mako==1.4.1
+MarkupSafe==3.0.3
+narwhals==2.25.0
+numpy==2.4.6
+openpyxl==3.1.5
+packaging==26.3
+pluggy==1.6.0
+pydantic==2.13.5
+pydantic_core==2.46.5
+Pygments==2.21.0
+pytest==9.1.1
+python-dotenv==1.2.3
+python-multipart==0.0.32
+PyYAML==6.0.3
+scikit-learn==1.9.0
+scipy==1.17.1
+SQLAlchemy==2.0.52
+starlette==1.6.0
+threadpoolctl==3.6.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvicorn==0.52.4
+watchfiles==1.2.0
+websockets==17.1

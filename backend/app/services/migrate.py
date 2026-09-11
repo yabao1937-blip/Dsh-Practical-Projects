@@ -245,15 +245,20 @@ def apply(store: dict) -> dict:
 def _record_vector(db) -> dict:
     """现库的「业务记录向量」：按测量类别细分，供防回退守卫逐项比较。
 
-    不含 manual_entries / import_logs / alerts：这些是日志类数据，
+    **只含前端必然 1:1 镜像过来的记录**（coal_records 的三个 category + 补录 calc_logs）。
+    刻意不含 manual_entries / import_logs / alerts：这些是日志类数据，
     前端「删除单条补录」「清空补录历史」会**合法地**让它们变少
-    （collect.js clearHistory → saveStore → PUT /state），
-    纳入守卫会把正常操作误判成回退。
+    （collect.js clearHistory → saveStore → PUT /state），纳入守卫会把正常操作误判成回退。
+
+    ⚠️ 也刻意不含 heavy_samples（2026-09 血泪教训，务必不要再加回来）：
+    `App._applyServerState` 把 heavySamples 列为**纯本地键**（从服务器拉数据时不覆盖它），
+    所以新浏览器/profile 永远拿不到服务器已有的采样 → 它的向量里 heavy_samples 恒为本地值
+    （通常 0），必然小于服务器 → **每一次镜像都被守卫拒绝**，表现为"前端所有改动静默同步不上去"。
+    守卫只能比较两端必然一致的口径；比较一个前端设计上就不回传的集合，等于把所有写入判死。
     """
     vec = {cat: db.query(CoalRecord).filter(CoalRecord.category == cat).count()
            for cat in ("coarse", "float", "ash_density")}
     vec["calc_logs"] = db.query(CalcLog).count()
-    vec["heavy_samples"] = db.query(HeavySample).count()
     return vec
 
 
@@ -265,7 +270,6 @@ def _plan_vector(p: dict) -> dict:
         if cat in vec:
             vec[cat] += 1
     vec["calc_logs"] = len(p["calc_logs"])
-    vec["heavy_samples"] = len(p["heavy_samples"])
     return vec
 
 

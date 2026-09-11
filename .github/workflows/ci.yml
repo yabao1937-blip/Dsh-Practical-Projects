@@ -1,0 +1,47 @@
+name: CI
+
+# 目的：把回归防线放进流水线。
+# 现状是 76 个 pytest + 8 个 headless 回归脚本全靠手跑（依赖个人自觉），
+# 本工作流只跑能在此环境里稳定运行的 pytest（见下方说明），先让"每次 push 都有一道自动防线"。
+#
+# 说明：需要 Edge 的浏览器回归脚本（scripts/verify_*.js、dump_*.js）**不在 CI 里**——
+# 它们依赖本机 Edge + 起后端，放这里会变成假绿/假红。需要时用 self-hosted runner 或夜间任务。
+# 依赖用 requirements.lock.txt（冻结自"76 测试全绿"的环境），避免上游发新版把 CI 打挂。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:      # 允许手动触发
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Python 3.11（与开发环境 CPython 3.11.9 同小版本线）
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装锁定依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock.txt
+
+      - name: 依赖自检（版本冲突会在这里暴露）
+        run: pip check
+
+      - name: 全量测试（conftest 已把库隔离到临时 SQLite，不碰真实数据）
+        run: python -m pytest -q
+
+      - name: 静态检查（不阻塞：先只做信号，等基线干净后再转为强制）
+        continue-on-error: true
+        run: |
+          pip install ruff
+          ruff check app tests --statistics || true

@@ -34,19 +34,27 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         const n0 = await evalJs('(App.store.densityDecisionLog || []).length');
         // 操作员手动设定密度(决策日志应记录 density_set,含工况上下文)
         await evalJs("App.setInstrumentInput('density', { manual: 1.485 }); true");
-        await sleep(1500);   // 等 PUT /state 镜像
         const out = JSON.parse(await evalJs(`JSON.stringify((App.store.densityDecisionLog || [])[App.store.densityDecisionLog.length - 1] || null)`));
         console.log('日志条目:', JSON.stringify(out, null, 2).slice(0, 900));
 
-        // 服务器侧核对(auto_state 持久化)
-        const dbSide = await (await fetch('http://127.0.0.1:8000/api/v1/state')).json();
-        const log = dbSide.densityDecisionLog || [];
-        const last = log[log.length - 1];
+        // 整库镜像：已改为合并发送（App.MIRROR_DEBOUNCE_MS=2000ms），这里显式冲一次。
+        await evalJs('App._flushMirror(true); true');
+        // 然后**轮询**等服务器侧出现，不要用固定 sleep 猜时间：
+        // 镜像是不等待响应的异步发送，而整库重写（529 条记录/175KB）提交需要时间；
+        // 若此脚本在提交完成前就 kill 掉 Edge，那次 PUT 会被直接中断（这正是它之前报 FAIL 的原因）。
+        let last = null, log = [];
+        for (let i = 0; i < 24; i++) {
+            const dbSide = await (await fetch('http://127.0.0.1:8000/api/v1/state')).json();
+            log = dbSide.densityDecisionLog || [];
+            last = log[log.length - 1];
+            if (last && out && last.ts === out.ts) break;   // 以浏览器侧那条的时间戳为准
+            await sleep(500);
+        }
         console.log('服务器侧条数:', log.length, '| 最新 trigger:', last && last.trigger,
             '| rhoNew:', last && last.rhoNew, '| ctx.rawAsh:', last && last.ctx && last.ctx.rawAsh,
             '| ctx.miningFace:', last && last.ctx && last.ctx.miningFace);
-        const ok = last && last.trigger === 'density_set' && last.rhoNew === 1.485
-            && last.ctx && typeof last.ctx.rawAsh === 'number';
+        const ok = !!(last && out && last.ts === out.ts && last.trigger === 'density_set'
+            && last.rhoNew === 1.485 && last.ctx && typeof last.ctx.rawAsh === 'number');
         console.log(ok ? 'DECISION_LOG: PASS' : 'DECISION_LOG: FAIL');
         // 节流验证:1秒内重复同类设定不应新增
         await evalJs("App.setInstrumentInput('density', { manual: 1.487 }); true");

@@ -138,6 +138,15 @@ const App = {
         if (pullBtn && window.location.protocol.startsWith('http') && window.Api) {
             pullBtn.style.display = '';
         }
+        // 镜像合并的收尾：页面隐藏/卸载前把待发的镜像立刻冲出去，
+        // 否则用户"改完就关页面"会丢掉最后那次镜像（本地 localStorage 仍有，但服务器没有）。
+        const flushMirror = () => this._flushMirror(true);
+        window.addEventListener('pagehide', flushMirror);
+        window.addEventListener('beforeunload', flushMirror);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') flushMirror();
+        });
+
         // http 模式:服务器数据更多时自动反向同步(旧浏览器自愈,防止镜像覆盖服务器新数据)
         this.autoPullIfStale();
         // 补记历史密度决策的灰分响应(页面打开时兜底一次)
@@ -227,16 +236,66 @@ const App = {
     // skipMirror=true 仅写本地：用于启动期默认值补齐/种子灌入——旧本地数据
     // 不能借启动流程镜像覆盖服务器上的新数据（服务器侧导入/训练成果）。
     saveStore(skipMirror) {
+        let body = null;
         try {
-            localStorage.setItem('dmcs_store', JSON.stringify(this.store));
+            body = JSON.stringify(this.store);      // 一次序列化，本地写与镜像复用
+            localStorage.setItem('dmcs_store', body);
         } catch (e) {
             console.warn('localStorage 保存失败:', e);
         }
-        if (skipMirror) return;
+        if (skipMirror || body === null) return;
+        if (!window.Api || !window.location.protocol.startsWith('http')) return;
+        this._scheduleMirror(body);                 // 镜像合并后发送（见 _scheduleMirror）
+    },
+
+    // ============================================================
+    //  整库镜像的合并（2026-09）
+    //  背景：saveStore 有 60+ 调用点，其中自动执行器与粗灰 EMA 都是 1 秒定时器。
+    //  原实现每次 saveStore 都整库 PUT /state —— 单次快照实测 130.3 KB，
+    //  即"自动执行期间每秒往服务器推 130 KB"，且并发下还会与 GET 抢 SQLite 写锁。
+    //  改法：
+    //    · localStorage 仍然**立即**写（它是主存储，不能延后）；
+    //    · 镜像合并到 MIRROR_DEBOUNCE_MS 一次，只发最后一次内容（每次都是全量快照，
+    //      所以"丢掉中间态"不丢数据）；
+    //    · 内容与上次已发送的完全相同则跳过；
+    //    · 页面隐藏/卸载前立刻冲一次（keepalive），避免"刚改完就关页面"服务器没收到。
+    //  安全前提：镜像本身是尽力而为的副本，真正的权威数据在 localStorage 与服务端库；
+    //  即使某次发送失败也不再重试（下一次内容变化时会带上完整快照）。
+    // ============================================================
+    MIRROR_DEBOUNCE_MS: 2000,
+    // Chrome/Edge 对 keepalive 请求体的硬上限是 64 KiB。整库快照实测约 175 KB，远超此限，
+    // 带 keepalive 的 fetch 会被**直接拒绝**（且是 promise 拒绝 → 被 .catch 静默吞掉，
+    // 表现为"冲了但服务器没收到"）。所以只在装得下时才用 keepalive，
+    // 装不下就退回普通 fetch（页面还活着时照常送达；真·卸载时尽力而为）。
+    MIRROR_KEEPALIVE_MAX: 60000,
+    _mirrorTimer: null,
+    _mirrorPending: null,
+    _mirrorSent: null,
+    _mirrorStats: { scheduled: 0, sent: 0, skippedSame: 0, keepalive: 0, noKeepalive: 0 },
+
+    _scheduleMirror(body) {
+        this._mirrorPending = body;
+        this._mirrorStats.scheduled++;
+        if (this._mirrorTimer) return;
+        this._mirrorTimer = setTimeout(() => {
+            this._mirrorTimer = null;
+            this._flushMirror(false);
+        }, this.MIRROR_DEBOUNCE_MS);
+    },
+
+    // immediate=true 表示走"页面隐藏/卸载"路径：能带 keepalive 就带（否则卸载会中断请求）
+    _flushMirror(immediate) {
+        if (this._mirrorTimer) { clearTimeout(this._mirrorTimer); this._mirrorTimer = null; }
+        const body = this._mirrorPending;
+        if (!body) return;
+        if (body === this._mirrorSent) { this._mirrorPending = null; this._mirrorStats.skippedSame++; return; }
+        this._mirrorSent = body;
+        this._mirrorPending = null;
+        this._mirrorStats.sent++;
+        const canKeepalive = !!immediate && body.length <= this.MIRROR_KEEPALIVE_MAX;
+        if (canKeepalive) this._mirrorStats.keepalive++; else this._mirrorStats.noKeepalive++;
         try {
-            if (window.Api && window.location.protocol.startsWith('http')) {
-                window.Api.putState(this.store);
-            }
+            window.Api.putStateBody(body, { keepalive: canKeepalive });
         } catch (e) { /* 后端未启动时静默 */ }
     },
 

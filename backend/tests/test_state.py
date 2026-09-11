@@ -79,6 +79,37 @@ def test_stale_guard_allows_log_shrink():
     client.put("/api/v1/state?force=true", json=SEED)
 
 
+def test_stale_guard_allows_mirror_with_empty_local_only_collections():
+    """回归：前端从服务器拉完数据后，其"纯本地键"仍是空的，镜像**必须**被接受。
+
+    背景（2026-09 真实事故）：守卫曾把 heavy_samples 纳入比较，而
+    App._applyServerState 把 heavySamples 列为纯本地键（从服务器拉取时不覆盖它），
+    于是新浏览器的向量里 heavy_samples 恒为 0 < 服务器的 1 → 每次镜像都被判"回退"，
+    表现为"前端所有改动静默同步不上去"（真实库上实测复现过）。
+    结论：守卫只能比较两端必然一致的口径，不能比较前端设计上就不回传的集合。
+
+    这里构造的正是那种快照：三类测量记录与现库一致，
+    而 heavySamples / manualEntries / importLogs / alerts 都是空的。
+    """
+    client.put("/api/v1/state?force=true", json=SEED)
+    # 先在服务器放一条 heavy_sample，制造"服务器有、浏览器没有"的局面
+    server_has_sample = json.loads(json.dumps(SEED))
+    server_has_sample["heavySamples"] = [{
+        "timestamp": "2026-09-01 08:00:00", "rho": 1.50, "ash_content": 7.9,
+    }]
+    assert client.put("/api/v1/state", json=server_has_sample).json()["ok"] is True
+
+    # 模拟"新浏览器拉完服务器数据"：三类测量记录齐全，但纯本地键为空
+    pulled = json.loads(json.dumps(SEED))
+    pulled["heavySamples"] = []
+    pulled["manualEntries"] = []
+    pulled["importLogs"] = []
+    pulled["alerts"] = []
+    j = client.put("/api/v1/state", json=pulled).json()
+    assert j["ok"] is True, f"镜像被守卫误拒（这正是那次事故的现象）：{j}"
+    client.put("/api/v1/state?force=true", json=SEED)
+
+
 def test_decision_log_roundtrip():
     """密度决策日志(Stage 0)经 auto_state 持久化:PUT 后 GET 应原样返回。"""
     st = json.loads(json.dumps(SEED))
