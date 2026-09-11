@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from ..auth import require_write
 from ..database import get_db
 from ..models import AutoState
 from ..schemas import InputPut
@@ -14,7 +15,7 @@ def list_inputs(db: Session = Depends(get_db)):
     return {s.key: s.value for s in db.query(AutoState).all()}
 
 
-@router.put("/{key}")
+@router.put("/{key}", dependencies=[Depends(require_write)])
 def put_input(key: str, body: InputPut, db: Session = Depends(get_db)):
     s = db.get(AutoState, key)
     if not s:

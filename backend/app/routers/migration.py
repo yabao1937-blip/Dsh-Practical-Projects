@@ -1,6 +1,7 @@
 """localStorage 一次性迁移"""
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from ..auth import require_write
 from ..schemas import MigrateReport
 from ..services import migrate
 
@@ -13,7 +14,7 @@ def preview(store: dict):
     return migrate.preview(store)
 
 
-@router.post("/localstorage", response_model=MigrateReport)
+@router.post("/localstorage", response_model=MigrateReport, dependencies=[Depends(require_write)])
 def apply_migration(store: dict):
     """把前端导出的 dmcs_store JSON 完整迁入库。"""
     return migrate.apply(store)

@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from ..auth import require_write
 from ..database import get_db
 from ..models import CoalRecord
 from ..schemas import CoalRecordIn, CoalRecordList, CoalRecordOut
@@ -29,7 +30,7 @@ def list_records(
     return {"total": total, "items": items}
 
 
-@router.post("", response_model=CoalRecordOut)
+@router.post("", response_model=CoalRecordOut, dependencies=[Depends(require_write)])
 def upsert_record(body: CoalRecordIn, db: Session = Depends(get_db)):
     # 按 (category, ts, system) 唯一键 upsert，从根上防重复导入
     rec = (db.query(CoalRecord)

@@ -23,3 +23,9 @@ backend/inspect_out*.txt
 
 # Office 打开文档时的临时锁文件
 ~$*
+
+# 写接口 token（每台机器自动生成，不入库）
+backend/data/write_token.txt
+
+# force 覆盖前的自动备份（就地回滚用，不入库）
+backend/data/backups/

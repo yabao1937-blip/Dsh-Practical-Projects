@@ -394,6 +394,17 @@ const App = {
             //    超时）：待发副本已在发送前写好，留着重试。
             this.mirrorStatus.lastError = (r && (r.reason || r.error)) || 'unknown';
             this.mirrorStatus.failures++;
+            if (r && r.denied) {
+                // 权限问题（写接口要 token）：留待发副本（token 修正后能补上），
+                // 但提示文案必须说清是权限，而不是"服务器数据更新"。
+                this.mirrorStatus.pending = true;
+                console.warn('写接口拒绝（可能需要 X-DMCS-Token）:', this.mirrorStatus.lastError);
+                if (this.mirrorStatus.failures === 1) {
+                    this.showToast('服务器拒绝写入（写接口需要访问令牌）：请确认页面来自服务器地址 '
+                        + 'http://<服务器IP>:8000/ 打开；本地副本已保留，恢复权限后会自动补发', 'error');
+                }
+                return;
+            }
             if (r && r.rejected) {
                 this._mirrorSent = body;
                 this._clearPendingSlot(stamp);

@@ -5,6 +5,9 @@ const path = require('path');
 
 const BASE = (process.env.DMCS_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const URL = BASE + '/';
+// 注意：本文件的 `const URL` 是字符串，会**遮蔽**全局 URL 类，
+// 所以不能写 new URL(URL)（会报 URL is not a constructor）—— 直接剥协议前缀。
+const HOST = BASE.replace(/^https?:\/\//, '');   // 形如 192.168.43.104:8013
 // 浏览器候选与 verify_mirror_e2e.js 保持一致（原来只硬编码一个 Windows 路径，
 // 与 ci.yml 的预检、另一个脚本的候选列表三处不一致，换 runner 就会红在与代码无关的地方）
 const CANDIDATES = [
@@ -30,7 +33,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     try {
         let page;
         for (let i = 0; i < 30; i++) {
-            try { const l = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json(); page = l.find(t => t.type === 'page' && t.url.includes('127.0.0.1')); if (page) break; } catch (e) {}
+            try { const l = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json(); page = l.find(t => t.type === 'page' && t.url.includes(HOST)); if (page) break; } catch (e) {}
             await sleep(500);
         }
         const ws = new WebSocket(page.webSocketDebuggerUrl);

@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from ..auth import require_write
 from ..database import get_db
 from ..models import ManualEntry
 from ..schemas import ManualEntryIn, ManualEntryOut
@@ -14,7 +15,7 @@ def list_entries(db: Session = Depends(get_db)):
     return db.query(ManualEntry).order_by(ManualEntry.id.desc()).all()
 
 
-@router.post("", response_model=ManualEntryOut)
+@router.post("", response_model=ManualEntryOut, dependencies=[Depends(require_write)])
 def add_entry(body: ManualEntryIn, db: Session = Depends(get_db)):
     e = ManualEntry(**body.model_dump())
     db.add(e)

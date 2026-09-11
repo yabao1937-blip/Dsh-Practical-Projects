@@ -20,12 +20,25 @@ window.Api = {
     // 发送**已序列化**的整库快照。调用方（App._scheduleMirror）已经为了写 localStorage
     // stringify 过一次，这里再序列化一遍纯属浪费（单次快照实测 130 KB）。
     // opts.keepalive：用于页面卸载路径 —— 普通 fetch 在卸载中会被中断，keepalive 才送得出去。
+    // 写接口 token：优先用首页注入的 <meta name="dmcs-token">（服务端下发，零配置），
+    // 其次 localStorage（便于自定义）；file:// 模式下两者都没有 → 不发 header（也不需要）。
+    writeToken() {
+        try {
+            const m = document.querySelector('meta[name="dmcs-token"]');
+            if (m && m.content) return m.content;
+            return localStorage.getItem('dmcs_write_token') || null;
+        } catch (e) { return null; }
+    },
+
     putStateBody(body, opts) {
         const o = opts || {};
         const url = this.base + '/state' + (o.force ? '?force=true' : '');
+        const headers = { 'Content-Type': 'application/json' };
+        const token = this.writeToken();
+        if (token) headers['X-DMCS-Token'] = token;   // 写接口鉴权（backend/app/auth.py）
         const init = {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: body,
         };
         if (o.keepalive) init.keepalive = true;
@@ -39,7 +52,18 @@ window.Api = {
             init.signal = AbortSignal.timeout(o.timeoutMs || 20000);
         }
         return fetch(url, init)
-          .then(r => (r.ok ? r.json() : Promise.reject(new Error('state ' + r.status))))
+          .then(r => {
+              // 401/403 与"内容被守卫拒绝"不同：那是权限问题，提示文案必须不一样，
+              // 而且重试再多次也不会成功（除非 token 被修正）——所以单独归一类 denied。
+              if (r.status === 401 || r.status === 403) {
+                  return r.json().then(j => ({
+                      ok: false, denied: true,
+                      reason: (j && j.detail && j.detail.error) || j.error || ('HTTP ' + r.status),
+                  })).catch(() => ({ ok: false, denied: true, reason: 'HTTP ' + r.status }));
+              }
+              if (!r.ok) return Promise.reject(new Error('state ' + r.status));
+              return r.json();
+          })
           .then(j => {
               if (j && j.ok === false) {
                   // **只有守卫明确的 stale 拒绝**才算"永久拒绝"（重试结果必然相同）。
@@ -62,7 +86,9 @@ window.Api = {
 
     async retrainCoarseModel(range) {
         // 后端训练 MLR+PLS 粗灰模型；返回 { coarseModel(全量), history, production, ... }
+        const tk = this.writeToken();
         const r = await fetch(this.base + '/training/coarse-model?range=' + encodeURIComponent(range || 'jun_jul'), {
+            headers: tk ? { 'X-DMCS-Token': tk } : undefined,
             method: 'POST',
         });
         if (!r.ok) throw new Error('train ' + r.status);

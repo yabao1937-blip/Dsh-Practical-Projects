@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from ..auth import require_write
 from ..database import get_db
 from ..models import Setting
 from ..schemas import SettingOut, SettingPut
@@ -22,7 +23,7 @@ def get_setting(key: str, db: Session = Depends(get_db)):
     return s
 
 
-@router.put("/{key}", response_model=SettingOut)
+@router.put("/{key}", response_model=SettingOut, dependencies=[Depends(require_write)])
 def put_setting(key: str, body: SettingPut, db: Session = Depends(get_db)):
     s = db.get(Setting, key)
     if not s:

@@ -2,7 +2,10 @@
 
 无损映射前端 App.store 到 11 张表。preview() 只规划不写库；apply() 写库。
 """
+import sqlite3
 import json
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -312,6 +315,58 @@ def _plan_vector(p: dict) -> dict:
     return vec
 
 
+BACKUP_KEEP = 20
+
+
+def backup_database(tag: str = "force") -> str | None:
+    """整库覆盖前先做一份一致快照，返回备份文件路径（失败返回 None）。
+
+    为什么必须有：force=true 是唯一能"绕过守卫把库洗掉"的入口。2026-09-11 我就是用一条
+    带空 store 的 force PUT 清空了真实库（529 条记录），最后靠"主库文件恰好还没被
+    checkpoint 覆盖"才捡回来 —— 那是运气，不是机制。
+
+    用 sqlite3 的在线备份 API（Connection.backup）而不是复制文件：WAL 模式下最新的
+    数据可能还在 -wal 里，直接 copy .db 会丢掉它们。
+    非 SQLite（MySQL/PG）暂不备份，返回 None（部署到那类库时应改用各自的备份工具）。
+    """
+    from ..config import DATABASE_URL
+
+    if not DATABASE_URL.startswith("sqlite"):
+        return None
+    src = DATABASE_URL.split("sqlite:///", 1)[-1]
+    try:
+        # 备份放在**该库文件旁边**的 backups/：生产是 backend/data/backups/，
+        # 测试库（conftest 隔离到临时目录）则落在临时目录，不会往仓库里写文件。
+        backup_dir = Path(src).parent / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        # 文件名带**毫秒**并防碰撞：只用秒级时间戳时，"覆盖 → 立刻回滚"这种连着的两次
+        # force 会撞同一个文件名，后一次把前一次的快照**覆盖掉**（回滚点被悄悄弄丢）。
+        # 这个坑是 test_backup 的"回滚演练"断言抓到的。
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+        dest = backup_dir / f"{Path(src).stem}-{tag}-{stamp}.db"
+        n = 1
+        while dest.exists():
+            dest = backup_dir / f"{Path(src).stem}-{tag}-{stamp}-{n}.db"
+            n += 1
+        con = sqlite3.connect(src)
+        try:
+            bck = sqlite3.connect(str(dest))
+            try:
+                con.backup(bck)          # 一致快照（含 WAL 中的最新事务）
+            finally:
+                bck.close()
+        finally:
+            con.close()
+        # 只保留最近 N 份，避免无限增长
+        olds = sorted(backup_dir.glob(f"{Path(src).stem}-*.db"))
+        for f in olds[:-BACKUP_KEEP]:
+            f.unlink(missing_ok=True)
+        return str(dest)
+    except Exception as e:               # 备份失败不阻断写入，但要在返回值里说清楚
+        print(f"[migrate] 备份失败（不阻断 force 写入）: {e}")
+        return None
+
+
 def replace(store: dict, force: bool = False) -> dict:
     """清空业务表后整体重写（PUT /state 整库快照用）。
 
@@ -328,9 +383,11 @@ def replace(store: dict, force: bool = False) -> dict:
     写入范围（force=False）：coal_records / calc_logs / coarse_models / settings / auto_state
     为"清空后按快照重写"；heavy_samples 完全不碰；manual_entries / import_logs / alerts /
     regression_models / coarse_model_history 按自然键**只增不删**（见 MERGE_ONLY_KEYS）。
-    force=True 仍是整库覆盖（备份恢复用）。
+    force=True 仍是整库覆盖（备份恢复用），且**覆盖前会自动备份**（见 backup_database），
+    备份路径写在响应的 backup 字段里；出错时用该文件即可回滚。
     """
     p = _plan(store)
+    backup_path = backup_database("force") if force else None
     db: Session = SessionLocal()
     try:
         if not force:
@@ -366,7 +423,8 @@ def replace(store: dict, force: bool = False) -> dict:
             db.query(t).delete()
         _apply_in_session(db, p)
         db.commit()
-        return {"counts": {t: len(p[t]) for t in p}, "merged": merged, "ok": True}
+        return {"counts": {t: len(p[t]) for t in p}, "merged": merged,
+                "backup": backup_path, "ok": True}
     except Exception as e:
         db.rollback()
         return {"ok": False, "error": str(e)}

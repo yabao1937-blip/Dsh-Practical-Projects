@@ -14,6 +14,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from ..auth import require_write
 from ..database import get_db
 from ..models import CoalRecord, CoarseModel, CoarseModelHistory, Setting
 from ..services import training_sklearn as T
@@ -47,7 +48,7 @@ def _get_setting(db: Session, key: str, default):
     return row.value if row is not None and row.value is not None else default
 
 
-@router.post("/coarse-model")
+@router.post("/coarse-model", dependencies=[Depends(require_write)])
 def train_coarse_model(
     train_range: Literal["jun_jul", "30d", "all"] = Query("jun_jul", alias="range"),
     db: Session = Depends(get_db),

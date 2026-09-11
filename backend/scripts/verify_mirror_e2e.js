@@ -26,6 +26,9 @@ const path = require('path');
 
 const BASE = (process.env.DMCS_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const URL = BASE + '/';
+// 注意：本文件的 `const URL` 是字符串，会**遮蔽**全局 URL 类，
+// 所以不能写 new URL(URL)（会报 URL is not a constructor）—— 直接剥协议前缀。
+const HOST = BASE.replace(/^https?:\/\//, '');   // 形如 192.168.43.104:8013
 const CANDIDATES = [
     process.env.DMCS_EDGE,
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -41,8 +44,22 @@ function check(name, ok, detail) {
     console.log(`${name}: ${ok ? 'PASS' : 'FAIL'}${detail ? ' | ' + detail : ''}`);
     if (!ok) fails.push(name);
 }
+// 本脚本是**在服务器本机运行的测试工具**，因此允许读服务器上的 token 文件来访问写接口。
+// （浏览器侧走的是另一条路：首页把 token 注入 <meta>，由 api.js 自动带上 —— 那才是被测对象，
+//  所以下面的浏览器断言仍然真实验证了"页面下发 token → 浏览器写入"这条链。）
+function writeToken() {
+    if (process.env.DMCS_WRITE_TOKEN) return process.env.DMCS_WRITE_TOKEN.trim();
+    try {
+        const p = path.join(__dirname, '..', 'data', 'write_token.txt');
+        return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : null;
+    } catch (e) { return null; }
+}
+
 const api = async (p, init) => {
-    const r = await fetch(BASE + p, init);
+    const opts = Object.assign({}, init);
+    const tk = writeToken();
+    if (tk) opts.headers = Object.assign({}, opts.headers, { 'X-DMCS-Token': tk });
+    const r = await fetch(BASE + p, opts);
     if (!r.ok) {
         // 把服务器**说的内容**带出来：只报 HTTP 状态在 CI 上等于没有信息
         // （422/500 的正文才说明是哪个字段/哪一步不行）
@@ -121,7 +138,7 @@ async function seed() {
         for (let i = 0; i < 40; i++) {
             try {
                 const l = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-                page = l.find(t => t.type === 'page' && t.url.includes('127.0.0.1'));
+                page = l.find(t => t.type === 'page' && t.url.includes(HOST));   // 按目标主机匹配，别写死 127.0.0.1
                 if (page) break;
             } catch (e) { /* 调试端口尚未起来 */ }
             await sleep(500);
