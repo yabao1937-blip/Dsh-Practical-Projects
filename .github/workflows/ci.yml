@@ -98,56 +98,64 @@ jobs:
           node --version
           Write-Host "Edge: $edge"
 
-      - name: 启动后端并等待就绪
+      # 关键：起后端、跑脚本、停后端必须在**同一个 step** 里。
+      # GitHub 运行器在每个 step 结束时回收该步骤的进程树 —— 2026-09-11 实测：
+      # 上一步 Start-Process 起的 uvicorn，到下一步就已经死了，脚本只报
+      # `fetch failed`，而"等待就绪"那一步明明刚探到 200（这正是 e2e 一直红的原因）。
+      # 失败时发 GitHub annotation：注解可经公开 API 读到，而作业日志需要管理员权限。
+      - name: 起后端 → 跑两个 E2E 脚本 → 停后端（完整输出，不截断）
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath "python" `
+          $srvOut = "$env:TEMP\ci-server.log"
+          $srvErr = "$env:TEMP\ci-server.err.log"
+          $server = Start-Process -FilePath "python" `
             -ArgumentList "-m","uvicorn","app.main:app","--host","127.0.0.1","--port","8000" `
             -PassThru -WindowStyle Hidden `
-            -RedirectStandardOutput "$env:TEMP\ci-server.log" `
-            -RedirectStandardError "$env:TEMP\ci-server.err.log"
-          $p.Id | Out-File "$env:TEMP\ci-server.pid"
-          # 探针用短超时（连接被拒是立刻返回的；只有"端口被别的东西占着"才会吃满超时）
-          $sw = [Diagnostics.Stopwatch]::StartNew()
-          for ($i = 0; $i -lt 45; $i++) {
-            try {
-              $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000/api/v1/health" -TimeoutSec 2
-              if ($r.StatusCode -eq 200) {
-                Write-Host "后端就绪（第 $($i+1) 次探测，用时 $([int]$sw.Elapsed.TotalSeconds) 秒）"
-                exit 0
+            -RedirectStandardOutput $srvOut -RedirectStandardError $srvErr
+          $failed = @()
+          try {
+            # 探针用短超时（连接被拒是立刻返回的；只有"端口被别的东西占着"才吃满超时）
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            $ready = $false
+            for ($i = 0; $i -lt 45; $i++) {
+              try {
+                $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000/api/v1/health" -TimeoutSec 2
+                if ($r.StatusCode -eq 200) {
+                  Write-Host "后端就绪（第 $($i+1) 次探测，用时 $([int]$sw.Elapsed.TotalSeconds) 秒）"
+                  $ready = $true; break
+                }
+              } catch { Start-Sleep -Milliseconds 800 }
+            }
+            if (-not $ready) {
+              Write-Host "---- $srvOut ----"; Get-Content $srvOut -ErrorAction SilentlyContinue
+              Write-Host "---- $srvErr ----"; Get-Content $srvErr -ErrorAction SilentlyContinue
+              throw "后端在约 $([int]$sw.Elapsed.TotalSeconds) 秒内未就绪（上限 45 次探测）"
+            }
+
+            $cases = @(
+              @{ name = '镜像写路径'; file = 'scripts/verify_mirror_e2e.js' },
+              @{ name = '密度决策日志'; file = 'scripts/verify_decision_log.js' }
+            )
+            foreach ($c in $cases) {
+              $log = Join-Path $env:TEMP ("e2e-" + [IO.Path]::GetFileNameWithoutExtension($c.file) + ".log")
+              Write-Host "==== $($c.name)：node $($c.file) ===="
+              & node $c.file *>&1 | Tee-Object -FilePath $log
+              $code = $LASTEXITCODE
+              if ($code -ne 0) {
+                $tail = ((Get-Content $log -Tail 12 -ErrorAction SilentlyContinue) -join ' / ') -replace '[\r\n]+', ' '
+                Write-Host "::error title=$($c.name)失败(exit=$code)::$tail"
+                $failed += "$($c.name)(exit=$code)"
               }
-            } catch { Start-Sleep -Milliseconds 800 }
+            }
+          } finally {
+            if ($server -and -not $server.HasExited) {
+              Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+              Write-Host "已停止后端 PID $($server.Id)"
+            }
+            Write-Host "---- server.err.log（末尾）----"
+            Get-Content $srvErr -Tail 20 -ErrorAction SilentlyContinue
           }
-          Write-Host "---- server.log ----"; Get-Content "$env:TEMP\ci-server.log" -ErrorAction SilentlyContinue
-          Write-Host "---- server.err.log ----"; Get-Content "$env:TEMP\ci-server.err.log" -ErrorAction SilentlyContinue
-          throw "后端在约 $([int]$sw.Elapsed.TotalSeconds) 秒内未就绪（上限 45 次探测）"
-
-      # 完整输出，不截断：任何 FAIL 行都必须留在日志里。
-      # 失败时额外发一条 GitHub annotation —— 注解可以通过公开 API 读到，
-      # 而作业日志需要仓库管理员权限（2026-09-11 排查"1 秒就红"时正卡在这里）。
-      - name: 镜像写路径（用例0 冷启动写不得被守卫拒绝 / 用例1 失败不静默+重试送达 / 用例2 守卫拒绝≠传输失败）
-        shell: pwsh
-        run: |
-          $log = "$env:TEMP\e2e-mirror.log"
-          node scripts/verify_mirror_e2e.js *>&1 | Tee-Object -FilePath $log
-          $code = $LASTEXITCODE
-          if ($code -ne 0) {
-            $tail = ((Get-Content $log -Tail 12 -ErrorAction SilentlyContinue) -join ' ⏎ ') -replace '[\r\n]+', ' '
-            Write-Host "::error title=镜像E2E失败(exit=$code)::$tail"
-          }
-          exit $code
-
-      - name: 密度决策日志链路
-        shell: pwsh
-        run: |
-          $log = "$env:TEMP\e2e-decision.log"
-          node scripts/verify_decision_log.js *>&1 | Tee-Object -FilePath $log
-          $code = $LASTEXITCODE
-          if ($code -ne 0) {
-            $tail = ((Get-Content $log -Tail 12 -ErrorAction SilentlyContinue) -join ' ⏎ ') -replace '[\r\n]+', ' '
-            Write-Host "::error title=决策日志E2E失败(exit=$code)::$tail"
-          }
-          exit $code
+          if ($failed.Count -gt 0) { throw "E2E 失败: $($failed -join ' , ')" }
 
       - name: 失败时输出后端日志（成功时不打印，避免噪音）
         if: failure()
@@ -156,15 +164,21 @@ jobs:
           Write-Host "---- server.log ----"; Get-Content "$env:TEMP\ci-server.log" -ErrorAction SilentlyContinue
           Write-Host "---- server.err.log ----"; Get-Content "$env:TEMP\ci-server.err.log" -ErrorAction SilentlyContinue
 
-      # 自托管 runner 上必须收尾，否则会留下占着 8000 端口的僵尸进程，
-      # 让下一次运行以"端口被占"的假红开始。
-      - name: 收尾：停掉后端（无论成败）
+      # 兜底收尾：自托管 runner 上若还有残留的 8000 监听进程，会让下一次运行以
+      # "端口被占"的假红开始。（正常路径已在上一个 step 的 finally 里停掉；
+      # 而且 GitHub 运行器本身在 step 结束时会回收进程树，这里只是双保险。）
+      - name: 收尾：确保没有残留的后端占着 8000（无论成败）
         if: always()
         shell: pwsh
         run: |
-          $pidFile = "$env:TEMP\ci-server.pid"
-          if (Test-Path $pidFile) {
-            $serverPid = Get-Content $pidFile
-            try { Stop-Process -Id $serverPid -Force -ErrorAction Stop; Write-Host "已停止后端 PID $serverPid" }
-            catch { Write-Host "后端进程已不在（PID $serverPid）" }
+          $conns = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
+          if (-not $conns) { Write-Host "8000 无监听进程"; exit 0 }
+          foreach ($c in $conns) {
+            $proc = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue
+            if ($proc -and $proc.ProcessName -like "python*") {
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+              Write-Host "已停止残留后端 PID $($proc.Id)"
+            } else {
+              Write-Host "8000 被非 python 进程占用: $($proc.ProcessName) (PID $($c.OwningProcess))，未处理"
+            }
           }
