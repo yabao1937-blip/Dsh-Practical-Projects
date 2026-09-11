@@ -132,14 +132,19 @@ jobs:
               throw "后端在约 $([int]$sw.Elapsed.TotalSeconds) 秒内未就绪（上限 45 次探测）"
             }
 
+            # allowReal：CI 的三个用例**顺序共用同一个库**，跑到第三个时库里已有前两个
+            # 用例播种的记录，于是"非空库拒跑"会把它挡下（本地是各起一个全新临时库才没暴露）。
+            # CI 的库是一次性的、且本来就归这些用例所有，所以只给第三个用例显式放行；
+            # 前两个仍保持严格 —— 那条守卫是给"人对着真实库跑"准备的。
             $cases = @(
-              @{ name = '镜像写路径'; file = 'scripts/verify_mirror_e2e.js' },
-              @{ name = '密度决策日志'; file = 'scripts/verify_decision_log.js' },
-              @{ name = '实测密度计(仅展示)'; file = 'scripts/verify_density_actual.js' }
+              @{ name = '镜像写路径'; file = 'scripts/verify_mirror_e2e.js'; allowReal = $null },
+              @{ name = '密度决策日志'; file = 'scripts/verify_decision_log.js'; allowReal = $null },
+              @{ name = '实测密度计(仅展示)'; file = 'scripts/verify_density_actual.js'; allowReal = '1' }
             )
             foreach ($c in $cases) {
               $log = Join-Path $env:TEMP ("e2e-" + [IO.Path]::GetFileNameWithoutExtension($c.file) + ".log")
               Write-Host "==== $($c.name)：node $($c.file) ===="
+              if ($c.allowReal) { $env:DMCS_ALLOW_REAL_DB = $c.allowReal } else { Remove-Item Env:\DMCS_ALLOW_REAL_DB -ErrorAction SilentlyContinue }
               & node $c.file *>&1 | Tee-Object -FilePath $log
               $code = $LASTEXITCODE
               if ($code -ne 0) {
