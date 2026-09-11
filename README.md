@@ -15,7 +15,7 @@ dense-medium-density-control-system/
 │   ├── migrations/             # 迁移（0001 init + 0002 训练列）
 │   ├── data/                   # seed_store.json + dense_medium.db(SQLite)
 │   ├── scripts/                # golden dump(4) + 前端回归 verify(5) + Excel 生成器(generate_*.py)
-│   ├── tests/                  # pytest（48 用例）
+│   ├── tests/                  # pytest（以收集为准，当前 76 用例）
 │   └── app/
 │       ├── main.py             # FastAPI 应用（建表 + 路由 + 前端静态托管）
 │       ├── config.py           # DATABASE_URL、FRONTEND_DIR（相对定位）
@@ -59,7 +59,7 @@ python -m venv .venv
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q          # 57 用例（临时库隔离,不触真实数据）
+.\.venv\Scripts\python.exe -m pytest -q          # 以收集为准（当前 76 用例，临时库隔离,不触真实数据）
 node scripts\dump_train_js.js                     # 重生成训练 oracle（需 Edge）
 node scripts\import_xlsx_via_ui.js [目录]         # 通过真实 UI 路径批量导入三表 xlsx（需后端+Edge）
 node scripts\verify_pull_from_server.js           # 双向同步/防回退端到端验证

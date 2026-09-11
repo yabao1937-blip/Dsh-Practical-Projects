@@ -1,6 +1,5 @@
 """重介密控系统后端（前后端分离，coal_records 统一主表）"""
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import models  # noqa: F401  确保建表前模型已注册
@@ -17,12 +16,12 @@ app = FastAPI(
     version="0.2.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# 2026-09 删除 CORSMiddleware(allow_origins=["*"])：
+# 前端由本服务**同源**托管（见文件末尾 mount "/"），api.js 的 base 是相对路径 '/api/v1'，
+# 前端永不跨源 → CORS 中间件实际无用，却把"任意来源可读写"当作默认暴露面。
+# 注意：删它**不等于**加强了安全 —— 本服务目前没有任何鉴权，
+# PUT /api/v1/state?force=true 可被同网段任意机器整库覆盖（见待办：访问控制）。
+# 将来前端若独立部署（换域名/端口），再按白名单显式开启。
 
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(migration.router, prefix="/api/v1")

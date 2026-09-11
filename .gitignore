@@ -12,8 +12,11 @@ dist/
 .idea/
 .pytest_cache/
 
-# 运行时数据库
+# 运行时数据库（含 SQLite WAL 的伴生文件）
 backend/data/*.db
+*.db-wal
+*.db-shm
+*.db-journal
 
 # 临时 / 检查输出
 backend/inspect_out*.txt
