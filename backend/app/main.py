@@ -38,3 +38,22 @@ app.include_router(training.router, prefix="/api/v1")
 
 # 静态托管前端（同源，规避 file:// 与 CORS）；挂在所有 API 路由之后
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+
+
+@app.middleware("http")
+async def no_cache_static_assets(request, call_next):
+    """静态前端强制每次校验（ETag/Last-Modified 命中会返回 304，开销极小）。
+
+    为什么必须加：index.html 没法用 `?v=N` 做缓存失效——JS/CSS 靠版本号参数换了 URL，
+    但 HTML 自己的 URL 永远不变。StaticFiles 默认只发 ETag/Last-Modified、不发 Cache-Control，
+    浏览器于是走**启发式缓存**（约取 Last-Modified 之后 10% 的时间当新鲜期），
+    这期间直接吃本地副本、连校验请求都不发，表现为「前端改了但页面没更新」，
+    只能靠用户手动 Ctrl+F5 —— 每次部署都要解释一遍。加了 no-cache 后：
+    文件没变 → 304（几十字节）；文件变了 → 立刻拿到新的。
+
+    只作用于静态资源；/api 不在此列（JSON 响应另有语义，且带 no-store 会禁用正常缓存策略）。
+    """
+    resp = await call_next(request)
+    if not request.url.path.startswith("/api"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
