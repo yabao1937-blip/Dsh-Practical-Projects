@@ -20,6 +20,9 @@ const CollectPage = {
         { id: 'ash_501', name: '501皮带灰分仪', metric: '灰分', unit: '%', min: 7, max: 9.5, value: 8.52, source: '自动', special: 'ash_501' },
         { id: 'ash_502', name: '502皮带灰分仪', metric: '灰分', unit: '%', min: 7, max: 9.5, value: 10.68, source: '自动', special: 'ash_502' },
         { id: 'density', name: '密度计', metric: '密度', unit: 'g/cm³', min: 1.35, max: 1.60, value: 1.450, source: '自动', special: 'density' },
+        // 实测密度计（2026-09）：人工实测值，作为比在线密度计更权威的参考。
+        // **仅展示**：不参与建议密度/灰分公式/模型；未录入时显示 —（没有仪表默认值可回退）。
+        { id: 'density_actual', name: '实测密度计', metric: '密度', unit: 'g/cm³', min: 1.35, max: 1.60, value: null, source: '人工实测', special: 'density_actual' },
         { id: 'scale_501', name: '501皮带秤', metric: '煤量', unit: 't/h', min: 100, max: 400, value: 268.5, source: '自动', special: 'scale_501' },
         { id: 'scale_502', name: '502皮带秤', metric: '煤量', unit: 't/h', min: 100, max: 400, value: 235.2, source: '自动', special: 'scale_502' },
         { id: 'level_tail', name: '精磁尾液位计', metric: '液位', unit: '%', min: 20, max: 80, value: 55, source: '自动', special: 'level_tail' },
@@ -40,6 +43,10 @@ const CollectPage = {
         ],
         density_meter: [
             { key: 'value', label: '密度值(g/cm³)', type: 'number' }
+        ],
+        // 实测密度计（人工实测）：与在线密度计分开记账，互不覆盖
+        density_actual: [
+            { key: 'value', label: '实测密度(g/cm³)', type: 'number' }
         ],
         belt_scale: [
             { key: 'value', label: '煤量(t/h)', type: 'number' },
@@ -115,8 +122,19 @@ const CollectPage = {
             const statusClass = ok ? 'status-good' : 'status-warn';
             const statusText = hasValue ? (ok ? '正常' : '偏离') : '—';
             const statusIcon = hasValue ? (ok ? '&#10003;' : '&#9888;') : '';
+            // 实测密度计：当前值后面直接跟上与在线密度计的偏差（Δ），超阈值标黄
+            let devHtml = '';
+            if (inst.special === 'density_actual') {
+                const d = App.densityActualDeviation();
+                if (d.dev != null) {
+                    const warn = Math.abs(d.dev) > App.DENSITY_ACTUAL.devWarn;
+                    devHtml = ` <span style="font-size:11px;${warn ? 'color:var(--accent-orange)' : 'color:var(--text-muted)'}"`
+                        + ` title="实测 ${d.actual} − 在线 ${d.online} = ${d.dev > 0 ? '+' : ''}${d.dev} g/cm³">`
+                        + `Δ${d.dev > 0 ? '+' : ''}${d.dev}</span>`;
+                }
+            }
             const valueCell = isTotal
-                ? `<span class="total-edit-cell" title="${lockedFactor ? chain : '双击修改（手动值，清空恢复自动）'}" ondblclick="CollectPage.editTotalInput('${inst.special}', this)"${lockedFactor ? ' style="color:var(--accent-red);opacity:0.75"' : ''}>${hasValue ? value : '—'}</span>`
+                ? `<span class="total-edit-cell" title="${lockedFactor ? chain : '双击修改（手动值，清空恢复自动）'}" ondblclick="CollectPage.editTotalInput('${inst.special}', this)"${lockedFactor ? ' style="color:var(--accent-red);opacity:0.75"' : ''}>${hasValue ? value : '—'}</span>${devHtml}`
                 : `<span style="font-weight:600;${ok ? '' : 'color:var(--accent-orange)'}">${inst.value}</span>`;
             // 总精煤灰分行：数据来源切换下拉（手动/计算）
             const sourceCell = (isTotal && inst.special === 'totalAsh')
@@ -204,7 +222,7 @@ const CollectPage = {
             case 'coarseAsh': return App.resolveCoarseAsh();
             case 'floatAsh': return App.resolveFloatAsh();
             case 'ash_501': case 'ash_502': case 'scale_501': case 'scale_502':
-            case 'density': case 'level_tail': return App.resolveInstrument(special);
+            case 'density': case 'density_actual': case 'level_tail': return App.resolveInstrument(special);
             case 'heavyAsh': return App.resolveHeavyAsh();
         }
         return null;
@@ -223,7 +241,7 @@ const CollectPage = {
             case 'coarseAsh': return App.coarseAshLayer();
             case 'floatAsh': return App.floatAshLayer();
             case 'ash_501': case 'ash_502': case 'scale_501': case 'scale_502':
-            case 'density': case 'level_tail': return App.instrumentLayer(special);
+            case 'density': case 'density_actual': case 'level_tail': return App.instrumentLayer(special);
             case 'heavyAsh': return App.heavyAshLayer();
         }
         return null;
@@ -240,6 +258,20 @@ const CollectPage = {
             case 'floatAsh': App.setFloatAshInput({ manual: v }); break;
             case 'ash_501': case 'ash_502': case 'scale_501': case 'scale_502':
             case 'density': case 'level_tail': App.setInstrumentInput(special, { manual: v }); break;
+            case 'density_actual': {
+                // 量程校验：1.30~1.65 之外拒收（手滑多打一位）；1.35~1.60 之外只是质量状态标黄
+                const R = App.DENSITY_ACTUAL;
+                if (v != null && (v < R.hardMin || v > R.hardMax)) {
+                    App.showToast(`实测密度 ${v} 超出可接受范围 ${R.hardMin}~${R.hardMax} g/cm³，已拒绝录入`
+                        + `（正常分选密度 ${R.softMin}~${R.softMax}）`, 'error');
+                    break;
+                }
+                App.setInstrumentInput('density_actual', { manual: v });
+                if (v != null && (v < R.softMin || v > R.softMax)) {
+                    App.showToast(`实测密度 ${v} 超出常规范围 ${R.softMin}~${R.softMax} g/cm³，已记录但请核对`, 'warning');
+                }
+                break;
+            }
             case 'heavyAsh': App.setHeavyAshInput({ manual: v }); break;
         }
         this.renderTable();
@@ -251,7 +283,7 @@ const CollectPage = {
         if (!inst) return;
         const mapping = {
             ash_501: 'ash_meter', ash_502: 'ash_meter',
-            density: 'density_meter',
+            density: 'density_meter', density_actual: 'density_actual',
             scale_501: 'belt_scale', scale_502: 'belt_scale',
             level_tail: 'magnetic_tail', float_ash: 'float_ash'
         };
@@ -302,6 +334,14 @@ const CollectPage = {
         if (cat === 'heavy_ash_sample') {
             const dEl = document.getElementById('manual-field-density');
             if (dEl) dEl.value = App.resolveDensity();
+        }
+
+        // 实测密度计：只预填**上一次实测值**（没有就留空）。
+        // 刻意不预填在线密度计的值 —— 那会让人把在线值当实测值提交，实测就失去意义了。
+        if (cat === 'density_actual') {
+            const aEl = document.getElementById('manual-field-value');
+            const prev = App.resolveInstrument('density_actual');
+            if (aEl) aEl.value = (prev != null) ? prev : '';
         }
 
         // 设置默认时间
@@ -400,6 +440,7 @@ const CollectPage = {
             }
             case 'ash_meter':
             case 'density_meter':
+            case 'density_actual':
             case 'belt_scale':
                 App.store.calcLogs.push({
                     id: App.store.calcLogs.length + 1,
@@ -494,7 +535,8 @@ const CollectPage = {
             });
         }
         const catNames = {
-            ash_meter: '灰分仪', density_meter: '密度计', belt_scale: '皮带秤',
+            ash_meter: '灰分仪', density_meter: '密度计', density_actual: '实测密度计',
+            belt_scale: '皮带秤',
             magnetic_tail: '精磁尾液位', float_ash: '浮精灰分', heavy_ash_sample: '重介精煤灰分采样'
         };
         const tbody = document.getElementById('manual-history-tbody');
@@ -535,6 +577,7 @@ const CollectPage = {
             case 'float_ash': removeRelated(App.store.floatCoal); break;
             case 'ash_meter':
             case 'density_meter':
+            case 'density_actual':
             case 'belt_scale': removeRelated(App.store.calcLogs); break;
         }
 

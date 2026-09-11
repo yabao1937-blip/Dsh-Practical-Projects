@@ -134,7 +134,8 @@ jobs:
 
             $cases = @(
               @{ name = '镜像写路径'; file = 'scripts/verify_mirror_e2e.js' },
-              @{ name = '密度决策日志'; file = 'scripts/verify_decision_log.js' }
+              @{ name = '密度决策日志'; file = 'scripts/verify_decision_log.js' },
+              @{ name = '实测密度计(仅展示)'; file = 'scripts/verify_density_actual.js' }
             )
             foreach ($c in $cases) {
               $log = Join-Path $env:TEMP ("e2e-" + [IO.Path]::GetFileNameWithoutExtension($c.file) + ".log")

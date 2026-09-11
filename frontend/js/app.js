@@ -54,6 +54,10 @@ const App = {
         // 在线仪表权威值（手动 > 录入 > 默认）：其他页面统一从这里取数
         instrumentInputs: {
             ash_501:   { manual: null }, ash_502:   { manual: null },
+            // 实测密度计（2026-09 新增）：操作员/化验室实测值，作为比在线密度计更权威的参考。
+            // **仅展示**：不参与建议密度/灰分公式/模型（密度指导只对"调整量"敏感，对密度计读数不敏感），
+            // 目前只用于：① 两个界面展示；② 与在线密度计的偏差；③ 记入密度决策日志 ctx 供日后标定。
+            density_actual: { manual: null },
             scale_501: { manual: null }, scale_502: { manual: null },
             density:   { manual: null }, level_tail: { manual: null },
         },
@@ -126,6 +130,7 @@ const App = {
         if (!this.store.instrumentInputs) {
             this.store.instrumentInputs = {
                 ash_501: { manual: null }, ash_502: { manual: null },
+                density_actual: { manual: null },
                 scale_501: { manual: null }, scale_502: { manual: null },
                 density: { manual: null }, level_tail: { manual: null },
             };
@@ -779,6 +784,7 @@ const App = {
             coarseCalc: { screen315: null, waterUnder: null },
             instrumentInputs: {
                 ash_501: { manual: null }, ash_502: { manual: null },
+                density_actual: { manual: null },
                 scale_501: { manual: null }, scale_502: { manual: null },
                 density: { manual: null }, level_tail: { manual: null },
             },
@@ -1272,6 +1278,25 @@ const App = {
     INSTRUMENT_DEFAULT: {
         ash_501: 8.8, ash_502: 7.9, scale_501: 268.5, scale_502: 235.2,
         density: 1.450, level_tail: 55, float_ash: 9.85,
+        // density_actual **刻意没有默认值**：实测值只应来自人工录入，
+        // 给它编一个默认（例如取在线值）会让人分不清哪条是真实测。
+    },
+
+    // 实测密度计的量程与偏差阈值（两处界面共用同一份口径，避免各写一遍各不一致）
+    DENSITY_ACTUAL: {
+        hardMin: 1.30, hardMax: 1.65,     // 之外**拒收**（手滑多打一位）
+        softMin: 1.35, softMax: 1.60,     // 之外但在硬限内 → 质量状态标黄"偏离"
+        devWarn: 0.02,                    // |实测−在线| 超过它 → 卡片上标黄（"已知密度计存在误差"看的就是这个）
+    },
+
+    // 实测密度 vs 在线密度计的偏差（两者都有效才算）。**只用于展示**。
+    densityActualDeviation() {
+        const n = v => (typeof v === 'number' && isFinite(v)) ? v : null;
+        let actual = null, online = null;
+        try { actual = n(this.resolveInstrument('density_actual')); } catch (e) { /* 未录入 */ }
+        try { online = n(this.resolveInstrument('density')); } catch (e) { /* 仪表未接 */ }
+        if (actual == null || online == null) return { actual: actual, online: online, dev: null };
+        return { actual: actual, online: online, dev: +(actual - online).toFixed(3) };
     },
 
     // ============================================================
@@ -1338,6 +1363,18 @@ const App = {
                     } catch (e) { /* 忽略坏记录 */ }
                 }
             }
+        } else if (id === 'density_actual') {
+            // 录入：手工补录的"实测密度计"最新一条（calc_type=density_actual）。
+            // 注意与在线密度计完全分开：它读 density_meter / ash_density，本行只读 density_actual，
+            // 两边不会互相污染。
+            const logs = (this.store.calcLogs || []).filter(l => l.calc_type === 'density_actual');
+            const R = this.DENSITY_ACTUAL;
+            for (let i = logs.length - 1; i >= 0; i--) {
+                try {
+                    const v = +JSON.parse(logs[i].input_json || '{}').value;
+                    if (isFinite(v) && v >= R.hardMin && v <= R.hardMax) { entry = v; break; }
+                } catch (e) { /* 忽略坏记录 */ }
+            }
         } else if (id === 'level_tail') {
             // 录入：精磁尾最新一条液位
             const list = this.store.magneticTail || [];
@@ -1380,12 +1417,24 @@ const App = {
                 }
                 return false;
             }
+            if (id === 'density_actual') {
+                const R = this.DENSITY_ACTUAL;
+                return (this.store.calcLogs || []).some(l => {
+                    if (l.calc_type !== 'density_actual') return false;
+                    try {
+                        const v = +JSON.parse(l.input_json || '{}').value;
+                        return isFinite(v) && v >= R.hardMin && v <= R.hardMax;
+                    } catch (e) { return false; }
+                });
+            }
             if (id === 'level_tail') {
                 const list = this.store.magneticTail || [];
                 return list.some(m => typeof m.level === 'number' && m.level > 0);
             }
             return false;
         })();
+        // 实测密度计没有"仪表默认值"这一层，所以叫"未录入"，不要写成"默认(仪表)"
+        if (id === 'density_actual') return hasEntry ? '录入' : '未录入';
         return hasEntry ? '录入' : '默认(仪表)';
     },
 
@@ -1851,6 +1900,9 @@ const App = {
             sys401: last ? (last.sys401 || 0) : null, sys402: last ? (last.sys402 || 0) : null,
             miningFace: last ? (last.mining_face || '') : '',
             levelTail: (() => { try { return this.resolveInstrument('level_tail'); } catch (e) { return null; } })(),
+            // 实测密度计（2026-09）：只记录、不参与决策。有了它，以后可以拿决策日志
+            // 标定"在线密度计 vs 实测"的偏差随时间/工况的变化。
+            densityActual: (() => { try { return this.resolveInstrument('density_actual'); } catch (e) { return null; } })(),
         };
     },
 
@@ -1897,7 +1949,7 @@ const App = {
         const head = ['决策时间', '触发', '方案', '目标灰分', '容差',
                       'ρ旧', 'ρ新', 'Δρ建议', 'ΔA等效', 'K', 'K来源', '重介灰分', '总灰分',
                       '带煤量', '原煤灰分', '脱粉473', '脱粉474', '系统A', '系统B', '系统401', '系统402',
-                      '工作面', '精磁尾液位',
+                      '工作面', '精磁尾液位', '实测密度',
                       '响应状态', '响应时间', '滞后(分)', '响应来源', 'ρ实测', '重介灰分实测', 'Δρ实测', 'ΔA实测'];
         const rows = log.map(e => {
             const c = e.ctx || {};
@@ -1909,6 +1961,7 @@ const App = {
                 e.rhoCur, e.rhoNew, e.deltaRho, e.deltaA, e.kUsed, e.kSource, e.heavyAsh, e.totalAsh,
                 c.coalAmount ?? '', c.rawAsh ?? '', c.desl473 ?? '', c.desl474 ?? '',
                 c.sysA ?? '', c.sysB ?? '', c.sys401 ?? '', c.sys402 ?? '', c.miningFace ?? '', c.levelTail ?? '',
+                c.densityActual ?? '',
                 state, r ? (r.ts || '') : '', r ? (r.lagMin ?? '') : '', r ? (SRC[r.source] || r.source || '') : '',
                 r ? (r.rhoNow ?? '') : '', r ? (r.heavyAshNow ?? '') : '',
                 r ? (r.dRhoActual ?? '') : '', r ? (r.dAActual ?? '') : '',
@@ -1927,6 +1980,8 @@ const App = {
             ['响应状态', '待补记=决策后尚未出现人工化验；作废=窗口内又发生了新的密度决策，累积量无法归属'],
             ['响应来源', '只取人工化验（采样记录 / 在线仪表手动录入）；不用在线仪表自动值——那是被控量，闭环下 ΔA≈0'],
             ['滞后(分)', '从决策到取样化验的分钟数，用于判断过程是否已到位'],
+            ['实测密度', '决策时的实测密度计读数（人工录入）。**仅记录、不参与建议密度的计算**；'
+                       + '与 ρ旧(在线密度计) 相减即为两台密度计的偏差，可用于标定在线密度计'],
         ];
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(notes), '口径说明');
         XLSX.writeFile(wb, `密度决策日志_${rows.length}条.xlsx`);

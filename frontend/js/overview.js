@@ -224,6 +224,29 @@ const OverviewPage = {
                     effectEl.textContent = effect;
                 }
             }
+            // 实测密度计（仅展示）：显示实测值 + 与在线密度计的偏差；只在这里画，不进入任何计算
+            const dDev = App.densityActualDeviation();
+            const dEl = document.getElementById(`density-actual-${sys.id}`);
+            if (dEl) {
+                dEl.textContent = dDev.actual != null ? dDev.actual.toFixed(3) : '--';
+                if (dDev.actual != null) {
+                    dEl.title = `实测密度计 ${dDev.actual} g/cm³（人工实测，仅展示，不参与建议密度计算）`;
+                }
+            }
+            const dDevEl = document.getElementById(`density-actual-dev-${sys.id}`);
+            if (dDevEl) {
+                if (dDev.dev == null) {
+                    dDevEl.textContent = dDev.actual == null ? '' : '（在线值不可用，无法比较）';
+                    dDevEl.style.color = 'var(--text-muted)';
+                } else {
+                    const warn = Math.abs(dDev.dev) > App.DENSITY_ACTUAL.devWarn;
+                    dDevEl.textContent = `Δ${dDev.dev > 0 ? '+' : ''}${dDev.dev} vs 在线 ${dDev.online.toFixed(3)}`;
+                    dDevEl.style.color = warn ? 'var(--accent-orange)' : 'var(--text-muted)';
+                    dDevEl.title = warn
+                        ? `两台密度计相差 ${dDev.dev} g/cm³，超过 ±${App.DENSITY_ACTUAL.devWarn}，建议核对在线密度计`
+                        : `与在线密度计相差 ${dDev.dev} g/cm³（阈值 ±${App.DENSITY_ACTUAL.devWarn}）`;
+                }
+            }
             document.getElementById(`source-${sys.id}`).textContent = hasData ? (heavyMode ? '重介灰分实测值' : '在线仪表(总精煤灰分)') : '--';
             document.getElementById(`update-time-${sys.id}`).textContent = hasData ? now : '--';
 
