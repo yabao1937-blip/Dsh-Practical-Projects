@@ -1053,75 +1053,26 @@ const ImportPage = {
         return { coarse: last(App.store.coarseCoal), float: last(App.store.floatCoal), ad: last(ad) };
     },
 
+    // 生成推测简报：生成后弹窗给「摘要 + 最近 20 行预览」，完整表格在「推测简报」独立页查看。
+    // 原来把 263 行 × 17 列塞进 800px 宽的弹窗，实测只能看到全部列宽的 38%，必须横向拉，
+    // 已改为独立整页（整页宽度 + 表头吸顶 + 直接下拉浏览）。
     generateBrief() {
-        const brief = App.buildHourlyBrief();
-        this.briefResult = brief;
-        if (!brief.rows.length) {
-            // 0 行有两种完全不同的原因，必须分开提示，否则会被误读成"简报生成失败"
-            const t = this._briefLastTs();
-            const empty = [t.coarse, t.float, t.ad].filter(x => !x).length;
-            if (empty > 0) {
-                App.showToast(`三表数据不齐（粗精煤泥 ${t.coarse || '无'} / 浮精 ${t.float || '无'} / 灰分密度 ${t.ad || '无'}），请先导入缺失的表`, 'warning');
-            } else {
-                App.showToast(`三表时间窗未落在同一天内，无法成行。各表最近：粗精煤泥 ${t.coarse} / 浮精 ${t.float} / 灰分密度 ${t.ad}`
-                    + `（成行规则：三表在该小时内 24h 内均有记录）`, 'warning');
-            }
-            App.openModal('推测简报（三表1h对齐）', `
-                <div style="line-height:2;font-size:13px">
-                    <p><strong>未生成任何行</strong>，原因如下：</p>
-                    <p>• 成行规则：某一小时要成行，<strong>粗精煤泥 / 浮精 / 灰分密度三张表都必须在该小时结束前 24 小时内各有一条记录</strong>；
-                       任一表超窗，该小时整行跳过（不再用陈旧数据续传凑行）。</p>
-                    <p>• 本机各表最近一条记录：</p>
-                    <table class="data-table" style="margin:4px 0 12px">
-                        <tr><td>粗精煤泥（表1）</td><td>${t.coarse || '— 无数据'}</td></tr>
-                        <tr><td>浮精（表2）</td><td>${t.float || '— 无数据'}</td></tr>
-                        <tr><td>灰分密度（表3）</td><td>${t.ad || '— 无数据'}</td></tr>
-                    </table>
-                    <p>• 常见原因：三张表来自不同时间段（例如表1是 6-7 月、表2/表3 只有 5 月），时间窗不重叠；
-                       浮精表是每天化验 1 次，因此只有每次浮精采样之后的 24 小时内才会成行。</p>
-                </div>`,
-                '<button class="btn" onclick="App.closeModal()">关闭</button>');
-            return;
-        }
-        const schemeName = (App.store.guideScheme === 'heavy') ? '重介精煤灰分版' : '总灰分版';
-        const target = (App.store.ashTarget != null ? App.store.ashTarget : 8.50).toFixed(2);
-        const tol = (App.store.ashTargetTol != null ? App.store.ashTargetTol : 0.1);
-        // 重介灰分不再写死 8.50：展示当前实际取值与层级来源
-        const heavyAshVal = App.getHeavyAsh();
-        const heavyAshLayer = App.heavyAshLayer();
-        const thead = `<tr><th>#</th>${brief.headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
-        const tbody = brief.rows.map((row, i) =>
-            `<tr><td>${i + 1}</td>${row.map(c => `<td>${c === '' ? '-' : c}</td>`).join('')}</tr>`).join('');
-        const body = `
-            <div style="margin-bottom:10px;color:var(--text-secondary);font-size:12px;line-height:1.7">
-                共 <strong>${brief.rows.length}</strong> 个 1h 间隔 ·
-                建议密度口径：<strong>${schemeName}</strong> ·
-                目标灰分 <strong>${target}%</strong> · 达标容差 ±<strong>${tol}%</strong><br>
-                成行规则：粗精煤泥 / 浮精 / 灰分密度三表在该小时结束前 <strong>24h 内均有记录</strong>才成行，任一表超窗则整行跳过<br>
-                重介精煤灰分：<strong>${heavyAshVal.toFixed(2)}%</strong>（${heavyAshLayer}）<br>
-                <span style="color:var(--accent-orange)">三表无数据源项按恒值处理：粗精煤泥量 40 t/h · 501/502皮带秤 268.5/235.2 t/h</span>
-            </div>
-            <div class="table-scroll" style="max-height:60vh">
-                <table class="data-table">
-                    <thead>${thead}</thead>
-                    <tbody>${tbody}</tbody>
-                </table>
-            </div>`;
-        App.openModal('推测简报（三表1h对齐）', body,
-            '<button class="btn btn-primary" onclick="ImportPage.exportBrief()">导出Excel</button>' +
+        if (typeof BriefPage === 'undefined') { App.showToast('简报模块未加载，请刷新页面', 'error'); return; }
+        BriefPage.generate();
+        const brief = BriefPage.result || { rows: [] };
+        this.briefResult = brief;          // 兼容旧引用
+        if (!brief.rows.length) return;    // 0 行：分诊弹窗与提示由 BriefPage 给出
+        App.openModal('推测简报（三表1h对齐）',
+            BriefPage.summaryHtml() + BriefPage.previewHtml(20),
+            '<button class="btn btn-primary" onclick="App.closeModal(); App.goToPage(\'page-brief\')">在简报页查看全部</button>' +
+            '<button class="btn" onclick="BriefPage.exportExcel()">导出Excel</button>' +
             '<button class="btn" onclick="App.closeModal()">关闭</button>');
     },
 
+    // 兼容旧入口（独立页未加载时退化为提示）
     exportBrief() {
-        const brief = this.briefResult;
-        if (!brief || !brief.rows.length) { App.showToast('请先生成推测简报', 'warning'); return; }
-        const aoa = [brief.headers, ...brief.rows];
-        const ws = XLSX.utils.aoa_to_sheet(aoa);
-        ws['!cols'] = brief.headers.map(() => ({ wch: 16 }));
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, '推测简报');
-        XLSX.writeFile(wb, '推测简报_1h对齐.xlsx');
-        App.showToast('推测简报已导出', 'success');
+        if (typeof BriefPage === 'undefined') { App.showToast('简报模块未加载，请刷新页面', 'error'); return; }
+        BriefPage.exportExcel();
     },
 
     exportErrors() {

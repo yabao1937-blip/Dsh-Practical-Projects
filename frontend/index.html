@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>重介密控系统 - 密度推荐与灰分监控平台</title>
-    <link rel="stylesheet" href="css/style.css?v=9">
+    <link rel="stylesheet" href="css/style.css?v=10">
     <!-- 无外部依赖，图表使用纯Canvas 2D绘制 -->
     <script src="js/xlsx-lite.js?v=8"></script>
     <script src="js/chart-lite.js?v=7"></script>
@@ -35,6 +35,9 @@
                 </a>
                 <a href="#" class="nav-item" data-page="page-import">
                     <span class="nav-icon">&#10515;</span>批量数据导入
+                </a>
+                <a href="#" class="nav-item" data-page="page-brief">
+                    <span class="nav-icon">&#9776;</span>推测简报
                 </a>
                 <a href="#" class="nav-item" data-page="page-history">
                     <span class="nav-icon">&#9744;</span>历史数据查询
@@ -692,7 +695,21 @@
             </div>
         </section>
 
-        <!-- ==================== 页面六：历史数据查询 ==================== -->
+        <!-- ==================== 页面六：推测简报 ==================== -->
+        <section class="page" id="page-brief">
+            <div class="page-header">
+                <h2>推测简报（三表1h对齐）</h2>
+                <div class="page-header-actions">
+                    <button class="btn" onclick="BriefPage.generate()">生成/刷新简报</button>
+                    <button class="btn btn-primary" onclick="BriefPage.exportExcel()">导出Excel</button>
+                </div>
+            </div>
+            <div id="brief-content">
+                <div class="panel"><div class="panel-body">正在生成…</div></div>
+            </div>
+        </section>
+
+        <!-- ==================== 页面七：历史数据查询 ==================== -->
         <section class="page" id="page-history">
             <div class="page-header">
                 <h2>历史数据查询</h2>
@@ -773,12 +790,13 @@
 
     <script src="js/seed_data.js?v=9"></script>
     <script src="js/api.js?v=2"></script>
-    <script src="js/app.js?v=73"></script>
+    <script src="js/app.js?v=75"></script>
     <script src="js/overview.js?v=40"></script>
     <script src="js/collect.js?v=23"></script>
     <script src="js/coarse.js?v=19"></script>
     <script src="js/float.js?v=14"></script>
-    <script src="js/import.js?v=25"></script>
+    <script src="js/import.js?v=26"></script>
+    <script src="js/brief.js?v=2"></script>
     <script src="js/history.js?v=2"></script>
 </body>
 </html>

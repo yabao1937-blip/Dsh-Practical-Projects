@@ -422,6 +422,10 @@ const App = {
         if (typeof ImportPage !== 'undefined') {
             ImportPage.loadLogs();
         }
+        // 简报页已生成过才重渲染（没生成过就别在每次数据变动时白算一遍 263 行）
+        if (typeof BriefPage !== 'undefined' && BriefPage.result) {
+            BriefPage.render();
+        }
         if (typeof HistoryPage !== 'undefined') {
             // History page refreshes on demand via query button
         }
@@ -432,15 +436,22 @@ const App = {
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.preventDefault();
-                const pageId = item.dataset.page;
-                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-                item.classList.add('active');
-                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-                document.getElementById(pageId).classList.add('active');
-                // 延迟初始化或刷新图表
-                setTimeout(() => this.initPage(pageId), 50);
+                this.goToPage(item.dataset.page);
             });
         });
+    },
+
+    // 以代码方式切页（弹窗里的「在简报页查看全部」等入口用），与点击导航行为一致
+    goToPage(pageId) {
+        const item = document.querySelector(`.nav-item[data-page="${pageId}"]`);
+        const sec = pageId ? document.getElementById(pageId) : null;
+        if (!item || !sec) return;
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        item.classList.add('active');
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        sec.classList.add('active');
+        // 延迟初始化或刷新图表
+        setTimeout(() => this.initPage(pageId), 50);
     },
 
     // 按需初始化页面
@@ -462,6 +473,9 @@ const App = {
                     break;
                 case 'page-import':
                     if (typeof ImportPage !== 'undefined') ImportPage.init();
+                    break;
+                case 'page-brief':
+                    if (typeof BriefPage !== 'undefined') BriefPage.init();
                     break;
                 case 'page-history':
                     if (typeof HistoryPage !== 'undefined') HistoryPage.init();
@@ -502,6 +516,14 @@ const App = {
                 case 'page-import':
                     if (typeof ImportPage !== 'undefined') {
                         ImportPage.loadLogs();
+                    }
+                    break;
+                case 'page-brief':
+                    // 切回简报页时重渲染：既刷新数据，也重新执行"滚到最新一行"。
+                    // （页面隐藏时 scrollHeight/clientHeight 为 0，渲染阶段的自动滚动会失效，
+                    //   所以必须在页面已可见之后再滚一次）
+                    if (typeof BriefPage !== 'undefined' && BriefPage.result) {
+                        BriefPage.render();
                     }
                     break;
                 case 'page-history':
