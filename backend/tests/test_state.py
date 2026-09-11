@@ -110,6 +110,45 @@ def test_stale_guard_allows_mirror_with_empty_local_only_collections():
     client.put("/api/v1/state?force=true", json=SEED)
 
 
+def test_mirror_does_not_wipe_heavy_samples():
+    """整库镜像不拥有 heavy_samples：新浏览器（本地为空）的镜像不得清零服务器侧采样。
+
+    背景（2026-09 实测事故）：守卫收窄之后镜像能写入了，但整库 PUT 的载荷里
+    heavy_samples 是空的（前端把它当纯本地键、从不拉取），而 replace() 会照删照写
+    → 每来一个空 profile 的浏览器就把服务器累积的采样清零（实测 heavy_samples 1 → 0）。
+    采样有自己的增量通道 POST /api/v1/samples/heavy-ash，整库镜像不该触碰；
+    只有 force=true（显式备份恢复）才允许整体覆盖。
+    """
+    from app.database import SessionLocal
+    from app.models import HeavySample
+
+    client.put("/api/v1/state?force=true", json=SEED)
+    # 服务器侧先有 1 条采样
+    st = json.loads(json.dumps(SEED))
+    st["heavySamples"] = [{"timestamp": "2026-09-01 08:00:00", "rho": 1.50, "ash_content": 7.9}]
+    assert client.put("/api/v1/state?force=true", json=st).json()["ok"] is True
+
+    db = SessionLocal()
+    try:
+        assert db.query(HeavySample).count() == 1
+    finally:
+        db.close()
+
+    # 模拟新浏览器镜像：三类测量记录齐全，但 heavySamples 为空
+    pulled = json.loads(json.dumps(SEED))
+    pulled["heavySamples"] = []
+    j = client.put("/api/v1/state", json=pulled).json()
+    assert j["ok"] is True, j
+
+    db = SessionLocal()
+    try:
+        n = db.query(HeavySample).count()
+        assert n == 1, f"镜像把服务器侧采样清零了（{n} 条），这正是那次事故的现象"
+    finally:
+        db.close()
+    client.put("/api/v1/state?force=true", json=SEED)
+
+
 def test_decision_log_roundtrip():
     """密度决策日志(Stage 0)经 auto_state 持久化:PUT 后 GET 应原样返回。"""
     st = json.loads(json.dumps(SEED))

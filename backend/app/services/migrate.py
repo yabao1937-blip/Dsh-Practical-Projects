@@ -297,8 +297,21 @@ def replace(store: dict, force: bool = False) -> dict:
                 return {"ok": False, "stale": True, "regressed": regressed,
                         "error": f"stale_store: 以下记录数将回退（{detail}），拒绝整库回退"
                                  f"（防旧浏览器覆盖服务器新数据；确需回退请 force=true）"}
-        for t in (CoalRecord, CalcLog, CoarseModelHistory, RegressionModel, HeavySample,
-                  ManualEntry, Alert, ImportLog, CoarseModel, Setting, AutoState):
+        if not force:
+            p = dict(p)
+            # 整库镜像**不拥有** heavy_samples（2026-09 实测事故）：
+            # heavySamples 在前端是"纯本地键"（_applyServerState 拉取时不覆盖它），
+            # 又被排除在守卫之外 —— 若这里照删照写，一次来自空 heavySamples 的
+            # 新浏览器/profile 镜像就会把服务器上累积的采样**静默清零**
+            # （实测发生过：heavy_samples 1 → 0）。它有自己的增量通道
+            # POST /api/v1/samples/heavy-ash，整库镜像不应触碰。
+            # force=true（显式备份恢复）仍按原样整体覆盖，以便备份能还原采样。
+            p["heavy_samples"] = []
+        wipe = [CoalRecord, CalcLog, CoarseModelHistory, RegressionModel,
+                ManualEntry, Alert, ImportLog, CoarseModel, Setting, AutoState]
+        if force:
+            wipe.append(HeavySample)      # 只有显式整库恢复才覆盖采样表
+        for t in wipe:
             db.query(t).delete()
         _apply_in_session(db, p)
         db.commit()
