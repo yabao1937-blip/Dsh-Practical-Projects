@@ -3,7 +3,8 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const URL = 'http://127.0.0.1:8000/';
+const BASE = (process.env.DMCS_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+const URL = BASE + '/';
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = 9383;
 const UD = path.join(process.env.TEMP, 'dmcs-cdp-decisionlog');
@@ -44,7 +45,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         // 若此脚本在提交完成前就 kill 掉 Edge，那次 PUT 会被直接中断（这正是它之前报 FAIL 的原因）。
         let last = null, log = [];
         for (let i = 0; i < 24; i++) {
-            const dbSide = await (await fetch('http://127.0.0.1:8000/api/v1/state')).json();
+            const dbSide = await (await fetch(BASE + '/api/v1/state')).json();
             log = dbSide.densityDecisionLog || [];
             last = log[log.length - 1];
             if (last && out && last.ts === out.ts) break;   // 以浏览器侧那条的时间戳为准

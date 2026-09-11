@@ -145,10 +145,16 @@ const App = {
         window.addEventListener('beforeunload', flushMirror);
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') flushMirror();
+            else this.retryMirrorIfPending();          // 切回前台：补发之前失败的镜像
         });
+        window.addEventListener('online', () => this.retryMirrorIfPending());
 
         // http 模式:服务器数据更多时自动反向同步(旧浏览器自愈,防止镜像覆盖服务器新数据)
         this.autoPullIfStale();
+        // 补发上次遗留的待发镜像。放在 autoPullIfStale **之后**：若刚刚做了反向同步，
+        // 服务器数据已成为权威，那份旧快照已过时（它的内容已被本地 store 接受），
+        // 不应再推回去；只有"没发生反向同步"时才补发。
+        this.retryMirrorIfPending();
         // 补记历史密度决策的灰分响应(页面打开时兜底一次)
         this._completeDensityDecisionResponses();
         // 存量 influence_value 一次性重算（旧口径写死 8.50 → 当前口径），__fixes.influence 标记只跑一次
@@ -259,8 +265,12 @@ const App = {
     //      所以"丢掉中间态"不丢数据）；
     //    · 内容与上次已发送的完全相同则跳过；
     //    · 页面隐藏/卸载前立刻冲一次（keepalive），避免"刚改完就关页面"服务器没收到。
-    //  安全前提：镜像本身是尽力而为的副本，真正的权威数据在 localStorage 与服务端库；
-    //  即使某次发送失败也不再重试（下一次内容变化时会带上完整快照）。
+    //  安全前提：镜像本身是尽力而为的副本，真正的权威数据在 localStorage 与服务端库。
+    //  失败处置（2026-09 二次修订）：发送失败**不再静默**——留下持久化待发副本
+    //  （localStorage: dmcs_mirror_pending，单槽，因为每次都是全量快照）、
+    //  提示一次、并在 断网恢复 / 切回前台 / 下次保存 时重试；成功后清除。
+    //  历史教训：这里原来是 `.catch(() => {})`，keepalive 超限（Chrome 64 KiB 上限）
+    //  与 stale 守卫拒绝都被吞掉，界面一切正常而服务器始终收不到数据。
     // ============================================================
     MIRROR_DEBOUNCE_MS: 2000,
     // Chrome/Edge 对 keepalive 请求体的硬上限是 64 KiB。整库快照实测约 175 KB，远超此限，
@@ -272,6 +282,21 @@ const App = {
     _mirrorPending: null,
     _mirrorSent: null,
     _mirrorStats: { scheduled: 0, sent: 0, skippedSame: 0, keepalive: 0, noKeepalive: 0 },
+
+    // 待发镜像的持久化副本。每次镜像都是**全量快照**，所以只需留最新一份（单槽队列）：
+    // 存 localStorage 而不是 store 里，避免它自己又被塞进镜像载荷里。
+    MIRROR_PENDING_KEY: 'dmcs_mirror_pending',
+    mirrorStatus: { pending: false, lastError: null, lastOkAt: null, failures: 0 },
+
+    _loadPendingMirror() {
+        try { return localStorage.getItem(this.MIRROR_PENDING_KEY); } catch (e) { return null; }
+    },
+    _savePendingMirror(body) {
+        try {
+            if (body) localStorage.setItem(this.MIRROR_PENDING_KEY, body);
+            else localStorage.removeItem(this.MIRROR_PENDING_KEY);
+        } catch (e) { /* 配额不足等：忽略，内存里仍有一份 */ }
+    },
 
     _scheduleMirror(body) {
         this._mirrorPending = body;
@@ -286,17 +311,63 @@ const App = {
     // immediate=true 表示走"页面隐藏/卸载"路径：能带 keepalive 就带（否则卸载会中断请求）
     _flushMirror(immediate) {
         if (this._mirrorTimer) { clearTimeout(this._mirrorTimer); this._mirrorTimer = null; }
-        const body = this._mirrorPending;
+        // 取本次挂起的，或上次失败后留下来的（都是全量快照，后者若更新以挂起的为准）
+        const pendingSaved = this._loadPendingMirror();
+        const body = this._mirrorPending || pendingSaved;
         if (!body) return;
-        if (body === this._mirrorSent) { this._mirrorPending = null; this._mirrorStats.skippedSame++; return; }
-        this._mirrorSent = body;
+        if (body === this._mirrorSent && !pendingSaved) {
+            this._mirrorPending = null; this._mirrorStats.skippedSame++; return;
+        }
         this._mirrorPending = null;
         this._mirrorStats.sent++;
         const canKeepalive = !!immediate && body.length <= this.MIRROR_KEEPALIVE_MAX;
         if (canKeepalive) this._mirrorStats.keepalive++; else this._mirrorStats.noKeepalive++;
+        let res;
         try {
-            window.Api.putStateBody(body, { keepalive: canKeepalive });
-        } catch (e) { /* 后端未启动时静默 */ }
+            res = window.Api.putStateBody(body, { keepalive: canKeepalive });
+        } catch (e) {
+            res = Promise.resolve({ ok: false, error: String((e && e.message) || e) });
+        }
+        Promise.resolve(res).then(r => {
+            if (r && r.ok) {
+                this._mirrorSent = body;
+                this._savePendingMirror(null);
+                this.mirrorStatus.pending = false;
+                this.mirrorStatus.lastOkAt = Date.now();
+                if (this.mirrorStatus.failures) {
+                    this.showToast('本地数据已同步到服务器', 'success');
+                    this.mirrorStatus.failures = 0;
+                }
+                return;
+            }
+            // 失败**不再静默**：记状态、提示一次（避免刷屏）。
+            // 但要分两类（2026-09）：
+            //  · rejected = 服务器**明确拒绝**（典型是 stale 守卫：服务器记录更多）。
+            //    这表示服务器数据更新、本地快照本就不该覆盖它 —— 重试一万次结果一样，
+            //    所以**不留待发副本**（否则每次开新浏览器都会弹一次无效告警 +
+            //    发一次注定被拒的 175 KB 请求）；真正的数据对齐交给 autoPullIfStale。
+            //  · 其它 = 传输失败（后端未启动 / keepalive 超限 / 网络中断）：留待发副本重试。
+            this.mirrorStatus.lastError = (r && (r.reason || r.error)) || 'unknown';
+            this.mirrorStatus.failures++;
+            if (r && r.rejected) {
+                console.warn('服务器拒绝了本次整库镜像(本地未覆盖服务器):', this.mirrorStatus.lastError);
+                if (this.mirrorStatus.failures === 1) {
+                    this.showToast('服务器数据比本地更新，本次本地快照未覆盖服务器（正在自动反向同步）', 'info');
+                }
+                return;
+            }
+            this._savePendingMirror(body);
+            this.mirrorStatus.pending = true;
+            console.warn('镜像未送达服务器:', this.mirrorStatus.lastError);
+            if (this.mirrorStatus.failures === 1) {
+                this.showToast('本地数据未能同步到服务器，将在网络恢复或切回页面时自动重试', 'warning');
+            }
+        }).catch(() => {});
+    },
+
+    // 失败后的重试入口（断网恢复 / 切回前台 / 下次保存时都会调用）
+    retryMirrorIfPending() {
+        if (this._loadPendingMirror() || this._mirrorPending) this._flushMirror(false);
     },
 
     // 一次性数据迁移：清空旧数据并载入合并系统种子数据（__merged 标记版本）

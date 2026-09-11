@@ -29,20 +29,25 @@ window.Api = {
             body: body,
         };
         if (o.keepalive) init.keepalive = true;
-        fetch(url, init)
+        // 返回结果而不是把失败吞掉（2026-09）：
+        // 原来末尾是 .catch(() => {})，于是 keepalive 超限、后端未启动、
+        // 守卫拒绝……全部**静默**，表现为"界面一切正常但服务器没收到"。
+        // 现在统一返回 {ok:true} 或 {ok:false, rejected|error}，由 App._flushMirror 处置
+        // （留下待发副本 + 提示 + 重试）。
+        return fetch(url, init)
           .then(r => (r.ok ? r.json() : Promise.reject(new Error('state ' + r.status))))
           .then(j => {
-              if (j && j.ok === false && j.stale) {
-                  console.warn('镜像被服务器拒绝(本地数据较旧):', j.error,
-                      '—— 请点「从服务器恢复数据」或刷新页面自动同步');
+              if (j && j.ok === false) {
+                  return { ok: false, rejected: true, reason: j.error || '服务器拒绝了整库覆盖' };
               }
+              return { ok: true };
           })
-          .catch(() => {});
+          .catch(e => ({ ok: false, error: String((e && e.message) || e) }));
     },
 
     putState(store, force) {
-        // 异步镜像，不阻塞主流程；后端未启动时静默失败
-        this.putStateBody(JSON.stringify(store), { force: force });
+        // 异步镜像，不阻塞主流程（结果由 App._flushMirror 统一处置）
+        return this.putStateBody(JSON.stringify(store), { force: force });
     },
 
     async retrainCoarseModel(range) {
