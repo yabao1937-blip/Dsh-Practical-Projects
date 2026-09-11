@@ -63,6 +63,18 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
                 + (lastErr ? '；最后一次求值异常: ' + lastErr : ''));
         }
 
+        const env0 = JSON.parse(await evalJs(`JSON.stringify({
+            coarse: (App.store.coarseCoal||[]).length,
+            float: (App.store.floatCoal||[]).length,
+            ashDensity: (App.store.calcLogs||[]).filter(l => l.calc_type === 'ash_density').length,
+        })`));
+        console.log('页面记录快照:', JSON.stringify(env0));
+        const srv0 = await (await fetch(BASE + '/api/v1/state')).json();
+        console.log('服务器记录快照:', JSON.stringify({
+            coarse: (srv0.coarseCoal || []).length, float: (srv0.floatCoal || []).length,
+            ashDensity: (srv0.calcLogs || []).length,
+        }));
+
         const n0 = await evalJs('(App.store.densityDecisionLog || []).length');
         // 操作员手动设定密度(决策日志应记录 density_set,含工况上下文)
         await evalJs("App.setInstrumentInput('density', { manual: 1.485 }); true");
@@ -70,6 +82,13 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         console.log('日志条目:', JSON.stringify(out, null, 2).slice(0, 900));
 
         // 整库镜像：已改为合并发送（App.MIRROR_DEBOUNCE_MS=2000ms），这里显式冲一次。
+        // 另外补一次**显式 await 的 PUT**：本脚本验证的是"决策日志这条数据链能否到服务器"，
+        // 而镜像的调度机制（防抖/待发槽/重试/守卫拒绝处置）由 verify_mirror_e2e.js 专门负责 ——
+        // 这里用确定性的写入，避免"服务器侧条数 0"究竟是没发出去还是被守卫拒绝看不出来
+        // （CI run 12 就卡在这个不可见性上）。
+        const putRes = await evalJs(
+            `(async () => JSON.stringify(await Api.putStateBody(JSON.stringify(App.store), {})))()`, true);
+        console.log('显式整库 PUT 结果:', putRes);
         await evalJs('App._flushMirror(true); true');
         // 然后**轮询**等服务器侧出现，不要用固定 sleep 猜时间：
         // 镜像是不等待响应的异步发送，而整库重写（529 条记录/175KB）提交需要时间；

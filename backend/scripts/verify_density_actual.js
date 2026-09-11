@@ -109,7 +109,11 @@ const api = async (p, init) => {
             row0 ? `当前值=${row0.cells[2]} 来源=${row0.cells[5]}` : '（未录入时应显示 — 且来源列为"未录入"）');
 
         // ---------- 2) 记录设置前的计算口径（用于证明"不参与计算"）----------
-        const before = JSON.parse(await evalJs(`(() => {
+        // 关键：比较前先把"在线密度"钉住。否则它的手动值会因手动有效期
+        // （manualAt vs autoState 打点时刻）在两次快照之间翻转，把无关变化误判成"计算被影响"
+        // —— CI run 12 就是这么红的。
+        const snap = `(() => {
+            App.setInstrumentInput('density', { manual: App.resolveDensity() });   // 钉住在线值
             const g = App.computeDensityGuidance(App.store.ashTarget);
             return JSON.stringify({
                 rhoNew: g.rhoNew, rhoCur: g.rhoCur, deltaRho: g.deltaRho, valid: g.valid,
@@ -117,7 +121,17 @@ const api = async (p, init) => {
                 coarseAsh: App.resolveCoarseAsh(), floatAsh: App.resolveFloatAsh(),
                 totalAmount: App.resolveTotalAmount(),
             });
-        })()`));
+        })()`;
+        const before = JSON.parse(await evalJs(snap));
+        const env0 = JSON.parse(await evalJs(`JSON.stringify({
+            coarse: (App.store.coarseCoal||[]).length,
+            float: (App.store.floatCoal||[]).length,
+            ashDensity: (App.store.calcLogs||[]).filter(l => l.calc_type === 'ash_density').length,
+        })`));
+        console.log('页面/服务器记录快照:', JSON.stringify(env0), '/',
+            JSON.stringify({ coarse: (serverState.coarseCoal || []).length,
+                             float: (serverState.floatCoal || []).length,
+                             ashDensity: (serverState.calcLogs || []).length }));
 
         // ---------- 3) 按现场路径录入（commitTotalInput = 表格双击那条路）----------
         const setv = JSON.parse(await evalJs(`(() => {
@@ -159,19 +173,14 @@ const api = async (p, init) => {
             `1.62 已接受，质量状态="${guard.status}"`);
 
         // ---------- 5) 关键不变量：设置实测密度**不改变任何计算结果** ----------
-        const after = JSON.parse(await evalJs(`(() => {
-            const g = App.computeDensityGuidance(App.store.ashTarget);
-            return JSON.stringify({
-                rhoNew: g.rhoNew, rhoCur: g.rhoCur, deltaRho: g.deltaRho, valid: g.valid,
-                totalAsh: App.resolveTotalAsh(), heavyAsh: App.getHeavyAsh(),
-                coarseAsh: App.resolveCoarseAsh(), floatAsh: App.resolveFloatAsh(),
-                totalAmount: App.resolveTotalAmount(),
-            });
-        })()`));
-        const same = JSON.stringify(before) === JSON.stringify(after);
+        const after = JSON.parse(await evalJs(snap.replace(
+            "App.setInstrumentInput('density', { manual: App.resolveDensity() });   // 钉住在线值",
+            "// 第二次不再钉住（否则会把被比较的值本身改掉）")));
+        const diff = Object.keys(before).filter(k => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+        const same = diff.length === 0;
         check('CALC_UNAFFECTED', same,
             same ? '设置实测密度前后，建议密度/灰分/用量全部一致'
-                 : `计算被影响了！before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
+                 : '计算被影响了！差异字段: ' + diff.map(k => `${k}: ${before[k]} → ${after[k]}`).join('; '));
 
         // ---------- 6) 补录（录入层）：清掉手动值后应显示补录值，来源=录入 ----------
         const layer = JSON.parse(await evalJs(`(() => {
