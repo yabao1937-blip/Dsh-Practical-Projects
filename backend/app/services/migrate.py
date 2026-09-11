@@ -210,6 +210,45 @@ def _bulk(session: Session, model: type, rows: list[dict]) -> None:
         session.add_all([model(**r) for r in rows])
 
 
+# 整库镜像**不拥有**的表：它们不在 GET /api/v1/state 的返回里（浏览器永远收不到服务器上的行），
+# 却会被整库 PUT 按 payload 重写 —— 两端不可能收敛。纳入防回退守卫会让"列表较短"的浏览器
+# **永久拒写**（守卫比较两端拿不到同一份数据的集合 = 2026-09 缺陷 M-1 的病理），
+# 而保持"照删照写"又会在多浏览器/清库场景下静默删掉服务器上的行（实测：种子里的
+# manualEntries=242/importLogs=3/alerts=0 与服务器 242/3/1 本来就不同步）。
+# 因此改为**按自然键合并、只增不删**：浏览器新产生的行能上行，缺失的行不会被删掉。
+# 真正要整库回退（备份恢复）走 force=true。
+MERGE_ONLY_KEYS = {
+    "manual_entries": ("ts", "category"),
+    "import_logs": ("ts", "category", "filename"),
+    "alerts": ("ts", "system", "message"),
+    "regression_models": ("model_type", "created_at"),
+    "coarse_model_history": ("trained_at", "production"),
+}
+MERGE_ONLY_TABLES = (ManualEntry, ImportLog, Alert, RegressionModel, CoarseModelHistory)
+
+
+def _merge_only(db: Session, p: dict) -> dict:
+    """把这些表按自然键合并进库：只插入库里没有的行，**不删除**任何已有行。
+
+    返回 {表名: 新增条数}。更新已有行也刻意不做：这些是审计/日志性质的数据，
+    内容相同即视为同一条；要改就删掉重建（force=true）。
+    """
+    added = {}
+    for key, cols in MERGE_ONLY_KEYS.items():
+        model = next(m for m in MERGE_ONLY_TABLES if m.__tablename__ == key)
+        seen = {tuple(getattr(r, c) for c in cols) for r in db.query(model).all()}
+        n = 0
+        for row in p.get(key) or []:
+            k = tuple(row.get(c) for c in cols)
+            if k in seen:
+                continue
+            seen.add(k)
+            db.add(model(**row))
+            n += 1
+        added[key] = n
+    return added
+
+
 def _apply_in_session(db: Session, p: dict) -> None:
     """在给定会话内写入全部规划结果（不 commit，由调用方决定）。"""
     _bulk(db, CoalRecord, p["coal_records"])
@@ -285,6 +324,11 @@ def replace(store: dict, force: bool = False) -> dict:
 
     为什么按类别细分而不是只比总数：总数相等也可能已经回退
     （如 ash_density 少 20 条、coarse 多 20 条 → 总数不变，只比总数的旧规则会放行）。
+
+    写入范围（force=False）：coal_records / calc_logs / coarse_models / settings / auto_state
+    为"清空后按快照重写"；heavy_samples 完全不碰；manual_entries / import_logs / alerts /
+    regression_models / coarse_model_history 按自然键**只增不删**（见 MERGE_ONLY_KEYS）。
+    force=True 仍是整库覆盖（备份恢复用）。
     """
     p = _plan(store)
     db: Session = SessionLocal()
@@ -297,6 +341,7 @@ def replace(store: dict, force: bool = False) -> dict:
                 return {"ok": False, "stale": True, "regressed": regressed,
                         "error": f"stale_store: 以下记录数将回退（{detail}），拒绝整库回退"
                                  f"（防旧浏览器覆盖服务器新数据；确需回退请 force=true）"}
+        merged = {}
         if not force:
             p = dict(p)
             # 整库镜像**不拥有** heavy_samples（2026-09 实测事故）：
@@ -307,15 +352,21 @@ def replace(store: dict, force: bool = False) -> dict:
             # POST /api/v1/samples/heavy-ash，整库镜像不应触碰。
             # force=true（显式备份恢复）仍按原样整体覆盖，以便备份能还原采样。
             p["heavy_samples"] = []
+            # 同理（方案D，2026-09-11）：MERGE_ONLY_KEYS 里的表改为只增不删的合并。
+            merged = _merge_only(db, p)
+            for k in MERGE_ONLY_KEYS:
+                p[k] = []                 # 交给 _merge_only，不参与 wipe + 重写
         wipe = [CoalRecord, CalcLog, CoarseModelHistory, RegressionModel,
                 ManualEntry, Alert, ImportLog, CoarseModel, Setting, AutoState]
         if force:
             wipe.append(HeavySample)      # 只有显式整库恢复才覆盖采样表
+        else:
+            wipe = [t for t in wipe if t not in MERGE_ONLY_TABLES]
         for t in wipe:
             db.query(t).delete()
         _apply_in_session(db, p)
         db.commit()
-        return {"counts": {t: len(p[t]) for t in p}, "ok": True}
+        return {"counts": {t: len(p[t]) for t in p}, "merged": merged, "ok": True}
     except Exception as e:
         db.rollback()
         return {"ok": False, "error": str(e)}

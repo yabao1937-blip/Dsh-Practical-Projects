@@ -67,15 +67,112 @@ def test_stale_guard_per_category_totals_equal():
     client.put("/api/v1/state?force=true", json=SEED)
 
 
-def test_stale_guard_allows_log_shrink():
-    """守卫不含日志类数据：前端「清空补录历史」会合法地让 manualEntries 变少，不得被拒。"""
+def test_mirror_does_not_delete_manual_entries():
+    """方案D（2026-09-11）：镜像**不拥有** manual_entries/import_logs/alerts/regression_models/
+    coarse_model_history —— 按自然键只增不删，空列表的镜像不再删掉服务器上的行。
+
+    ⚠️ 这条用例的**期望被有意改过**：原先是 test_stale_guard_allows_log_shrink，断言
+    "manualEntries=[] 的镜像会让服务器也变成 []"。改成方案的依据：
+      · GET /api/v1/state **不返回**这些表 → 浏览器永远拿不到服务器上的行，两端不可能收敛；
+      · 于是把它们纳入防回退守卫会让"列表较短"的浏览器**永久拒写**（缺陷 M-1 的病理），
+        而保持照删照写又会在多浏览器/清库场景下静默删掉服务器上的行
+        （实测：种子 manualEntries=242 而服务器库也是 242，纯属巧合，不是机制）；
+      · 所以镜像改为只增不删，整库回退（备份恢复）走 force=true。
+    代价（已知并接受）：界面上的「清空补录历史」不再删除服务器侧的历史行。
+    """
+    from app.database import SessionLocal
+    from app.models import ManualEntry
+
     client.put("/api/v1/state?force=true", json=SEED)
-    assert len(SEED.get("manualEntries") or []) > 0
+    db = SessionLocal()
+    try:
+        before = db.query(ManualEntry).count()
+    finally:
+        db.close()
+    assert before > 0, "种子应带手工补录历史"
+
     st = json.loads(json.dumps(SEED))
     st["manualEntries"] = []                      # 相当于 CollectPage.clearHistory()
     j = client.put("/api/v1/state", json=st).json()
+    assert j["ok"] is True, j                     # 不得被守卫拒绝
+    assert j["merged"]["manual_entries"] == 0     # 没有新行可并
+    db = SessionLocal()
+    try:
+        assert db.query(ManualEntry).count() == before, "镜像不应删除服务器侧的手工补录历史"
+    finally:
+        db.close()
+    # 但显式整库回退（备份恢复）仍然照原样覆盖
+    client.put("/api/v1/state?force=true", json=st)
+    db = SessionLocal()
+    try:
+        assert db.query(ManualEntry).count() == 0
+    finally:
+        db.close()
+    client.put("/api/v1/state?force=true", json=SEED)
+
+
+def test_mirror_merges_new_log_rows():
+    """方案D 的另一半：浏览器新产生的行必须**能上行**（只增不删 ≠ 不增）。
+
+    构造：服务器已有 1 条 import_log；镜像带来 1 条重复 + 1 条新的 →
+    重复的不重复插，新的插进去（按自然键 ts+category+filename 判重）。
+    """
+    from app.database import SessionLocal
+    from app.models import ImportLog
+
+    base = json.loads(json.dumps(SEED))
+    base["importLogs"] = [{"timestamp": "2026-09-01 08:00:00", "category": "粗精煤泥",
+                           "fileName": "a.xlsx", "total": 1, "success": 1,
+                           "failed": 0, "skipped": 0, "status": "成功"}]
+    base["manualEntries"] = []
+    client.put("/api/v1/state?force=true", json=base)
+    db = SessionLocal()
+    try:
+        assert db.query(ImportLog).count() == 1
+    finally:
+        db.close()
+
+    st = json.loads(json.dumps(base))
+    st["importLogs"] = base["importLogs"] + [
+        {"timestamp": "2026-09-02 09:00:00", "category": "浮选", "fileName": "b.xlsx",
+         "total": 2, "success": 2, "failed": 0, "skipped": 0, "status": "成功"}]
+    j = client.put("/api/v1/state", json=st).json()
     assert j["ok"] is True, j
-    assert client.get("/api/v1/state").json().get("manualEntries", []) == []
+    assert j["merged"]["import_logs"] == 1, j     # 只新增那一条
+    db = SessionLocal()
+    try:
+        assert db.query(ImportLog).count() == 2
+    finally:
+        db.close()
+    client.put("/api/v1/state?force=true", json=SEED)
+
+
+def test_mirror_keeps_alerts_computed_server_side():
+    """alerts 同理：浏览器每次刷新都重建该数组（派生值），镜像不得据此清库。"""
+    from app.database import SessionLocal
+    from app.models import Alert
+
+    client.put("/api/v1/state?force=true", json=SEED)
+    st = json.loads(json.dumps(SEED))
+    st["alerts"] = [{"system": "合并", "level": "警告", "message": "总灰分偏低",
+                     "time": "2026-09-01 08:00:00"}]
+    assert client.put("/api/v1/state", json=st).json()["merged"]["alerts"] == 1
+    db = SessionLocal()
+    try:
+        assert db.query(Alert).count() == 1
+    finally:
+        db.close()
+
+    # 下一次刷新时告警条件消失：镜像里 alerts 为空 → 服务器上的那条必须还在
+    st2 = json.loads(json.dumps(SEED))
+    st2["alerts"] = []
+    j = client.put("/api/v1/state", json=st2).json()
+    assert j["ok"] is True, j
+    db = SessionLocal()
+    try:
+        assert db.query(Alert).count() == 1, "告警条件消失不应删掉服务器侧已记录的行"
+    finally:
+        db.close()
     client.put("/api/v1/state?force=true", json=SEED)
 
 
