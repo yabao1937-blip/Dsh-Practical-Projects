@@ -35,7 +35,6 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         }
         const ws = new WebSocket(page.webSocketDebuggerUrl);
         await new Promise((ok, fail) => { ws.onopen = ok; ws.onerror = fail; });
-        await sleep(3000);   // 等 autoPull 同步 + init
         let idc = 0; const pending = new Map();
         ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } };
         const send = (method, params) => new Promise((ok) => { const id = ++idc; pending.set(id, ok); ws.send(JSON.stringify({ id, method, params })); });
@@ -44,6 +43,22 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
             if (r.result.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || r.result.exceptionDetails.text);
             return r.result.result.value;
         };
+
+        // 等页面初始化完成（轮询，不用固定 sleep：CI 冷启动更慢）
+        // typeof App（不是 window.App）：app.js 的 App 是脚本作用域的 const
+        let appReady = false, lastErr = null;
+        for (let i = 0; i < 60; i++) {
+            try {
+                if (await evalJs("typeof App !== 'undefined' && !!App.store && !!App.store.coarseCoal")) {
+                    appReady = true; break;
+                }
+            } catch (e) { lastErr = e.message; }
+            await sleep(500);
+        }
+        if (!appReady) {
+            throw new Error('页面 30 秒内未完成初始化（typeof App 仍不可用）'
+                + (lastErr ? '；最后一次求值异常: ' + lastErr : ''));
+        }
 
         const n0 = await evalJs('(App.store.densityDecisionLog || []).length');
         // 操作员手动设定密度(决策日志应记录 density_set,含工况上下文)

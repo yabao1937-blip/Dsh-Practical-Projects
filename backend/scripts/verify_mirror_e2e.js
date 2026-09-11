@@ -129,7 +129,6 @@ async function seed() {
         if (!page) throw new Error('未能连上浏览器调试端口');
         const ws = new WebSocket(page.webSocketDebuggerUrl);
         await new Promise((ok, fail) => { ws.onopen = ok; ws.onerror = fail; });
-        await sleep(3500);   // 等 init + autoPullIfStale
         let idc = 0; const pending = new Map();
         ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } };
         const send = (method, params) => new Promise((ok) => { const id = ++idc; pending.set(id, ok); ws.send(JSON.stringify({ id, method, params })); });
@@ -138,6 +137,26 @@ async function seed() {
             if (r.result.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || r.result.exceptionDetails.text);
             return r.result.result.value;
         };
+
+        // 等页面初始化完成：**轮询**而不是固定 sleep。
+        // CI 冷启动比开发机慢得多（seed_data.js 153KB + app.js 120KB 都是冷读），
+        // 固定 3.5 秒曾让第一条 evalJs 撞上 "ReferenceError: App is not defined"。
+        // 注意用 typeof App 而不是 window.App：app.js 是 `const App = {...}`，
+        // 脚本作用域的 const **不会**挂到 window 上（第一版就是这么写错的）。
+        let appReady = false, lastErr = null;
+        for (let i = 0; i < 60; i++) {
+            try {
+                if (await evalJs("typeof App !== 'undefined' && !!App.store && !!App.store.coarseCoal")) {
+                    appReady = true; break;
+                }
+            } catch (e) { lastErr = e.message; }   // 记下来，别让失败没有信息量
+            await sleep(500);
+        }
+        if (!appReady) {
+            throw new Error('页面 30 秒内未完成初始化（typeof App 仍不可用）'
+                + (lastErr ? '；最后一次求值异常: ' + lastErr : ''));
+        }
+        await sleep(800);   // 再给 autoPullIfStale 一点时间（它不影响下面的断言，只影响基线值）
 
         // 初始状态。空库时 GET /state 的 ashTarget 是 null → 以**浏览器侧**值作基线
         // （冷启动把种子默认值推上去正是这条链路要做的事）。
