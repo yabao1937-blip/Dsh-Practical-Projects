@@ -122,12 +122,32 @@ jobs:
           Write-Host "---- server.err.log ----"; Get-Content "$env:TEMP\ci-server.err.log" -ErrorAction SilentlyContinue
           throw "后端在约 $([int]$sw.Elapsed.TotalSeconds) 秒内未就绪（上限 45 次探测）"
 
-      # 完整输出，不截断：任何 FAIL 行都必须留在日志里
+      # 完整输出，不截断：任何 FAIL 行都必须留在日志里。
+      # 失败时额外发一条 GitHub annotation —— 注解可以通过公开 API 读到，
+      # 而作业日志需要仓库管理员权限（2026-09-11 排查"1 秒就红"时正卡在这里）。
       - name: 镜像写路径（用例0 冷启动写不得被守卫拒绝 / 用例1 失败不静默+重试送达 / 用例2 守卫拒绝≠传输失败）
-        run: node scripts/verify_mirror_e2e.js
+        shell: pwsh
+        run: |
+          $log = "$env:TEMP\e2e-mirror.log"
+          node scripts/verify_mirror_e2e.js *>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $tail = ((Get-Content $log -Tail 12 -ErrorAction SilentlyContinue) -join ' ⏎ ') -replace '[\r\n]+', ' '
+            Write-Host "::error title=镜像E2E失败(exit=$code)::$tail"
+          }
+          exit $code
 
       - name: 密度决策日志链路
-        run: node scripts/verify_decision_log.js
+        shell: pwsh
+        run: |
+          $log = "$env:TEMP\e2e-decision.log"
+          node scripts/verify_decision_log.js *>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $tail = ((Get-Content $log -Tail 12 -ErrorAction SilentlyContinue) -join ' ⏎ ') -replace '[\r\n]+', ' '
+            Write-Host "::error title=决策日志E2E失败(exit=$code)::$tail"
+          }
+          exit $code
 
       - name: 失败时输出后端日志（成功时不打印，避免噪音）
         if: failure()

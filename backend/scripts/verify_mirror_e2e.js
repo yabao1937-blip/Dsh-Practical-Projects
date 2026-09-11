@@ -43,7 +43,13 @@ function check(name, ok, detail) {
 }
 const api = async (p, init) => {
     const r = await fetch(BASE + p, init);
-    if (!r.ok) throw new Error(`${p} → HTTP ${r.status}`);
+    if (!r.ok) {
+        // 把服务器**说的内容**带出来：只报 HTTP 状态在 CI 上等于没有信息
+        // （422/500 的正文才说明是哪个字段/哪一步不行）
+        let body = '';
+        try { body = (await r.text()).slice(0, 400); } catch (e) { /* 忽略 */ }
+        throw new Error(`${p} → HTTP ${r.status} ${body}`);
+    }
     return r.json();
 };
 const post = (p, body) => api(p, { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -69,29 +75,40 @@ async function seed() {
         console.error('ERROR: 未找到浏览器可执行文件，请用环境变量 DMCS_EDGE 指定');
         process.exit(2);
     }
-    console.log('浏览器:', EDGE, '| 目标:', URL);
+    console.log('浏览器:', EDGE, '| 目标:', URL, '| Node', process.version);
 
-    // ---------- 前置：目标库必须为空（除非显式放行） ----------
-    let sv0 = await api('/api/v1/state');
-    const vec0 = { coarse: (sv0.coarseCoal || []).length, float: (sv0.floatCoal || []).length,
-        ash_density: (sv0.calcLogs || []).length };
-    const nonEmpty = Object.values(vec0).some(n => n > 0);
-    if (nonEmpty && process.env.DMCS_ALLOW_REAL_DB !== '1') {
-        console.error('ERROR: 目标库非空（' + JSON.stringify(vec0) + '），本脚本会整库 PUT，');
-        console.error('       而整库 PUT 会 wipe/重写 manual_entries/alerts/import_logs/coarse_models/');
-        console.error('       settings/auto_state（守卫不保护这些表）。请指向空库（CI 即如此），');
-        console.error('       或确知后果后设置 DMCS_ALLOW_REAL_DB=1。');
-        process.exit(2);
+    // ---------- 前置阶段（库状态检查 + 播种）----------
+    // 刻意包在 try 里：这一阶段若抛异常而无人捕获，Node 只打印堆栈并以 1 退出，
+    // CI 上就表现为"1 秒就红、日志里看不到任何有用原因"（2026-09-11 实际踩到过）。
+    let heavyId = null, armed = null, serverAsh = null, localAsh = null;
+    try {
+        // 目标库必须为空（除非显式放行）：整库 PUT 会 wipe/重写下面这些表
+        const sv0 = await api('/api/v1/state');
+        const vec0 = { coarse: (sv0.coarseCoal || []).length, float: (sv0.floatCoal || []).length,
+            ash_density: (sv0.calcLogs || []).length };
+        const nonEmpty = Object.values(vec0).some(n => n > 0);
+        if (nonEmpty && process.env.DMCS_ALLOW_REAL_DB !== '1') {
+            console.error('ERROR: 目标库非空（' + JSON.stringify(vec0) + '），本脚本会整库 PUT，');
+            console.error('       而整库 PUT 会 wipe/重写 manual_entries/alerts/import_logs/coarse_models/');
+            console.error('       settings/auto_state（守卫不保护这些表）。请指向空库（CI 即如此），');
+            console.error('       或确知后果后设置 DMCS_ALLOW_REAL_DB=1。');
+            process.exit(2);
+        }
+        if (nonEmpty) console.warn('警告: 正在对着非空库运行（已显式放行）:', JSON.stringify(vec0));
+
+        // 播种 + 守卫已武装
+        const seededSample = await seed();
+        const seeded = await api('/api/v1/state');
+        armed = { coarse: (seeded.coarseCoal || []).length, float: (seeded.floatCoal || []).length,
+            ash_density: (seeded.calcLogs || []).length, total: 0 };
+        armed.total = armed.coarse + armed.float + armed.ash_density;
+        heavyId = seededSample && seededSample.id;
+    } catch (e) {
+        console.error('ERROR(前置阶段/播种):', e.message);
+        console.log('MIRROR_E2E: FAIL (前置阶段异常)');
+        process.exitCode = 1;
+        process.exit();
     }
-    if (nonEmpty) console.warn('警告: 正在对着非空库运行（已显式放行）:', JSON.stringify(vec0));
-
-    // ---------- 播种 + 守卫已武装 ----------
-    const seededSample = await seed();
-    const seeded = await api('/api/v1/state');
-    const armed = { coarse: (seeded.coarseCoal || []).length, float: (seeded.floatCoal || []).length,
-        ash_density: (seeded.calcLogs || []).length, total: 0 };
-    armed.total = armed.coarse + armed.float + armed.ash_density;
-    const heavyId = seededSample && seededSample.id;
     check('GUARD_ARMED', armed.total > 0 && heavyId >= 1,
         `测量记录 ${armed.total} / 重介采样 id=${heavyId}（守卫在空库上是关闭的，必须播种）`);
 
