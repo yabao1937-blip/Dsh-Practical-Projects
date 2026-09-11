@@ -60,6 +60,8 @@ jobs:
   # 因此这里不额外加 `|| true`、也不做输出截断（截断会藏掉 FAIL 行）。
   e2e:
     runs-on: windows-latest
+    # 必须有上限：脚本里的 CDP 交互一旦挂起，默认 360 分钟才会被判失败（假红占满配额）
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -87,8 +89,12 @@ jobs:
       - name: 确认浏览器可用（缺失则直接失败，不要静默跳过）
         shell: pwsh
         run: |
-          $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-          if (-not (Test-Path $edge)) { throw "未找到 Edge: $edge" }
+          $cands = @(
+            "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            "C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+          )
+          $edge = $cands | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $edge) { throw "未找到 Edge，候选: $($cands -join ' , ')" }
           node --version
           Write-Host "Edge: $edge"
 
@@ -101,18 +107,23 @@ jobs:
             -RedirectStandardOutput "$env:TEMP\ci-server.log" `
             -RedirectStandardError "$env:TEMP\ci-server.err.log"
           $p.Id | Out-File "$env:TEMP\ci-server.pid"
-          for ($i = 0; $i -lt 60; $i++) {
+          # 探针用短超时（连接被拒是立刻返回的；只有"端口被别的东西占着"才会吃满超时）
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          for ($i = 0; $i -lt 45; $i++) {
             try {
-              $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000/api/v1/state" -TimeoutSec 5
-              if ($r.StatusCode -eq 200) { Write-Host "后端就绪（第 $($i+1) 次探测）"; exit 0 }
-            } catch { Start-Sleep -Seconds 1 }
+              $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:8000/api/v1/health" -TimeoutSec 2
+              if ($r.StatusCode -eq 200) {
+                Write-Host "后端就绪（第 $($i+1) 次探测，用时 $([int]$sw.Elapsed.TotalSeconds) 秒）"
+                exit 0
+              }
+            } catch { Start-Sleep -Milliseconds 800 }
           }
           Write-Host "---- server.log ----"; Get-Content "$env:TEMP\ci-server.log" -ErrorAction SilentlyContinue
           Write-Host "---- server.err.log ----"; Get-Content "$env:TEMP\ci-server.err.log" -ErrorAction SilentlyContinue
-          throw "后端在 60 秒内未就绪"
+          throw "后端在约 $([int]$sw.Elapsed.TotalSeconds) 秒内未就绪（上限 45 次探测）"
 
       # 完整输出，不截断：任何 FAIL 行都必须留在日志里
-      - name: 用例0/1 整库镜像写路径
+      - name: 镜像写路径（用例0 冷启动写不得被守卫拒绝 / 用例1 失败不静默+重试送达 / 用例2 守卫拒绝≠传输失败）
         run: node scripts/verify_mirror_e2e.js
 
       - name: 密度决策日志链路
@@ -124,3 +135,16 @@ jobs:
         run: |
           Write-Host "---- server.log ----"; Get-Content "$env:TEMP\ci-server.log" -ErrorAction SilentlyContinue
           Write-Host "---- server.err.log ----"; Get-Content "$env:TEMP\ci-server.err.log" -ErrorAction SilentlyContinue
+
+      # 自托管 runner 上必须收尾，否则会留下占着 8000 端口的僵尸进程，
+      # 让下一次运行以"端口被占"的假红开始。
+      - name: 收尾：停掉后端（无论成败）
+        if: always()
+        shell: pwsh
+        run: |
+          $pidFile = "$env:TEMP\ci-server.pid"
+          if (Test-Path $pidFile) {
+            $serverPid = Get-Content $pidFile
+            try { Stop-Process -Id $serverPid -Force -ErrorAction Stop; Write-Host "已停止后端 PID $serverPid" }
+            catch { Write-Host "后端进程已不在（PID $serverPid）" }
+          }

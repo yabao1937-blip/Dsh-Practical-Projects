@@ -5,13 +5,26 @@ const path = require('path');
 
 const BASE = (process.env.DMCS_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const URL = BASE + '/';
-const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const PORT = 9383;
-const UD = path.join(process.env.TEMP, 'dmcs-cdp-decisionlog');
-if (fs.existsSync(UD)) fs.rmSync(UD, { recursive: true, force: true });
+// 浏览器候选与 verify_mirror_e2e.js 保持一致（原来只硬编码一个 Windows 路径，
+// 与 ci.yml 的预检、另一个脚本的候选列表三处不一致，换 runner 就会红在与代码无关的地方）
+const CANDIDATES = [
+    process.env.DMCS_EDGE,
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    '/usr/bin/microsoft-edge-stable', '/usr/bin/microsoft-edge',
+    '/usr/bin/google-chrome', '/usr/bin/chromium',
+];
+const EDGE = CANDIDATES.find(p => p && fs.existsSync(p));
+const PORT = 9300 + Math.floor(Math.random() * 400);   // 随机端口：避免连到遗留的调试浏览器
+const UD = path.join(process.env.TEMP || '/tmp', 'dmcs-cdp-decisionlog-' + Date.now());
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 (async () => {
+    if (!EDGE) {
+        console.error('ERROR: 未找到浏览器可执行文件，请用环境变量 DMCS_EDGE 指定');
+        process.exit(2);
+    }
+    console.log('浏览器:', EDGE, '| 目标:', URL);
     const edge = spawn(EDGE, ['--headless=new', '--disable-gpu', '--no-first-run',
         `--user-data-dir=${UD}`, `--remote-debugging-port=${PORT}`, '--window-size=1680,1200', URL], { stdio: 'ignore' });
     try {

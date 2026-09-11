@@ -34,11 +34,21 @@ window.Api = {
         // 守卫拒绝……全部**静默**，表现为"界面一切正常但服务器没收到"。
         // 现在统一返回 {ok:true} 或 {ok:false, rejected|error}，由 App._flushMirror 处置
         // （留下待发副本 + 提示 + 重试）。
+        // 加上限超时：中断/挂死的请求若永不回调，App 侧的重试闸门(_mirrorInFlight)会永久卡住。
+        if (!init.signal && typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+            init.signal = AbortSignal.timeout(o.timeoutMs || 20000);
+        }
         return fetch(url, init)
           .then(r => (r.ok ? r.json() : Promise.reject(new Error('state ' + r.status))))
           .then(j => {
               if (j && j.ok === false) {
-                  return { ok: false, rejected: true, reason: j.error || '服务器拒绝了整库覆盖' };
+                  // **只有守卫明确的 stale 拒绝**才算"永久拒绝"（重试结果必然相同）。
+                  // 后端 migrate.replace 的 except 分支同样返回 ok:false 但没有 stale
+                  // （例如 SQLite 写锁超时）—— 那是**瞬时**故障，必须留给上层留副本重试，
+                  // 否则"服务器内部异常"会被当成"永久拒绝、不再重试"，
+                  // 正是这次改动要根除的那类静默丢失。
+                  return { ok: false, rejected: j.stale === true,
+                           reason: j.error || '服务器拒绝了整库写' };
               }
               return { ok: true };
           })

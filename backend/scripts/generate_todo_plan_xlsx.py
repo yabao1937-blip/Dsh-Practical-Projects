@@ -543,6 +543,23 @@ sheet(
          "触发条件：出现第二个需要导 Excel 的人/机器，或浏览器解析出一次实际事故。"
          "另注：/import/parse 仍是半成品端点（无调用者 + 按 Sheet 合并的逻辑与浏览器不同源），"
          "其畸形日期崩溃已修；若半年内不迁移就删掉，别让它长期以「看似可用」的状态存在。"],
+         ["Q-9", "待决", "整库镜像对 manual_entries / import_logs / alerts / coarse_models 的**所有权**"
+                 "（2026-09-11 由独立评审 + 实测确认）",
+          "migrate.replace 对 force=False 也会 wipe 并重写这些表，而防回退守卫**不保护**它们"
+          "（刻意排除，因为前端「清空补录历史」会合法地让它们变少）。"
+          "同时前端只用到 GET /state、PUT /state、POST /training/coarse-model —— "
+          "**整库镜像就是浏览器侧补录/导入日志/告警上行的唯一通道**。"
+          "于是形成风险：某个浏览器手里的列表比服务器短（另一台浏览器新增过、或本地被清过），"
+          "它的一次镜像就会把服务器上的那些行**静默删掉**（守卫不拦）。",
+          "方案A 维持现状（单浏览器使用假设）：成本 0，风险=多浏览器/清库场景下静默丢这些行；"
+          "方案B 守卫扩展到这些表 + 显式清空走 force=true：需要前端把「我确实清空了」作为显式意图上报；"
+          "方案C 前端改为逐条调用 POST /manual-entries 等接口，镜像不再拥有这些表：最干净，"
+          "但要新增前端调用与错误处理（工作量中等）；"
+          "方案D 服务器对这些表改为「按 ts 合并、只增不删」。",
+          "建议先做方案B 的最小版：把 alerts / import_logs 纳入守卫（它们没有「用户清空」的需求），"
+          "manual_entries 保留「显式清空」入口后再纳入。实测证据：前端种子 seed_data.js 里 "
+          "manualEntries=242 / importLogs=3 / alerts=0，而服务器库是 242 / 3 / 1（两侧本就不同步，"
+          "本轮 E2E 没造成损失只因种子里恰好有同样的 242 条，属运气不是机制）。"],
     ],
     fill_col=2, fill_map={"高": HIGH_FILL, "中": MID_FILL, "低": LOW_FILL},
 )
@@ -634,6 +651,67 @@ sheet(
     fill_col=1,
     fill_map={"共同根因": HIGH_FILL, "准入 vs 所有权": HIGH_FILL, "空转的测试": MID_FILL,
               "用 stub 验证被 stub 掉的层": MID_FILL, "没有执行就没有防线": LOW_FILL},
+)
+
+# ------------------------------------- 7 写路径独立评审与修复（2026-09-11）
+sheet(
+    wb, "写路径评审与修复",
+    "独立评审（只读、未运行脚本）对镜像写路径改动的发现与处置（2026-09-11）",
+    ["编号", "严重度", "发现", "处置与证据"],
+    [8, 10, 72, 78],
+    [
+        ["R-1", "高", "api.js 把**任何** ok:false 都判为 rejected，而后端 migrate.replace 的 except 分支"
+                "（如 SQLite 写锁超时）同样返回 ok:false 但没有 stale → 服务器**瞬时**异常被当成"
+                "「永久拒绝、不留副本不再重试」，正是这次要根除的静默丢失被固化成设计。",
+         "已改为 `rejected: j.stale === true`，其余 ok:false 归入可重试的传输/瞬时失败。"
+         "证据：migrate.py:319-321 的 except 分支只返回 {ok:false,error}。"],
+        ["R-2", "高", "待发副本只在 promise 回调里写：页面关闭/切后台时那次请求被浏览器中断，"
+                "回调永不执行 → **「关页面丢最后一笔」这个原始痛点其实没解决**；"
+                "且槽里若残留更旧快照，下次启动会把它推回服务器（守卫只比条数，可能放行）。",
+         "已改为**发送前**先落副本（语义：本地已保存、服务器未确认），成功或被守卫拒绝后再清。"
+         "E2E 新增断言 slotRightAfterSend（发送返回前槽里就必须有内容）。"],
+        ["R-3", "高", "keepalive 上限用 body.length（字符）去卡 64 KiB（字节）：整库快照以中文为主，"
+                "JSON.stringify 不转义非 ASCII，1 字符 = 3 字节 → 以为装得下、实际 3 倍超限，"
+                "缺陷B（keepalive 超限 → TypeError）原样残留。",
+         "改用 Blob([body]).size 取**字节数**，阈值降到 48 KB。"],
+        ["R-4", "高", "E2E 用例0 在 CI 必然**空转假 PASS**：守卫是 `if sum(current.values()) > 0 and regressed`，"
+                "空库上直接关闭；而 CI 的库必然是空的（*.db 被 gitignore）。"
+                "即：即使把 heavy_samples 加回守卫，用例0 也照样绿。",
+         "已改为先播种（records + samples/heavy-ash）并断言 GUARD_ARMED；"
+         "并做了**反向对照**：临时把 heavy_samples 加回守卫后重跑，"
+         "MIRROR_COLD_START 立刻 FAIL（stale_store ... heavy_samples 0<1），"
+         "撤销后恢复 PASS —— 证明用例0 真的有牙齿，而不是只会绿。"],
+        ["R-5", "高", "E2E 脚本对着**真实开发库**跑是破坏性的：整库 PUT 会 wipe/重写 "
+                "manual_entries/alerts/import_logs/coarse_models/settings/auto_state，"
+                "而脚本只复原了 ashTarget。",
+         "已加前置检查：目标库非空则**直接拒跑**（退出码 2）并说明原因，"
+         "需显式 DMCS_ALLOW_REAL_DB=1 放行。另新增 MIRROR_KEEPS_HEAVY_SAMPLES 断言"
+         "（没有 GET 采样接口，用「新插入的自增 id 是否在原 id 之后」判断表没被清空）。"],
+        ["R-6", "中", "用例1 只覆盖传输失败，新的 rejected 分支零覆盖；"
+                "且 MIRROR_RETRY_ON_ONLINE 只断言结果、不断言因果（任何一次成功都能满足）。",
+         "新增用例2（注入 rejected：必须不留待发副本、记 rejected 计数、给 info 提示、"
+         "内容相同的再次保存不得重发）；新增 MIRROR_NOT_DELIVERED_YET 断言"
+         "（注入失败后服务器必须仍是基线值），让「重试送达」具备因果前提。"],
+        ["R-7", "中", "跨标签页会丢数据：待发槽是裸 body、无归属无时间戳，成功时无条件清除 → "
+                "B 标签页的成功会删掉 A 标签页尚未送达的唯一副本；旧标签页的失败还会覆盖新快照。",
+         "槽内结构改为 {wall, stamp, body}：写入时若已有更新的快照则不覆盖（wall），"
+         "清除时只清自己写的那份（stamp）。"],
+        ["R-8", "中", "rejected 分支不清槽、不更新 _mirrorSent → 每次 online/切前台都会重发一次"
+                "注定被拒的整库；提示语「正在自动反向同步」是假的（autoPullIfStale 只在启动跑一次）。",
+         "rejected 现在会清掉自己那份副本、记入 _mirrorSent（内容不变不再重发），"
+         "并在失败 streak 的第一次**真的**调用 autoPullIfStale()，让提示语成真。"],
+        ["R-9", "中", "CI：e2e 作业无 timeout-minutes（默认挂 360 分钟）、"
+                "就绪探测号称 60 秒实际更久、Edge 候选三处不一致、无收尾步骤（自托管会留僵尸占端口）。",
+         "已加 timeout-minutes: 15、短超时探针 + 真实计时输出、Edge 候选统一为同一份列表、"
+         "新增 if: always() 的停后端步骤。另把两个脚本的 CDP 端口改为随机，避免连到遗留浏览器。"],
+        ["R-10", "中", "去重判据位置不对：saveStore 每次都会置 _mirrorPending，"
+                 "而「内容与上次已发送相同则跳过」只在「内容来自槽」时生效 → "
+                 "正常保存路径上的重复内容永远会重发（被守卫拒绝的整库会被反复重发）。",
+         "判据提到「看来源之前」。E2E 用例2 断言第二次相同保存不增加发送次数"
+         "（实测 _mirrorStats.skippedSame 由 0 → 1）。"],
+    ],
+    fill_col=2,
+    fill_map={"高": HIGH_FILL, "中": MID_FILL, "低": LOW_FILL},
 )
 
 DOCS.mkdir(parents=True, exist_ok=True)
