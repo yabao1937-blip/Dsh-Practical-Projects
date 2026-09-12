@@ -21,9 +21,12 @@ REASON_CONSTANT_TOTAL_ASH = (
 )
 K_PREDICT = 0.075
 
+# P0 安全守卫（2026-09-12，三模型会诊结论）：逐步建议 + 保持 + 占位值守卫。
+# stepwise=True 时发布的建议不超过 maxStep，同时给出完整目标与步数：
+# 整步修正要么依赖"专家表=增益律"这一未验证前提，要么在闭环里震荡（实测 ρ:1.52→1.433→1.588→…）。
 DENSITY_GUIDE = {
     "deadband": 0.05, "maxStep": 0.01, "rhoMin": 1.35, "rhoMax": 1.60,
-    "kFallback": 0.03, "simBaseRho": 1.49, "simK": 0.03,
+    "kFallback": 0.03, "simBaseRho": 1.49, "simK": 0.03, "stepwise": True,
 }
 
 
@@ -74,6 +77,11 @@ def compute_density_guidance(state: dict, target_total_ash: float) -> dict:
         "targetHeavy": None, "deltaAHeavy": None,
         "deltaA": None, "deltaRho": 0.0, "rhoNew": rho_cur, "direction": "stable",
         "reason": "", "deadband": tol, "maxStep": max_step,
+        # P0 状态位（与前端 densityGuardState 同口径；由调用方通过 state 传入）
+        "placeholderManual": bool(state.get("placeholder_manual")),
+        "hold": bool(state.get("hold")), "holdReason": state.get("hold_reason") or "",
+        "driveKey": state.get("drive_key") or "",
+        "deltaRhoFull": None, "rhoTargetFull": None, "steps": 1, "stepwise": False,
     }
     # 常量灰分不得驱动控制建议：501 皮带灰分仪尚未接入时，总灰分取的是默认常量，
     # 若照它算 deltaA（如 8.8−8.5=0.3 超容差）会推出"下调密度"——用编造的灰分指挥现场操作。
@@ -86,6 +94,13 @@ def compute_density_guidance(state: dict, target_total_ash: float) -> dict:
 
     if not r["valid"]:
         r["reason"] = "总精煤灰分数据不完整，暂无密度调整建议"
+        return r
+
+    # P0④ 占位值守卫：手动灰分等于目标值且长期未更新 → 视为占位值，宁可不给建议
+    if r["placeholderManual"]:
+        r["valid"] = False
+        r["reason"] = ("当前灰分取的是「手动值」，且该值等于目标灰分并已超过 24 小时未更新 —— "
+                       "疑似占位值（不是新化验结果）。请录入新的化验值后再看密度建议。")
         return r
 
     if scheme == "heavy":
@@ -118,10 +133,27 @@ def compute_density_guidance(state: dict, target_total_ash: float) -> dict:
                            f"{r['deltaA']:+.2f}% ≤ ±{tol}% —— 已达标，密度保持")
         return r
 
+    # P0② 动作闩锁 / P0③ 最短驻留：同一份驱动数据只允许一次动作（由前端组装 state 传入）
+    if r["hold"]:
+        r["direction"] = "stable"
+        r["rhoNew"] = rho_cur
+        r["deltaRho"] = 0.0
+        r["reason"] = r["holdReason"] or "已按当前这份数据调整过密度，等新的化验/在线数据后再给下一步建议"
+        return r
+
     sign = 1.0 if r["deltaA"] > 0 else -1.0
     d_rho_full = -sign * expert_adjust(abs(r["deltaA"]))
-    r["deltaRho"] = round(d_rho_full, 4)
-    r["rhoNew"] = max(DENSITY_GUIDE["rhoMin"], min(DENSITY_GUIDE["rhoMax"], round(rho_cur + d_rho_full, 3)))
+    # P0① 逐步建议：发布的建议不超过 maxStep
+    stepwise = bool(state.get("stepwise", DENSITY_GUIDE["stepwise"]))
+    step_limit = max_step if stepwise and max_step and max_step > 0 else abs(d_rho_full)
+    d_rho = max(-step_limit, min(step_limit, d_rho_full))
+    r["deltaRhoFull"] = round(d_rho_full, 4)
+    r["rhoTargetFull"] = max(DENSITY_GUIDE["rhoMin"],
+                             min(DENSITY_GUIDE["rhoMax"], round(rho_cur + d_rho_full, 3)))
+    r["steps"] = max(1, int(-(-abs(d_rho_full) // (step_limit or 1)))) if step_limit else 1
+    r["stepwise"] = bool(stepwise and r["steps"] > 1)
+    r["deltaRho"] = round(d_rho, 4)
+    r["rhoNew"] = max(DENSITY_GUIDE["rhoMin"], min(DENSITY_GUIDE["rhoMax"], round(rho_cur + d_rho, 3)))
     r["direction"] = "down" if r["deltaA"] > 0 else "up"
     if scheme == "heavy":
         r["reason"] = (f"重介灰分{'偏高' if r['deltaAHeavy'] > 0 else '偏低'} {abs(r['deltaAHeavy']):.2f}%"
@@ -131,4 +163,8 @@ def compute_density_guidance(state: dict, target_total_ash: float) -> dict:
         r["reason"] = (f"实际总灰分{'偏高' if r['deltaA'] > 0 else '偏低'} {abs(r['deltaA']):.2f}%"
                        f"（{actual_total:.2f}% / 期望{target_total_ash:.2f}%），"
                        f"按专家经验建议{'下调' if r['direction'] == 'down' else '上调'}密度至 {r['rhoNew']:.3f} g/cm³（人工执行）")
+        if r["stepwise"]:
+            r["reason"] += (f"；完整修正目标 {r['rhoTargetFull']:.3f}"
+                            f"（本步只走 {abs(r['deltaRho']):.3f}，共约 {r['steps']} 步，"
+                            f"每步之后等新的化验/在线数据再走下一步）")
     return r

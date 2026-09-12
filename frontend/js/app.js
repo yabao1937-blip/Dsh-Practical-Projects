@@ -1392,11 +1392,13 @@ const App = {
             // P0 门控（2026-09-12）：只在密度**有真实来源**时才叠加仿真增量。
             // 否则默认密度 1.45（距基准 1.49 有 0.04）会凭空把 502 的 7.9% 变成 6.57% ——
             // 那不是测量，是编造出来的偏差，会直接进总灰分与建议密度。
-            // 同时限幅 |Δ灰分| ≤ 0.5，避免远离工作点时仿真线性外推给出荒唐值。
+            // 同时限幅 |Δ灰分| ≤ 1.0，避免远离工作点时仿真线性外推给出荒唐值。
             const rho = this.resolveInstrument('density');
             const rhoIsReal = this.instrumentLayer('density') !== '默认(仪表)';
             let d = rhoIsReal ? (rho - this.getSimBaseRho()) / this.DENSITY_GUIDE.simK : 0;
-            if (d > 0.5) d = 0.5; else if (d < -0.5) d = -0.5;
+            // 限幅 ±1.0（≈±0.03 g/cm³）：既挡住远离工作点的线性外推（ρ=1.60 时未限幅是 +3.67），
+            // 又留出足够宽的"响应带"，否则密度稍远就饱和、灰分不再随密度变化、闭环会卡住。
+            if (d > 1.0) d = 1.0; else if (d < -1.0) d = -1.0;
             entry = +((base != null ? base : this.INSTRUMENT_DEFAULT[id]) + d).toFixed(4);
             // 打点只用数据部分：密度仿真变化不算自动动作（只有新数据才接管更早的手工灰分）
             this._autoBump(id, base != null ? base : this.INSTRUMENT_DEFAULT[id]);
@@ -1696,6 +1698,12 @@ const App = {
     },
 
     computeDensityGuidance(targetTotalAshOverride) {
+        // 2026-09-12 修复：并发改动把参数改名为 …Override，但函数体仍用旧名 targetTotalAsh，
+        // 导致**每次调用都 ReferenceError**（总览页卡片/建议密度整体失效，页面能加载但建议全废）。
+        // 这里补别名，并保留"显式覆盖优先，其次取当前目标灰分"的语义。
+        const targetTotalAsh = (targetTotalAshOverride != null)
+            ? targetTotalAshOverride
+            : ((this.store.ashTarget != null) ? this.store.ashTarget : 8.50);
         const g = this.getDensityGuide();
         const scheme = (this.store.guideScheme === 'heavy') ? 'heavy' : 'total';
         const rhoCur = this.resolveDensity();                    // 密度计权威值
@@ -1729,11 +1737,11 @@ const App = {
             deadband: tol, maxStep: g.maxStep,
         };
         // P0 状态位（占位值 / 闩锁与驻留内保持）—— 与后端同口径，后端由 state 传入相同三值
-        const gs = this.densityGuardState({ scheme: scheme, actualTotal: actualTotal, heavyAsh: heavyAsh });
-        r.placeholderManual = gs.placeholder;
-        r.hold = gs.hold;
-        r.holdReason = gs.holdReason;
-        r.driveKey = gs.driveKey;
+        const p0guard = this.densityGuardState({ scheme: scheme, actualTotal: actualTotal, heavyAsh: heavyAsh });
+        r.placeholderManual = p0guard.placeholder;
+        r.hold = p0guard.hold;
+        r.holdReason = p0guard.holdReason;
+        r.driveKey = p0guard.driveKey;
         // 常量灰分不得驱动控制建议（与后端 compute_density_guidance 同序同文案）：
         // 501 未接入时总灰分是默认常量，照它算 deltaA（如 8.8−8.5=0.3 超容差）会推出"下调密度"。
         // 必须排在「数据不完整」通用判定之前，否则与后端给出的 reason 不一致。

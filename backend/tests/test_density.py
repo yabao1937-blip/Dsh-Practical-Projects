@@ -31,21 +31,58 @@ def test_guidance_total_reach_target():
     assert g["direction"] == "stable" and g["deltaRho"] == 0.0
 
 
-def test_guidance_total_down_and_clamp():
-    # 灰分偏高 0.50 → 下调 0.045；当前密度 1.49 → 1.445
+def test_guidance_total_down_stepwise_and_full_target():
+    """灰分偏高 0.50：完整修正 0.045，但**发布的建议只走一步**（≤maxStep=0.01）。
+
+    P0（2026-09-12）：整步修正要么依赖"专家表=增益律"这一未验证前提，要么在闭环里震荡
+    （实测 ρ:1.52→1.433→1.588→…）。所以默认逐步：每步之后等新的化验/在线数据再走下一步；
+    完整目标仍以 rhoTargetFull 给出，便于人工判断还要走几步。
+    """
     st = {"rho_cur": 1.49, "heavy_ash": 8.50, "actual_total": 9.00, "scheme": "total", "tol": 0.1}
     g = compute_density_guidance(st, 8.50)
     assert g["direction"] == "down"
+    assert abs(g["deltaRho"] + 0.01) < 1e-9              # 发布的一步
+    assert abs(g["deltaRhoFull"] + 0.045) < 1e-9         # 完整修正量
+    assert abs(g["rhoTargetFull"] - 1.445) < 1e-9        # 完整目标
+    assert abs(g["rhoNew"] - 1.48) < 1e-9                # 本步目标
+    assert g["steps"] >= 5 and g["stepwise"] is True
+
+
+def test_guidance_full_step_still_available():
+    """stepwise=False 时保留整步语义（用于对照/回放，不是默认）。"""
+    st = {"rho_cur": 1.49, "heavy_ash": 8.50, "actual_total": 9.00, "scheme": "total",
+          "tol": 0.1, "stepwise": False}
+    g = compute_density_guidance(st, 8.50)
     assert abs(g["deltaRho"] + 0.045) < 1e-9
     assert abs(g["rhoNew"] - 1.445) < 1e-9
+    assert g["stepwise"] is False
 
 
-def test_guidance_clamp_upper():
-    # 灰分远低 → 大幅上调，钳制到 1.60
+def test_guidance_stepwise_respects_upper_bound():
+    """逐步只走一步：1.45 + 0.01 = 1.46（完整目标也不会越过 1.60）。"""
     st = {"rho_cur": 1.45, "heavy_ash": 8.50, "actual_total": 7.0, "scheme": "total", "tol": 0.1}
     g = compute_density_guidance(st, 10.20)
     assert g["direction"] == "up"
-    assert g["rhoNew"] == 1.60
+    assert g["rhoNew"] == 1.46
+    assert g["rhoTargetFull"] <= 1.60
+
+
+def test_guidance_hold_returns_stable_with_reason():
+    """P0②③ 保持：同一份数据已动作过 / 或在驻留窗口内 → 只报"保持"并说明原因。"""
+    st = {"rho_cur": 1.49, "heavy_ash": 8.50, "actual_total": 9.00, "scheme": "total", "tol": 0.1,
+          "hold": True, "hold_reason": "已按当前这份数据调整过密度（同一份化验只动作一次）"}
+    g = compute_density_guidance(st, 8.50)
+    assert g["direction"] == "stable" and g["deltaRho"] == 0.0 and g["rhoNew"] == 1.49
+    assert "只动作一次" in g["reason"]
+
+
+def test_guidance_placeholder_manual_blocks_advice():
+    """P0④ 占位值守卫：手动灰分等于目标值且长期未更新 → 不给建议（宁可不给，也不给编造的）。"""
+    st = {"rho_cur": 1.49, "heavy_ash": 8.50, "actual_total": 8.50, "scheme": "total", "tol": 0.1,
+          "placeholder_manual": True}
+    g = compute_density_guidance(st, 8.50)
+    assert g["valid"] is False
+    assert "占位值" in g["reason"]
 
 
 def test_guidance_heavy_scheme():

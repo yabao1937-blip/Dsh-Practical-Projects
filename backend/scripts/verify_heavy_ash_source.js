@@ -154,10 +154,14 @@ const api = async (p) => {
             + `总灰分 ${calcFollows.before.t}→${calcFollows.after.t}（Δ${dT}）`);
 
         // ---------- 4) 闭环：按建议密度调整后，总灰分偏差变小/达标 ----------
+        // 注意：P0 之后"同一份数据只动作一次 + 30 分钟驻留"会生效；脚本要连续试算必须先清守卫
+        // （相当于"模拟新的化验/在线数据到达"）。
         const loop = JSON.parse(await evalJs(`(() => {
             App.store.heavyAshManualOn = false;
             // 造一个"总灰分不达标"的起点：密度偏高 → 灰分偏高
             App.setInstrumentInput('density', { manual: 1.520 });
+            // 设密度本身会登记"刚调整过" → 触发 P0 的 30 分钟驻留；脚本要立刻试算，故在此清守卫
+            App.store.densityActionLatch = null; App.store.densityLastMoveAt = 0;
             const g0 = App.computeDensityGuidance(App.store.ashTarget);
             const before = { rho: App.resolveDensity(), dev: g0.valid ? +g0.deltaA.toFixed(3) : null,
                              total: App.resolveTotalAsh() };
@@ -179,6 +183,7 @@ const api = async (p) => {
         const step = +(loop.after.rho - loop.before.rho).toFixed(4);
         const simGain = +(dT / Math.abs(calcFollows.after.rho || 0.02) * 1).toFixed(0);   // 占位，下面重算
         const measured = JSON.parse(await evalJs(`(() => {
+            App.store.densityActionLatch = null; App.store.densityLastMoveAt = 0;
             App.store.heavyAshManualOn = false;
             App.setInstrumentInput('density', { manual: 1.500 });
             const a = App.resolveTotalAsh();
@@ -230,6 +235,83 @@ const api = async (p) => {
         })()`));
         check('CTX_RECORDS_SOURCE', ctx.calc === 'calc' && ctx.manual === 'manual',
             `计算档=${ctx.calc} 手动档=${ctx.manual}`);
+
+        // ---------- 8) P0 守卫：棘轮已停（同一份化验只动作一次） ----------
+        const ratchet = JSON.parse(await evalJs(`(() => {
+            App.store.densityActionLatch = null; App.store.densityLastMoveAt = 0;
+            App.store.heavyAshManualOn = true;
+            App.setHeavyAshInput({ manual: 8.60 });          // 一份化验，之后不再更新
+            App.setInstrumentInput('density', { manual: 1.520 });
+            const g1 = App.computeDensityGuidance(App.store.ashTarget);
+            const first = { advice: +(g1.rhoNew - g1.rhoCur).toFixed(3), rhoNew: +g1.rhoNew.toFixed(3),
+                            stepwise: !!g1.stepwise, steps: g1.steps, full: g1.rhoTargetFull };
+            App.setInstrumentInput('density', { manual: +g1.rhoNew.toFixed(3) });   // 操作员照做
+            const g2 = App.computeDensityGuidance(App.store.ashTarget);
+            return JSON.stringify({ first, second: { direction: g2.direction,
+                advice: +(g2.rhoNew - g2.rhoCur).toFixed(3), reason: g2.reason.slice(0, 60) } });
+        })()`));
+        check('RATCHET_STOPPED',
+            Math.abs(ratchet.first.advice) <= 0.01001 && ratchet.second.direction === 'stable'
+            && ratchet.second.advice === 0,
+            `第一步建议 ${ratchet.first.advice}（逐步=${ratchet.first.stepwise}，完整目标 ${ratchet.first.full}，`
+            + `共 ${ratchet.first.steps} 步）；照做后再算 → ${ratchet.second.direction}／${ratchet.second.advice}`
+            + `｜${ratchet.second.reason}`);
+
+        // ---------- 9) P0 守卫：计算档逐步收敛且不越界（每步之间模拟"来了新化验"清闩锁） ----------
+        const conv = JSON.parse(await evalJs(`(() => {
+            App.store.heavyAshManualOn = false;
+            App.setInstrumentInput('density', { manual: 1.520 });
+            const steps = [];
+            for (let i = 0; i < 8; i++) {
+                App.store.densityActionLatch = null;   // 模拟"又来了新的化验/在线数据"
+                App.store.densityLastMoveAt = 0;
+                const g = App.computeDensityGuidance(App.store.ashTarget);
+                steps.push({ rho: +App.resolveDensity().toFixed(3), dA: g.valid ? +g.deltaA.toFixed(3) : null,
+                             advice: +(g.rhoNew - g.rhoCur).toFixed(3) });
+                if (!g.valid || Math.abs(g.deltaA) <= App.store.ashTargetTol) break;
+                App.setInstrumentInput('density', { manual: +g.rhoNew.toFixed(3) });
+            }
+            return JSON.stringify({ steps, tol: App.store.ashTargetTol });
+        })()`));
+        const lastStep = conv.steps[conv.steps.length - 1];
+        const noOvershoot = conv.steps.every(s => s.dA == null || Math.sign(s.dA) === Math.sign(conv.steps[0].dA));
+        check('STEPWISE_CONVERGES',
+            Math.abs(lastStep.dA) <= conv.tol && noOvershoot && conv.steps.length <= 6,
+            `${conv.steps.length - 1} 步后偏差 ${lastStep.dA}%（容差 ±${conv.tol}）；`
+            + `轨迹 ${conv.steps.map(s => s.rho + ':' + s.dA).join(' → ')}；未越过目标=${noOvershoot}`);
+
+        // ---------- 10) P0 守卫：默认密度下不再有"凭空"的仿真灰分偏移 ----------
+        // 门控 + 限幅（直接验证逻辑本身，不依赖该 store 恰好处于哪一层）
+        const gated = JSON.parse(await evalJs(`(() => {
+            const realLayer = App.instrumentLayer;
+            const base = App.latestBeltAsh('502') != null ? App.latestBeltAsh('502') : App.INSTRUMENT_DEFAULT.ash_502;
+            App.instrumentLayer = () => '默认(仪表)';
+            const heavyDefaultLayer = App.resolveInstrument('ash_502');
+            App.instrumentLayer = () => '手动';
+            App.setInstrumentInput('density', { manual: 1.60 });       // 远离基准点 → 触发限幅
+            const heavyFar = App.resolveInstrument('ash_502');
+            App.instrumentLayer = realLayer;
+            return JSON.stringify({ base, heavyDefaultLayer, heavyFar, rho: 1.60,
+                                    delta: +(heavyFar - base).toFixed(4) });
+        })()`));
+        check('SIM_GATED_ON_DEFAULT', Math.abs(gated.heavyDefaultLayer - gated.base) < 1e-6,
+            `基准=${gated.base}｜层=默认(仪表) 时 502 在线值=${gated.heavyDefaultLayer}`
+            + `（应等于基准：不得叠加仿真增量，否则默认密度会把 7.9 变成 6.57）`);
+        check('SIM_CLAMPED', Math.abs(gated.delta) <= 1.0 + 1e-9 && Math.abs(gated.delta) > 0,
+            `ρ=1.60 时仿真增量 ${gated.delta}（限幅 ±1.0；未限幅会是 +3.67）`);
+
+        // ---------- 11) P0 守卫：占位值（手动=目标且陈旧）不给建议 ----------
+        const ph = JSON.parse(await evalJs(`(() => {
+            App.store.totalAshManualOn = true;
+            App.store.ashInputs.totalAsh = { manual: App.store.ashTarget, manualAt: Date.now() - 48 * 3600 * 1000 };
+            const g = App.computeDensityGuidance(App.store.ashTarget);
+            const out = { valid: g.valid, reason: g.reason || '' };
+            App.store.totalAshManualOn = false;
+            App.store.ashInputs.totalAsh = { mode: 'auto', manual: null, entry: null, manualAt: null };
+            return JSON.stringify(out);
+        })()`));
+        check('PLACEHOLDER_BLOCKED', ph.valid === false && ph.reason.includes('占位值'),
+            `valid=${ph.valid}｜${ph.reason.slice(0, 60)}`);
 
         ws.close();
     } catch (e) {
