@@ -1546,9 +1546,15 @@ const App = {
     DENSITY_GUIDE: { deadband: 0.05, maxStep: 0.01, rhoMin: 1.35, rhoMax: 1.60, kFallback: 0.03,
                      simBaseRho: 1.49, simK: 0.03 },   // 灰分测量响应仿真：密度↑0.01 → 灰分↑≈0.33%
 
-    // 专家经验调整表（总灰分偏差 → 密度修正量，线性插值/外推）：
-    //   |ΔA|≤0.05% → 不调；0.15%→0.01；0.25%→0.02；>0.25% 按末段斜率0.1外推
-    EXPERT_ADJUST: { deadband: 0.05, p1: { dA: 0.15, dRho: 0.01 }, p2: { dA: 0.25, dRho: 0.02 }, slope: 0.1 },
+    // 专家经验调整表（总灰分偏差 → 密度修正量）——**2026-09-12 现场访谈确认后的口径**：
+    //   偏差 0.15% → 调 0.01；0.30% → 0.02；更大时**最多 0.03**（不再线性外推）；
+    //   |ΔA| ≤ 0.05% 不动（死区）。
+    //   等价形式：Δρ = min(|ΔA| / gain, cap)，隐含增益 15%/单位密度、单次封顶 0.03。
+    // 与旧口径的差别（旧值：p1 0.15→0.01、p2 0.25→0.02、slope 0.1 无上限）：
+    //   · 旧表在 |ΔA|=1.5% 时给 0.145 —— 是专家上限 0.03 的 4.8 倍；
+    //   · 旧表在 0.30% 时给 0.025，现场是 0.02；
+    //   · 旧表斜率 0.1 与现场 ~0.067 不符（现场三点正好落在 0.15→0.01 这条割线上）。
+    EXPERT_ADJUST: { deadband: 0.05, gain: 15, cap: 0.03 },
     // 专家经验反推的物理增益 K（0.01/0.15≈0.067，0.02/0.25=0.08，取0.075）：
     // 仅用于"调密后重介灰分预测"（ΔA ≈ Δρ/K），不参与调整量计算。
     // 表3 配对足够时由 densityGainK() 数据驱动估计（分系统 OLS），此常数为回退值。
@@ -1558,9 +1564,9 @@ const App = {
     expertAdjust(dAbs) {
         const t = this.EXPERT_ADJUST;
         if (!(dAbs > t.deadband)) return 0;
-        if (dAbs <= t.p1.dA) return (dAbs - t.deadband) / (t.p1.dA - t.deadband) * t.p1.dRho;
-        if (dAbs <= t.p2.dA) return t.p1.dRho + (dAbs - t.p1.dA) / (t.p2.dA - t.p1.dA) * (t.p2.dRho - t.p1.dRho);
-        return t.p2.dRho + (dAbs - t.p2.dA) * t.slope;
+        // 现场做法：比例律（15%/单位）× 封顶 0.03。注意**不减死区**——
+        // 现场给出的三点（0.15→0.01、0.30→0.02、0.60→0.03 封顶）正好落在 |ΔA|/15 上。
+        return Math.min(dAbs / t.gain, t.cap);
     },
 
     // 灰分→密度 增益 K（表3 灰分密度配对，分系统 OLS 加权平均；与后端 density_model.py 逐值一致）

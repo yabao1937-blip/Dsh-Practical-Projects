@@ -15,13 +15,21 @@ def test_expert_adjust_deadband():
 
 
 def test_expert_adjust_ramp():
-    assert abs(expert_adjust(0.15) - 0.01) < 1e-12   # 0.15% → 0.01
-    assert abs(expert_adjust(0.25) - 0.02) < 1e-12   # 0.25% → 0.02
+    """现场确认口径（2026-09-12 访谈）：Δρ = min(|ΔA|/15, 0.03)，死区 0.05 不动。
+
+    现场给的三个点：0.15% → 0.01、0.30% → 0.02、更大时最多 0.03。
+    """
+    assert abs(expert_adjust(0.15) - 0.01) < 1e-12        # 0.15/15 = 0.01（现场点）
+    assert abs(expert_adjust(0.25) - 0.25 / 15) < 1e-12   # 0.016667（旧表是 0.02，现场口径更低）
+    assert abs(expert_adjust(0.30) - 0.02) < 1e-12        # 现场点
+    assert expert_adjust(0.04) == 0.0                     # 死区内不动
 
 
-def test_expert_adjust_extrapolate():
-    assert abs(expert_adjust(0.30) - 0.025) < 1e-12  # 0.02 + 0.05×0.1
-    assert abs(expert_adjust(0.50) - 0.045) < 1e-12  # 0.02 + 0.25×0.1
+def test_expert_adjust_capped():
+    """单次修正**封顶 0.03**（现场："最多也就调 0.03"）——旧表无上限，1.5% 偏差会给 0.145（4.8 倍）。"""
+    assert abs(expert_adjust(0.60) - 0.03) < 1e-12   # 0.04 被上限截到 0.03
+    assert abs(expert_adjust(0.50) - 0.03) < 1e-12
+    assert abs(expert_adjust(1.50) - 0.03) < 1e-12   # 旧表此处为 0.145
 
 
 def test_guidance_total_reach_target():
@@ -41,11 +49,11 @@ def test_guidance_total_down_stepwise_and_full_target():
     st = {"rho_cur": 1.49, "heavy_ash": 8.50, "actual_total": 9.00, "scheme": "total", "tol": 0.1}
     g = compute_density_guidance(st, 8.50)
     assert g["direction"] == "down"
-    assert abs(g["deltaRho"] + 0.01) < 1e-9              # 发布的一步
-    assert abs(g["deltaRhoFull"] + 0.045) < 1e-9         # 完整修正量
-    assert abs(g["rhoTargetFull"] - 1.445) < 1e-9        # 完整目标
+    assert abs(g["deltaRho"] + 0.01) < 1e-9              # 发布的一步（≤maxStep）
+    assert abs(g["deltaRhoFull"] + 0.03) < 1e-9          # 完整修正量（现场封顶 0.03）
+    assert abs(g["rhoTargetFull"] - 1.46) < 1e-9         # 完整目标
     assert abs(g["rhoNew"] - 1.48) < 1e-9                # 本步目标
-    assert g["steps"] >= 5 and g["stepwise"] is True
+    assert g["steps"] >= 3 and g["stepwise"] is True
 
 
 def test_guidance_full_step_still_available():
@@ -53,8 +61,8 @@ def test_guidance_full_step_still_available():
     st = {"rho_cur": 1.49, "heavy_ash": 8.50, "actual_total": 9.00, "scheme": "total",
           "tol": 0.1, "stepwise": False}
     g = compute_density_guidance(st, 8.50)
-    assert abs(g["deltaRho"] + 0.045) < 1e-9
-    assert abs(g["rhoNew"] - 1.445) < 1e-9
+    assert abs(g["deltaRho"] + 0.03) < 1e-9      # 现场封顶后的整步量
+    assert abs(g["rhoNew"] - 1.46) < 1e-9
     assert g["stepwise"] is False
 
 

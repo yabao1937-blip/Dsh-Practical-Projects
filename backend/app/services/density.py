@@ -4,12 +4,15 @@
 """
 import math
 
-# 专家经验调整表（总灰分偏差 → 密度修正量，分段线性）
+# 专家经验调整表（总灰分偏差 → 密度修正量）——2026-09-12 现场访谈确认后的口径：
+#   偏差 0.15% → 0.01；0.30% → 0.02；更大时**最多 0.03**；|ΔA| ≤ 0.05% 不动。
+#   等价：Δρ = min(|ΔA| / gain, cap)，隐含增益 15%/单位密度、单次封顶 0.03。
+# 旧口径（p1 0.15→0.01、p2 0.25→0.02、slope 0.1 无上限）与现场不符：
+#   1.5% 偏差时旧表给 0.145（专家上限的 4.8 倍）；0.30% 时旧表 0.025、现场 0.02。
 EXPERT_ADJUST = {
     "deadband": 0.05,
-    "p1": {"dA": 0.15, "dRho": 0.01},
-    "p2": {"dA": 0.25, "dRho": 0.02},
-    "slope": 0.1,
+    "gain": 15,
+    "cap": 0.03,
 }
 
 # 专家经验反推的物理增益 K（仅用于"调密后重介灰分预测"展示，不参与调整量）
@@ -43,11 +46,8 @@ def expert_adjust(d_abs):
     t = EXPERT_ADJUST
     if not (d_abs > t["deadband"]):
         return 0.0
-    if d_abs <= t["p1"]["dA"]:
-        return (d_abs - t["deadband"]) / (t["p1"]["dA"] - t["deadband"]) * t["p1"]["dRho"]
-    if d_abs <= t["p2"]["dA"]:
-        return t["p1"]["dRho"] + (d_abs - t["p1"]["dA"]) / (t["p2"]["dA"] - t["p1"]["dA"]) * (t["p2"]["dRho"] - t["p1"]["dRho"])
-    return t["p2"]["dRho"] + (d_abs - t["p2"]["dA"]) * t["slope"]
+    # 现场做法：比例律（15%/单位）× 封顶 0.03；**不减死区**（现场三点落在 |ΔA|/15 上）
+    return min(d_abs / t["gain"], t["cap"])
 
 
 def compute_density_guidance(state: dict, target_total_ash: float) -> dict:

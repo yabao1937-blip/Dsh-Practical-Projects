@@ -194,7 +194,7 @@ const api = async (p) => {
             return JSON.stringify({ dRho: 0.01, dTotal: +(b - a).toFixed(4), guide: c });
         })()`));
         const gainPerUnit = +(measured.dTotal / 0.01).toFixed(2);       // %总灰分 / (g/cm³)
-        const tableGain = +(0.15 / 0.01).toFixed(1);                    // 专家表第一档隐含的增益
+        const tableGain = +((await evalJs("App.EXPERT_ADJUST.gain")) || 15);   // 从页面读专家表隐含增益（现场确认 15%/单位、封顶 0.03）
         console.log(`LOOP_OVERSHOOT_INFO: 建议步长 Δρ=${step}；应用后偏差 ${loop.before.dev}% → ${loop.after.dev}%`
             + `（过冲 ${(devAfter / Math.max(devBefore, 1e-9)).toFixed(2)} 倍）`);
         console.log(`LOOP_GAIN_INFO: 仿真+配煤公式实测增益 ${gainPerUnit}%/单位密度`
