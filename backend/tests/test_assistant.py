@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """AI 解读助手(只读)测试:快照构建 / 状态接口 / 未配置拒绝 / 只读性(无写表)。"""
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -32,12 +34,28 @@ def test_status_endpoint_shape():
     assert "configured" in j and isinstance(j["configured"], bool)
 
 
-def test_ask_unconfigured_returns_503(monkeypatch):
+def test_ask_unconfigured_returns_503(monkeypatch, tmp_path):
     for k in ("ASSISTANT_API_KEY", "ZAI_API_KEY", "DEEPSEEK_API_KEY"):
         monkeypatch.delenv(k, raising=False)
+    # 密钥文件(backend/.llm_keys.json)也是合法来源,测试需一并屏蔽
+    from app.routers import assistant as mod
+    monkeypatch.setattr(mod, "KEYS_FILE", tmp_path / "nonexistent.json")
     r = client.post("/api/v1/assistant/ask", json={"question": "什么是Q²?", "history": []})
     assert r.status_code == 503
     assert "ZAI_API_KEY" in r.json()["detail"]
+
+
+def test_keys_file_is_preferred_source_when_env_missing(monkeypatch, tmp_path):
+    """密钥文件生效:环境变量缺失时仍能配置成功(解决'谁重启谁忘带环境变量')。"""
+    for k in ("ASSISTANT_API_KEY", "ZAI_API_KEY", "DEEPSEEK_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    from app.routers import assistant as mod
+    fake = tmp_path / "keys.json"
+    fake.write_text(json.dumps({"zai": "sk-test"}), encoding="utf-8")
+    monkeypatch.setattr(mod, "KEYS_FILE", fake)
+    r = client.get("/api/v1/assistant/status")
+    j = r.json()
+    assert j["configured"] is True and j["provider"] == "zai-coding"
 
 
 def test_ask_validates_input():

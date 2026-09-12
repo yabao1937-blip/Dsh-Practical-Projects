@@ -29,3 +29,6 @@ backend/data/write_token.txt
 
 # force è¦†ç›–å‰çš„è‡ªåŠ¨å¤‡ä»½ï¼ˆå°±åœ°å›æ»šç”¨ï¼Œä¸å…¥åº“ï¼‰
 backend/data/backups/
+
+# AIÖúÊÖLLMÃÜÔ¿(±¾µØ,ÎğÈë¿â)
+backend/.llm_keys.json

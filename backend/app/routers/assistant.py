@@ -18,6 +18,7 @@ import json
 import os
 import urllib.request
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -57,6 +58,19 @@ KNOWLEDGE = """【系统知识】重介密控系统:选煤厂重介分选密度�
 · 密度趋势与口径的已知边界:系统"当前密度"取自最新记录(非实时),现场调密度后需在系统内录入,否则死区判断会用旧密度。"""
 
 
+# 密钥文件(优先级低于环境变量;存在则任何方式启动的服务都自带密钥,
+# 解决"谁重启服务谁忘带环境变量 → 助手反复变暗"的 recurring 问题)。
+# 格式 {"zai": "...", "deepseek": "...", "assistant": "..."};已加入 .gitignore。
+KEYS_FILE = Path(__file__).resolve().parent.parent.parent / ".llm_keys.json"
+
+
+def _keys_from_file() -> dict:
+    try:
+        return json.loads(KEYS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def _llm_config():
     """兼容旧接口:返回回退链首选。"""
     chain = _llm_chain()
@@ -64,23 +78,25 @@ def _llm_config():
 
 
 def _llm_chain():
-    """按环境变量解析回退链 [(base_url, model, key, 名字), ...]。
+    """解析回退链 [(base_url, model, key, 名字), ...]。
 
+    密钥来源:环境变量优先,其次 backend/.llm_keys.json(见 KEYS_FILE)。
     顺序:显式 ASSISTANT_* > ZAI(编程套餐) > DeepSeek。
     2026-09-12 实测:zai coding 通道会出现"流式空返回"故障(完整→截断→全空的渐进劣化),
-    因此助手改为 缓冲式+多供应商回退:任一供应商失败/空答自动切下一个,可靠性优先。
+    因此助手为 缓冲式+多供应商回退:任一供应商失败/空答自动切下一个,可靠性优先。
     """
+    fk = _keys_from_file()
+    zai_key = os.environ.get("ZAI_API_KEY") or fk.get("zai")
+    ds_key = os.environ.get("DEEPSEEK_API_KEY") or fk.get("deepseek")
+    as_key = os.environ.get("ASSISTANT_API_KEY") or fk.get("assistant")
     chain = []
-    if os.environ.get("ASSISTANT_API_KEY"):
+    if as_key:
         chain.append((os.environ.get("ASSISTANT_BASE_URL") or "https://api.z.ai/api/coding/paas/v4",
-                      os.environ.get("ASSISTANT_MODEL") or "glm-4.6",
-                      os.environ["ASSISTANT_API_KEY"], "assistant-explicit"))
-    if os.environ.get("ZAI_API_KEY"):
-        chain.append(("https://api.z.ai/api/coding/paas/v4", "glm-4.6",
-                      os.environ["ZAI_API_KEY"], "zai-coding"))
-    if os.environ.get("DEEPSEEK_API_KEY"):
-        chain.append(("https://api.deepseek.com", "deepseek-chat",
-                      os.environ["DEEPSEEK_API_KEY"], "deepseek"))
+                      os.environ.get("ASSISTANT_MODEL") or "glm-4.6", as_key, "assistant-explicit"))
+    if zai_key:
+        chain.append(("https://api.z.ai/api/coding/paas/v4", "glm-4.6", zai_key, "zai-coding"))
+    if ds_key:
+        chain.append(("https://api.deepseek.com", "deepseek-chat", ds_key, "deepseek"))
     return chain
 
 
