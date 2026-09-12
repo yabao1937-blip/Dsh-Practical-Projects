@@ -327,6 +327,35 @@ const api = async (p) => {
             + `；法则封顶的完整修正=${pred.rhoTargetFull}；本次一步=${pred.rhoNew}（≤${pred.maxStep}）；`
             + `弹窗已显示=${pred.shown}`);
 
+        // ---------- 13) 经验范围提示：大偏差时推测值标"超出经验范围" ----------
+        const rng = JSON.parse(await evalJs(`(() => {
+            App.store.heavyAshManualOn = true;
+            App.setHeavyAshInput({ manual: 9.60 });          // 造大偏差（>0.45%）
+            App.setInstrumentInput('density', { manual: 1.52 });
+            App.store.densityActionLatch = null; App.store.densityLastMoveAt = 0;
+            const g = App.computeDensityGuidance(App.store.ashTarget);
+            OverviewPage.showCardDetail('total');
+            const html = document.getElementById('modal-body') ? document.getElementById('modal-body').innerHTML : '';
+            App.closeModal();
+            const out = { dA: g.deltaA, beyond: g.predictBeyondRange, range: g.expertRangeDA,
+                          warned: html.includes('超出经验范围'),
+                          hasPredict: html.includes('建议密度(推测值)') };
+            App.setHeavyAshInput({ manual: 8.55 });          // 小偏差
+            App.store.densityActionLatch = null; App.store.densityLastMoveAt = 0;
+            const g2 = App.computeDensityGuidance(App.store.ashTarget);
+            OverviewPage.showCardDetail('total');
+            const html2 = document.getElementById('modal-body') ? document.getElementById('modal-body').innerHTML : '';
+            App.closeModal();
+            out.smallDA = g2.deltaA; out.smallBeyond = g2.predictBeyondRange;
+            out.smallWarned = html2.includes('超出经验范围');
+            return JSON.stringify(out);
+        })()`));
+        check('PREDICT_RANGE_HINT',
+            rng.beyond === true && rng.warned === true && rng.hasPredict === true
+            && rng.smallBeyond === false && rng.smallWarned === false,
+            `大偏差 ΔA=${rng.dA}%（阈值 ${rng.range}%）→ 标注=${rng.warned}；`
+            + `小偏差 ΔA=${rng.smallDA}% → 标注=${rng.smallWarned}`);
+
         // ---------- 11) P0 守卫：占位值（手动=目标且陈旧）不给建议 ----------
         const ph = JSON.parse(await evalJs(`(() => {
             App.store.totalAshManualOn = true;

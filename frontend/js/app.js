@@ -1763,6 +1763,7 @@ const App = {
             deadband: tol, maxStep: g.maxStep,
             deltaRhoFull: null, rhoTargetFull: null, steps: 1, stepwise: false,
             deltaRhoPredict: null, rhoPredict: null,
+            expertRangeDA: null, predictBeyondRange: false,
         };
         // P0 状态位（占位值 / 闩锁与驻留内保持）—— 与后端同口径，后端由 state 传入相同三值
         const p0guard = this.densityGuardState({ scheme: scheme, actualTotal: actualTotal, heavyAsh: heavyAsh });
@@ -1832,6 +1833,11 @@ const App = {
         const dRhoPredict = -(r.deltaA / this.EXPERT_ADJUST.gain);
         r.deltaRhoPredict = +dRhoPredict.toFixed(4);
         r.rhoPredict = Math.max(g.rhoMin, Math.min(g.rhoMax, +(rhoCur + dRhoPredict).toFixed(3)));
+        // 经验范围：现场法则封顶 0.03 对应的偏差 = 0.03 × 15 = 0.45%。
+        // 超过它说明"一次只敢调 0.03"的经验已不适用（现场此时多半先查扰动源而不是猛动密度），
+        // 所以推测值仍显示、但要标注"超出经验范围，仅供参考"。
+        r.expertRangeDA = +(this.EXPERT_ADJUST.cap * this.EXPERT_ADJUST.gain).toFixed(4);
+        r.predictBeyondRange = Math.abs(r.deltaA) > r.expertRangeDA;
         r.steps = Math.max(1, Math.ceil(Math.abs(dRhoFull) / (stepLimit || 1) - 1e-9));
         r.stepwise = this.DENSITY_STEPWISE && r.steps > 1;
         r.deltaRho = +dRhoStep.toFixed(4);

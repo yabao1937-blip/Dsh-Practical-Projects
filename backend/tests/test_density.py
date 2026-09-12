@@ -96,6 +96,22 @@ def test_guidance_predict_target_is_uncapped_by_law():
     assert g2["deltaRhoPredict"] is not None
 
 
+def test_predict_value_flags_beyond_expert_range():
+    """经验范围提示：|ΔA| 超过「法则封顶 0.03 × 增益 15 = 0.45%」时标为超出经验范围。
+
+    依据：现场法则封顶 0.03 对应的偏差就是 0.45%；超过它说明"一次只敢调 0.03"的经验不再适用
+    （现场此时多半先查扰动源），所以推测值仍显示但要标注"仅供参考"。
+    """
+    ok = compute_density_guidance(
+        {"rho_cur": 1.49, "heavy_ash": 8.50, "actual_total": 8.80, "scheme": "total", "tol": 0.1}, 8.50)
+    assert abs(ok["deltaA"] - 0.30) < 1e-9
+    assert ok["predictBeyondRange"] is False and abs(ok["expertRangeDA"] - 0.45) < 1e-9
+    far = compute_density_guidance(
+        {"rho_cur": 1.49, "heavy_ash": 8.50, "actual_total": 9.60, "scheme": "total", "tol": 0.1}, 8.50)
+    assert abs(far["deltaA"] - 1.10) < 1e-9
+    assert far["predictBeyondRange"] is True
+
+
 def test_guidance_hold_returns_stable_with_reason():
     """P0②③ 保持：同一份数据已动作过 / 或在驻留窗口内 → 只报"保持"并说明原因。"""
     st = {"rho_cur": 1.49, "heavy_ash": 8.50, "actual_total": 9.00, "scheme": "total", "tol": 0.1,

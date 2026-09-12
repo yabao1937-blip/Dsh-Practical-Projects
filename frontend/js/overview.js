@@ -475,8 +475,16 @@ const OverviewPage = {
                     <tr><td>目标密度(本次一步)</td><td><strong>${g.rhoNew.toFixed(3)} g/cm³</strong>（范围1.35~1.60）</td></tr>
                     <tr><td><strong>建议密度(推测值)</strong></td><td>${
                         (g.rhoPredict != null && g.valid)
-                            ? `<strong style="color:var(--accent-cyan)">${g.rhoPredict.toFixed(3)} g/cm³</strong>`
+                            ? `<strong style="color:${g.predictBeyondRange ? 'var(--text-muted)' : 'var(--accent-cyan)'}">`
+                              + `${g.rhoPredict.toFixed(3)} g/cm³</strong>`
                               + `（${g.deltaRhoPredict > 0 ? '+' : ''}${g.deltaRhoPredict.toFixed(3)}）`
+                              + (g.predictBeyondRange
+                                  ? `<br><span style="color:var(--accent-orange);font-size:12px">`
+                                    + `⚠ 超出经验范围：|ΔA| ${Math.abs(g.deltaA).toFixed(2)}% > `
+                                    + `${(g.expertRangeDA != null ? g.expertRangeDA : 0.45).toFixed(2)}%`
+                                    + `（= 现场法则封顶 0.03 × 增益 15）。这么大的偏差，现场做法是**先查扰动源**`
+                                    + `（换工作面/煤质/脱粉切换）而不是一次猛动密度 —— 该推测值仅供参考。</span>`
+                                  : '')
                               + `<br><span style="color:var(--text-secondary);font-size:12px">`
                               + `一步到位的终点：按现场确认增益 15%/单位密度把偏差线性外推归零所得，`
                               + `不受单步限幅(≤${g.maxStep})约束，仅受 1.35~1.60 物理范围限制；`
