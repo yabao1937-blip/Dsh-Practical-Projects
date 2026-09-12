@@ -7,7 +7,7 @@ from . import auth
 from . import models  # noqa: F401  确保建表前模型已注册
 from .config import FRONTEND_DIR
 from .database import Base, engine
-from .routers import (health, import_api, inputs, manual_entries, migration, overview,
+from .routers import (assistant, health, import_api, inputs, manual_entries, migration, overview,
                       records, samples, settings, state, training)
 
 Base.metadata.create_all(bind=engine)
@@ -29,6 +29,7 @@ app = FastAPI(
 #   · PUT /state?force=true（整库覆盖/清空）**只接受本机来源**，拿到 token 也不能从别的机器洗库。
 
 app.include_router(health.router, prefix="/api/v1")
+app.include_router(assistant.router, prefix="/api/v1")   # AI解读助手(只读)
 app.include_router(migration.router, prefix="/api/v1")
 app.include_router(settings.router, prefix="/api/v1")
 app.include_router(inputs.router, prefix="/api/v1")

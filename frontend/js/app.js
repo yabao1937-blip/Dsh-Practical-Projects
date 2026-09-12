@@ -1294,7 +1294,45 @@ const App = {
         // 给它编一个默认（例如取在线值）会让人分不清哪条是真实测。
     },
 
-    // 实测密度计的量程与偏差阈值（两处界面共用同一份口径，避免各写一遍各不一致）
+    // ---- P0 安全守卫（2026-09-12，三模型会诊结论）----
+    // 逐步建议：发布的建议值不超过 maxStep（钳制），并给出完整目标与步数。
+    DENSITY_STEPWISE: true,
+    // 最短驻留：密度变动后这段时间内不再出新建议（过程到位 + 化验周期）
+    DENSITY_DWELL_MS: 30 * 60000,
+    // 占位值判定：手动灰分等于目标值且超过这段时间未更新 → 视为占位值，不给建议
+    PLACEHOLDER_STALE_MS: 24 * 3600 * 1000,
+
+    // 「驱动数据键」：当前偏差是由哪一份数据算出来的。键不变 ⇒ 建议不该重复给。
+    // 组成：方案 + 实际值/重介值 + 该值的来源时间戳（手动=manualAt；录入=最新记录时间）。
+    _densityDriveKey(actualTotal, heavyAsh, scheme) {
+        const cfg = (this.store.instrumentInputs && this.store.instrumentInputs) || {};
+        const totalManual = (this.store.ashInputs && this.store.ashInputs.totalAsh) || {};
+        const heavyManual = this.store.heavyAshInput || {};
+        let stamp = 0, src = 'calc';
+        if (scheme === 'heavy') {
+            if (this.heavyAshSource() === 'manual') { src = 'heavyManual'; stamp = heavyManual.manualAt || 0; }
+        } else if (this.store.totalAshManualOn && typeof totalManual.manual === 'number') {
+            src = 'totalManual'; stamp = totalManual.manualAt || 0;
+        }
+        if (!stamp) {
+            // 非手动来源：用最新数据时间戳（粗精煤泥记录/补录），没有则用值本身
+            let ts = '';
+            (this.store.coarseCoal || []).forEach(r => { if (r && r.timestamp && r.timestamp > ts) ts = r.timestamp; });
+            stamp = ts ? new Date(String(ts).replace(' ', 'T')).getTime() : 0;
+        }
+        const v = (scheme === 'heavy' ? heavyAsh : actualTotal);
+        return `${scheme}|${src}|${stamp || 0}|${v == null ? 'na' : (+v).toFixed(3)}`;
+    },
+
+    // 该记录一份"已按某份数据动作过"的闩锁（在操作员/自动执行真正改了密度时调用）
+    _latchDensityAction() {
+        const st = this.store;
+        if (!st.densityActionLatch) st.densityActionLatch = null;
+        if (this._lastDriveKey) {
+            st.densityActionLatch = { key: this._lastDriveKey, at: Date.now(), rho: this.resolveDensity() };
+            this.saveStore();
+        }
+    },
     DENSITY_ACTUAL: {
         hardMin: 1.30, hardMax: 1.65,     // 之外**拒收**（手滑多打一位）
         softMin: 1.35, softMax: 1.60,     // 之外但在硬限内 → 质量状态标黄"偏离"
@@ -1350,9 +1388,15 @@ const App = {
         } else if (id === 'ash_501' || id === 'ash_502') {
             // 录入：补录灰分仪 或 表3导入的该皮带灰分
             const base = this.latestBeltAsh(id === 'ash_501' ? '501' : '502');
-            // 仿真：密度变化→灰分测量变化（基准点线性化，密度↑0.01→灰分↑≈0.33%）
+            // 仿真：密度变化→灰分测量变化（基准点线性化）
+            // P0 门控（2026-09-12）：只在密度**有真实来源**时才叠加仿真增量。
+            // 否则默认密度 1.45（距基准 1.49 有 0.04）会凭空把 502 的 7.9% 变成 6.57% ——
+            // 那不是测量，是编造出来的偏差，会直接进总灰分与建议密度。
+            // 同时限幅 |Δ灰分| ≤ 0.5，避免远离工作点时仿真线性外推给出荒唐值。
             const rho = this.resolveInstrument('density');
-            const d = (rho - this.getSimBaseRho()) / this.DENSITY_GUIDE.simK;
+            const rhoIsReal = this.instrumentLayer('density') !== '默认(仪表)';
+            let d = rhoIsReal ? (rho - this.getSimBaseRho()) / this.DENSITY_GUIDE.simK : 0;
+            if (d > 0.5) d = 0.5; else if (d < -0.5) d = -0.5;
             entry = +((base != null ? base : this.INSTRUMENT_DEFAULT[id]) + d).toFixed(4);
             // 打点只用数据部分：密度仿真变化不算自动动作（只有新数据才接管更早的手工灰分）
             this._autoBump(id, base != null ? base : this.INSTRUMENT_DEFAULT[id]);
@@ -1465,6 +1509,11 @@ const App = {
             patch = Object.assign({}, patch);
             patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
             if (!('autoExec' in patch)) patch.autoExec = false;   // 操作员手动写入清除自动执行标记
+            // P0②：密度真的被改了 → 记闩锁（同一份驱动数据不再重复给建议），并记下变动时刻
+            if (id === 'density' && typeof patch.manual === 'number' && isFinite(patch.manual)) {
+                this.store.densityLastMoveAt = Date.now();
+                this._latchDensityAction();
+            }
         }
         // 决策日志:操作员手动设定密度(有效范围内)——记录决策上下文,45分钟后自动补记灰分响应
         if (id === 'density' && !patch.autoExec && typeof patch.manual === 'number'
@@ -1612,7 +1661,41 @@ const App = {
     //   total：总灰分版——偏差=实际总灰分−目标总灰分（现行）
     //   heavy：重介精煤灰分版——目标重介灰分=(A目标×总量−浮−粗)/重介量，偏差=实测重介灰分−目标重介灰分，
     //          换算成等效总灰分偏差（×重介量/总量）后共用同一专家表
-    computeDensityGuidance(targetTotalAsh) {
+    // P0 状态位：占位值 / 是否保持在闩锁与驻留窗口内（前后端同口径）
+    densityGuardState(state) {
+        const s = state || {};
+        const now = Date.now();
+        const manualTotal = (this.store.ashInputs && this.store.ashInputs.totalAsh) || {};
+        const heavyManual = this.store.heavyAshInput || {};
+        const target = this.store.ashTarget;
+        const isStale = at => !at || (now - at) > this.PLACEHOLDER_STALE_MS;
+        let placeholder = false;
+        if (s.scheme !== 'heavy' && this.store.totalAshManualOn
+            && typeof manualTotal.manual === 'number' && Math.abs(manualTotal.manual - target) < 1e-9) {
+            placeholder = isStale(manualTotal.manualAt);
+        }
+        if (s.scheme === 'heavy' && this.heavyAshSource() === 'manual'
+            && typeof heavyManual.manual === 'number' && Math.abs(heavyManual.manual - target) < 1e-9) {
+            placeholder = isStale(heavyManual.manualAt);
+        }
+        const latch = this.store.densityActionLatch;
+        const key = this._densityDriveKey(s.actualTotal, s.heavyAsh, s.scheme);
+        const lastMove = this.store.densityLastMoveAt || 0;
+        let hold = false, holdReason = '';
+        if (latch && latch.key === key) {
+            hold = true;
+            holdReason = '已按当前这份数据调整过密度（同一份化验只动作一次）；'
+                + '请等新的化验/在线数据后再看下一步建议';
+        } else if (lastMove && (now - lastMove) < this.DENSITY_DWELL_MS) {
+            hold = true;
+            holdReason = `刚调整过密度（${Math.round((now - lastMove) / 60000)} 分钟前），`
+                + `过程到位与化验需要时间，${Math.round(this.DENSITY_DWELL_MS / 60000)} 分钟内不再给新建议；`
+                + '如已拿到新化验，录入后会自动重新计算';
+        }
+        return { placeholder, hold, holdReason, driveKey: key };
+    },
+
+    computeDensityGuidance(targetTotalAshOverride) {
         const g = this.getDensityGuide();
         const scheme = (this.store.guideScheme === 'heavy') ? 'heavy' : 'total';
         const rhoCur = this.resolveDensity();                    // 密度计权威值
@@ -1645,6 +1728,12 @@ const App = {
             deltaA: null, deltaRho: 0, rhoNew: rhoCur, direction: 'stable', reason: '',
             deadband: tol, maxStep: g.maxStep,
         };
+        // P0 状态位（占位值 / 闩锁与驻留内保持）—— 与后端同口径，后端由 state 传入相同三值
+        const gs = this.densityGuardState({ scheme: scheme, actualTotal: actualTotal, heavyAsh: heavyAsh });
+        r.placeholderManual = gs.placeholder;
+        r.hold = gs.hold;
+        r.holdReason = gs.holdReason;
+        r.driveKey = gs.driveKey;
         // 常量灰分不得驱动控制建议（与后端 compute_density_guidance 同序同文案）：
         // 501 未接入时总灰分是默认常量，照它算 deltaA（如 8.8−8.5=0.3 超容差）会推出"下调密度"。
         // 必须排在「数据不完整」通用判定之前，否则与后端给出的 reason 不一致。
@@ -1655,6 +1744,13 @@ const App = {
             return r;
         }
         if (!r.valid) { r.reason = '总精煤灰分数据不完整，暂无密度调整建议'; return r; }
+        // P0④ 占位值守卫：手动灰分等于目标值且长期未更新 → 视为占位值，宁可不给建议
+        if (r.placeholderManual) {
+            r.valid = false;
+            r.reason = '当前灰分取的是「手动值」，且该值等于目标灰分并已超过 24 小时未更新 —— '
+                     + '疑似占位值（不是新化验结果）。请录入新的化验值后再看密度建议。';
+            return r;
+        }
         if (scheme === 'heavy') {
             const heavyAmt = this.resolveAmount('denseAmount');
             const floatAmt = this.resolveAmount('floatAmount');
@@ -1677,10 +1773,26 @@ const App = {
                 : `实际总灰分 ${actualTotal.toFixed(2)}% 与期望 ${targetTotalAsh.toFixed(2)}% 偏差 ${r.deltaA >= 0 ? '+' : ''}${r.deltaA.toFixed(2)}% ≤ ±${tol}% —— 已达标，密度保持`;
             return r;
         }
-        // 专家经验修正量（完整修正，人工执行；密度限幅1.35~1.60）
+        // P0② 动作闩锁 / P0③ 最短驻留：同一份驱动数据只允许一次动作
+        this._lastDriveKey = this._densityDriveKey(actualTotal, heavyAsh, scheme);
+        if (r.hold) {
+            r.direction = 'stable';
+            r.rhoNew = rhoCur;
+            r.deltaRho = 0;
+            r.reason = r.holdReason || '已按当前这份数据调整过密度，等新的化验/在线数据后再给下一步建议';
+            return r;
+        }
+        // 专家经验修正量（完整修正量）
         const dRhoFull = -Math.sign(r.deltaA) * this.expertAdjust(Math.abs(r.deltaA));   // 灰分偏高→降密度
-        r.deltaRho = +dRhoFull.toFixed(4);
-        r.rhoNew = Math.max(g.rhoMin, Math.min(g.rhoMax, +(rhoCur + dRhoFull).toFixed(3)));
+        // P0① 逐步建议：发布的建议不超过 maxStep，避免"整步修正"依赖未验证前提而在闭环里震荡。
+        const stepLimit = (this.DENSITY_STEPWISE && g.maxStep > 0) ? g.maxStep : Math.abs(dRhoFull);
+        const dRhoStep = Math.max(-stepLimit, Math.min(stepLimit, dRhoFull));
+        r.deltaRhoFull = +dRhoFull.toFixed(4);
+        r.rhoTargetFull = Math.max(g.rhoMin, Math.min(g.rhoMax, +(rhoCur + dRhoFull).toFixed(3)));
+        r.steps = Math.max(1, Math.ceil(Math.abs(dRhoFull) / (stepLimit || 1) - 1e-9));
+        r.stepwise = this.DENSITY_STEPWISE && r.steps > 1;
+        r.deltaRho = +dRhoStep.toFixed(4);
+        r.rhoNew = Math.max(g.rhoMin, Math.min(g.rhoMax, +(rhoCur + dRhoStep).toFixed(3)));
         r.direction = r.deltaA > 0 ? 'down' : 'up';
         r.reason = scheme === 'heavy'
             ? `重介灰分${r.deltaAHeavy > 0 ? '偏高' : '偏低'} ${Math.abs(r.deltaAHeavy).toFixed(2)}%` +
@@ -1688,7 +1800,11 @@ const App = {
               `${r.direction === 'down' ? '下调' : '上调'}密度至 ${r.rhoNew.toFixed(3)} g/cm³（人工执行）`
             : `实际总灰分${r.deltaA > 0 ? '偏高' : '偏低'} ${Math.abs(r.deltaA).toFixed(2)}%` +
               `（${actualTotal.toFixed(2)}% / 期望${targetTotalAsh.toFixed(2)}%），按专家经验建议` +
-              `${r.direction === 'down' ? '下调' : '上调'}密度至 ${r.rhoNew.toFixed(3)} g/cm³（人工执行）`;
+              `${r.direction === 'down' ? '下调' : '上调'}密度至 ${r.rhoNew.toFixed(3)} g/cm³（人工执行）`
+              + (r.stepwise
+                  ? `；完整修正目标 ${r.rhoTargetFull.toFixed(3)}（本步只走 ${Math.abs(r.deltaRho).toFixed(3)}，`
+                    + `共约 ${r.steps} 步，每步之后等新的化验/在线数据再走下一步）`
+                  : '');
         return r;
     },
 
