@@ -1761,6 +1761,8 @@ const App = {
             targetHeavy: null, deltaAHeavy: null,
             deltaA: null, deltaRho: 0, rhoNew: rhoCur, direction: 'stable', reason: '',
             deadband: tol, maxStep: g.maxStep,
+            deltaRhoFull: null, rhoTargetFull: null, steps: 1, stepwise: false,
+            deltaRhoPredict: null, rhoPredict: null,
         };
         // P0 状态位（占位值 / 闩锁与驻留内保持）—— 与后端同口径，后端由 state 传入相同三值
         const p0guard = this.densityGuardState({ scheme: scheme, actualTotal: actualTotal, heavyAsh: heavyAsh });
@@ -1823,6 +1825,13 @@ const App = {
         const dRhoStep = Math.max(-stepLimit, Math.min(stepLimit, dRhoFull));
         r.deltaRhoFull = +dRhoFull.toFixed(4);
         r.rhoTargetFull = Math.max(g.rhoMin, Math.min(g.rhoMax, +(rhoCur + dRhoFull).toFixed(3)));
+        // 建议密度（推测值）= 一步到位的终点：按现场确认增益把偏差线性外推归零处的密度。
+        // 与 rhoTargetFull 的区别：后者受专家法则封顶 0.03 限制（那是"一次敢走多少"），
+        // 前者是"若一步步走到位最终会落在哪"（只受 1.35~1.60 物理范围限制）。
+        // 用途：给操作员看系统判断的终点（首页卡片详情里展示）；**不改变**发布的建议步长。
+        const dRhoPredict = -(r.deltaA / this.EXPERT_ADJUST.gain);
+        r.deltaRhoPredict = +dRhoPredict.toFixed(4);
+        r.rhoPredict = Math.max(g.rhoMin, Math.min(g.rhoMax, +(rhoCur + dRhoPredict).toFixed(3)));
         r.steps = Math.max(1, Math.ceil(Math.abs(dRhoFull) / (stepLimit || 1) - 1e-9));
         r.stepwise = this.DENSITY_STEPWISE && r.steps > 1;
         r.deltaRho = +dRhoStep.toFixed(4);

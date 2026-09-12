@@ -306,6 +306,27 @@ const api = async (p) => {
         check('SIM_CLAMPED', Math.abs(gated.delta) <= 1.0 + 1e-9 && Math.abs(gated.delta) > 0,
             `ρ=1.60 时仿真增量 ${gated.delta}（限幅 ±1.0；未限幅会是 +3.67）`);
 
+        // ---------- 12) 建议密度（推测值）：详情弹窗里显示一步到位的终点 ----------
+        const pred = JSON.parse(await evalJs(`(() => {
+            App.store.heavyAshManualOn = false;
+            App.setInstrumentInput('density', { manual: 1.520 });
+            App.store.densityActionLatch = null; App.store.densityLastMoveAt = 0;
+            const g = App.computeDensityGuidance(App.store.ashTarget);
+            OverviewPage.showCardDetail('total');
+            const html = document.getElementById('modal-body') ? document.getElementById('modal-body').innerHTML : '';
+            const shown = html.includes('建议密度(推测值)') && html.includes(g.rhoPredict.toFixed(3));
+            App.closeModal();
+            return JSON.stringify({ dA: g.deltaA, rhoCur: g.rhoCur, rhoNew: g.rhoNew,
+                rhoTargetFull: g.rhoTargetFull, rhoPredict: g.rhoPredict,
+                deltaRhoPredict: g.deltaRhoPredict, maxStep: g.maxStep, shown,
+                expect: +(g.rhoCur - g.deltaA / 15).toFixed(3) });
+        })()`));
+        check('PREDICT_TARGET_SHOWN',
+            pred.shown === true && Math.abs(pred.rhoPredict - pred.expect) < 1e-9,
+            `推测值=${pred.rhoPredict}（= ρ当前 ${pred.rhoCur} − ΔA ${pred.dA} / 15，期望 ${pred.expect}）`
+            + `；法则封顶的完整修正=${pred.rhoTargetFull}；本次一步=${pred.rhoNew}（≤${pred.maxStep}）；`
+            + `弹窗已显示=${pred.shown}`);
+
         // ---------- 11) P0 守卫：占位值（手动=目标且陈旧）不给建议 ----------
         const ph = JSON.parse(await evalJs(`(() => {
             App.store.totalAshManualOn = true;

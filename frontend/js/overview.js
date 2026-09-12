@@ -466,12 +466,22 @@ const OverviewPage = {
                     <tr><td>实际总灰分(在线仪表)</td><td>${g.valid ? g.actualTotal.toFixed(2) + '%' : '—'}</td></tr>`}
                     <tr><td>期望总灰分</td><td>${g.targetTotal.toFixed(2)}%</td></tr>
                     <tr><td>${g.scheme === 'heavy' ? '等效总灰分偏差' : '总灰分偏差'} ΔA</td><td>${g.valid ? (g.deltaA > 0 ? '+' : '') + g.deltaA.toFixed(2) + '%' : '—'}</td></tr>
-                    <tr><td>调整规则(专家经验)</td><td>偏差≤0.05%不调；0.15%→调0.01；0.25%→调0.02；区间线性插值，0.25%以上按斜率0.1外推</td></tr>
+                    <tr><td>调整规则(现场确认)</td><td>偏差≤0.05%不调；更大时按 <strong>Δρ = min(|ΔA|/15, 0.03)</strong>
+                        （2026-09-12 现场口径：0.15%→0.01、0.30%→0.02、最多 0.03）</td></tr>
                     <tr><td>预测增益 K</td><td>${g.K.toFixed(4)}　${App.kStateText(g.kInfo)}
                         <span title="${App.kSystemsText(g.kInfo)}" style="cursor:help;color:var(--accent-blue)">［分系统明细］</span>
                         <br><span style="color:var(--text-secondary);font-size:12px">仅用于"调密后重介灰分预测"，不参与调整量计算</span></td></tr>
                     <tr><td>密度修正量</td><td>${g.valid ? (g.deltaRho > 0 ? '+' : '') + g.deltaRho.toFixed(3) : '—'} g/cm³（建议值，人工执行后录入实际密度）</td></tr>
-                    <tr><td>目标密度</td><td><strong>${g.rhoNew.toFixed(3)} g/cm³</strong>（范围1.35~1.60）</td></tr>
+                    <tr><td>目标密度(本次一步)</td><td><strong>${g.rhoNew.toFixed(3)} g/cm³</strong>（范围1.35~1.60）</td></tr>
+                    <tr><td><strong>建议密度(推测值)</strong></td><td>${
+                        (g.rhoPredict != null && g.valid)
+                            ? `<strong style="color:var(--accent-cyan)">${g.rhoPredict.toFixed(3)} g/cm³</strong>`
+                              + `（${g.deltaRhoPredict > 0 ? '+' : ''}${g.deltaRhoPredict.toFixed(3)}）`
+                              + `<br><span style="color:var(--text-secondary);font-size:12px">`
+                              + `一步到位的终点：按现场确认增益 15%/单位密度把偏差线性外推归零所得，`
+                              + `不受单步限幅(≤${g.maxStep})约束，仅受 1.35~1.60 物理范围限制；`
+                              + `属推测值（增益待阶跃实验实测），请以化验验证</span>`
+                            : '—'}</td></tr>
                     <tr><td>重介灰分预测(调密后)</td><td>${g.valid && Math.abs(g.deltaRho) > 1e-9 ? (g.heavyAsh + (g.rhoNew - g.rhoCur) / (g.K || 0.03)).toFixed(2) + '%（仅预测，不参与计算，请采样验证）' : '—'}</td></tr>
                     <tr><td>达标判定</td><td>${g.valid && Math.abs(g.deltaA) <= g.deadband ? '<span style="color:var(--accent-green)">✓ 已达标（' + (g.scheme === 'heavy' ? '重介口径±' + (g.deadband * g.totalAmt / g.heavyAmt).toFixed(3) + '%，等效总灰分±' + g.deadband : '容差±' + g.deadband) + '%）</span>' : '<span style="color:var(--accent-orange)">未达标</span>'}</td></tr>
                     <tr><td>重介灰分反推值(仅展示)</td><td>${App.store.heavyAshBackcalc != null ? App.store.heavyAshBackcalc.toFixed(2) + '%' : '—'}</td></tr>

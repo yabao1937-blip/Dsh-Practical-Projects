@@ -84,6 +84,7 @@ def compute_density_guidance(state: dict, target_total_ash: float) -> dict:
         "hold": bool(state.get("hold")), "holdReason": state.get("hold_reason") or "",
         "driveKey": state.get("drive_key") or "",
         "deltaRhoFull": None, "rhoTargetFull": None, "steps": 1, "stepwise": False,
+        "deltaRhoPredict": None, "rhoPredict": None,
     }
     # 常量灰分不得驱动控制建议：501 皮带灰分仪尚未接入时，总灰分取的是默认常量，
     # 若照它算 deltaA（如 8.8−8.5=0.3 超容差）会推出"下调密度"——用编造的灰分指挥现场操作。
@@ -152,6 +153,11 @@ def compute_density_guidance(state: dict, target_total_ash: float) -> dict:
     r["deltaRhoFull"] = round(d_rho_full, 4)
     r["rhoTargetFull"] = max(DENSITY_GUIDE["rhoMin"],
                              min(DENSITY_GUIDE["rhoMax"], round(rho_cur + d_rho_full, 3)))
+    # 建议密度（推测值）：一步到位的终点（按现场确认增益把偏差外推归零），不受专家法则封顶限制
+    d_rho_predict = -(r["deltaA"] / EXPERT_ADJUST["gain"])
+    r["deltaRhoPredict"] = round(d_rho_predict, 4)
+    r["rhoPredict"] = max(DENSITY_GUIDE["rhoMin"],
+                          min(DENSITY_GUIDE["rhoMax"], round(rho_cur + d_rho_predict, 3)))
     r["steps"] = max(1, int(-(-abs(d_rho_full) // (step_limit or 1)))) if step_limit else 1
     r["stepwise"] = bool(stepwise and r["steps"] > 1)
     r["deltaRho"] = round(d_rho, 4)
