@@ -133,15 +133,33 @@ const CollectPage = {
                         + `Δ${d.dev > 0 ? '+' : ''}${d.dev}</span>`;
                 }
             }
+            // 重介精煤灰分行：手动档下并列显示"计算值"（必须在 valueCell 之前拼进 devHtml）
+            if (inst.special === 'heavyAsh' && App.heavyAshSource() === 'manual') {
+                const cv = App.heavyAshComputed();
+                if (cv != null) {
+                    devHtml += ` <span style="font-size:11px;color:var(--text-muted)"`
+                        + ` title="若切到「计算」，本行将取该值（502在线值 + 密度仿真；密度计因此在起作用）">`
+                        + `计算 ${(+cv).toFixed(2)}</span>`;
+                }
+            }
             const valueCell = isTotal
                 ? `<span class="total-edit-cell" title="${lockedFactor ? chain : '双击修改（手动值，清空恢复自动）'}" ondblclick="CollectPage.editTotalInput('${inst.special}', this)"${lockedFactor ? ' style="color:var(--accent-red);opacity:0.75"' : ''}>${hasValue ? value : '—'}</span>${devHtml}`
                 : `<span style="font-weight:600;${ok ? '' : 'color:var(--accent-orange)'}">${inst.value}</span>`;
-            // 总精煤灰分行：数据来源切换下拉（手动/计算）
+            // 总精煤灰分 / 重介精煤灰分：数据来源切换下拉（手动/计算）
+            const sourceSelect = (id, isManual, handler, title) =>
+                `<select id="${id}" onchange="${handler}" title="${title}" style="padding:3px 6px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-darker);color:var(--text-primary);font-size:12px">
+                     <option value="calc"${!isManual ? ' selected' : ''}>计算</option>
+                     <option value="manual"${isManual ? ' selected' : ''}>手动</option>
+                   </select>`;
             const sourceCell = (isTotal && inst.special === 'totalAsh')
-                ? `<select id="totalash-source" onchange="CollectPage.onTotalAshSourceChange()" style="padding:3px 6px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-darker);color:var(--text-primary);font-size:12px">
-                     <option value="calc"${!App.store.totalAshManualOn ? ' selected' : ''}>计算</option>
-                     <option value="manual"${App.store.totalAshManualOn ? ' selected' : ''}>手动</option>
-                   </select>`
+                ? sourceSelect('totalash-source', !!App.store.totalAshManualOn,
+                    'CollectPage.onTotalAshSourceChange()',
+                    '总精煤灰分来源：计算=按公式由各因素算出；手动=用你填的化验值（公式因素会被冻结）')
+                : (isTotal && inst.special === 'heavyAsh' && !lockedFactor)
+                ? sourceSelect('heavyash-source', App.heavyAshSource() === 'manual',
+                    'CollectPage.onHeavyAshSourceChange()',
+                    '重介精煤灰分来源：手动=用你填的化验值（优先，且不随密度计变化）；'
+                    + '计算=502在线值 + 密度仿真（密度计调整会直接改变它，从而影响总灰分与建议密度）')
                 : isTotal
                     ? (lockedFactor
                         ? `<span style="color:var(--accent-red);font-size:12px" title="${chain}">冻结</span>`
@@ -164,6 +182,34 @@ const CollectPage = {
                 <td>${actionCell}</td>
             </tr>`;
         }).join('');
+    },
+
+    // 重介精煤灰分来源切换：手动=用填写的化验值；计算=502在线+密度仿真（密度计因此在起作用）
+    onHeavyAshSourceChange() {
+        const el = document.getElementById('heavyash-source');
+        const wantManual = el ? el.value === 'manual' : false;
+        // 「总灰分修改」开启时公式因素冻结，重介灰分也属于被冻结的因素
+        if (App.store.totalAshManualOn) {
+            App.showToast('"总灰分修改"开启中，公式因素（含重介灰分）已冻结；'
+                + '关闭总灰分开关后才能切换来源', 'warning');
+            this.renderTable();
+            return;
+        }
+        const hv = (App.store.heavyAshInput && App.store.heavyAshInput.manual);
+        const hasManual = typeof hv === 'number' && isFinite(hv);
+        App.store.heavyAshManualOn = wantManual;
+        App.saveStore();
+        App._onExternalInput();          // 来源变化会改变总灰分 → 自动执行重算目标密度
+        this.renderTable();
+        if (typeof OverviewPage !== 'undefined' && OverviewPage.chart) OverviewPage.refresh();
+        if (wantManual) {
+            App.showToast(hasManual
+                ? `重介精煤灰分已切为「手动」：使用你填写的 ${hv}%（不随密度计变化）`
+                : '重介精煤灰分已切为「手动」，但还没有手动值：双击本行数值即可填写化验值', 'info');
+        } else {
+            App.showToast('重介精煤灰分已切为「计算」：取 502在线值 + 密度仿真，'
+                + '调整密度计会直接改变它，进而影响总灰分与建议密度', 'success');
+        }
     },
 
     // 总精煤灰分数据来源切换：手动→公式因素冻结；计算→清空手动值、解冻

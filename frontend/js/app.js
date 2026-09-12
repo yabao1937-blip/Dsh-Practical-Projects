@@ -38,6 +38,10 @@ const App = {
         },
         heavyAshBackcalc: null,   // 反推的重介精煤灰分（任务三公式），null=未反推
         heavyAshInput: { manual: null },   // 重介精煤灰分手动覆盖（采样值，双击修改）
+        // 重介精煤灰分来源：true=手动值优先；false=计算（502在线 + 密度仿真）。
+        // 2026-09-12 新增：此前只要填过手动值就**永久**压住计算值 ——
+        // 于是"把密度计调到建议密度 → 重介灰分随之变化 → 总灰分达标"这条链走不通。
+        heavyAshManualOn: false,
         heavySamples: [],          // 重介精煤灰分采样记录 [{id, timestamp, rho, ash_content}]（训练数据积累）
         ashTargetTol: 0.1,         // 总灰分达标容差（±%），页面可配置（专家经验版默认±0.1）
         guideScheme: 'total',      // 密度指导版本：total=总灰分版 | heavy=重介精煤灰分版（总览页可切换）
@@ -103,6 +107,13 @@ const App = {
         // 在线仪表可修改项补齐
         if (!this.store.coarseAshInput) { this.store.coarseAshInput = { manual: null }; this.saveStore(true); }
         if (!this.store.heavyAshInput) { this.store.heavyAshInput = { manual: null }; this.saveStore(true); }
+        if (this.store.heavyAshManualOn == null) {
+            // 迁移：升级前"有手动值就是手动优先"。为不悄悄改变现场行为，按这个事实初始化一次；
+            // 之后由在线仪表行的 手动/计算 下拉决定。
+            const hv = this.store.heavyAshInput && this.store.heavyAshInput.manual;
+            this.store.heavyAshManualOn = (typeof hv === 'number' && isFinite(hv));
+            this.saveStore(true);
+        }
         if (this.store.ashTarget == null) { this.store.ashTarget = 8.50; this.saveStore(true); }
         if (!this.store.coarseTrainRange) { this.store.coarseTrainRange = 'jun_jul'; this.saveStore(true); }
         // 出厂烘焙模型无 range 字段时回填当前训练范围
@@ -773,6 +784,7 @@ const App = {
             ashInputs: { totalAsh: { mode: 'auto', manual: null, entry: null } },
             heavyAshBackcalc: null,
             heavyAshInput: { manual: null },
+            heavyAshManualOn: false,
             heavySamples: [],
             ashTargetTol: 0.1,
             guideScheme: 'total',
@@ -1903,6 +1915,8 @@ const App = {
             // 实测密度计（2026-09）：只记录、不参与决策。有了它，以后可以拿决策日志
             // 标定"在线密度计 vs 实测"的偏差随时间/工况的变化。
             densityActual: (() => { try { return this.resolveInstrument('density_actual'); } catch (e) { return null; } })(),
+            // 重介灰分这一笔是"人工值"还是"502在线+密度仿真"算出来的 —— 影响日后标定时对数据的信任判断
+            heavyAshSource: this.heavyAshSource(),
         };
     },
 
@@ -1947,7 +1961,7 @@ const App = {
         if (!log.length) { this.showToast('暂无密度决策记录（真实调整密度后才会生成）', 'warning'); return; }
         const SRC = { heavySamples: '采样记录', heavyAshInput: '在线仪表手动录入' };
         const head = ['决策时间', '触发', '方案', '目标灰分', '容差',
-                      'ρ旧', 'ρ新', 'Δρ建议', 'ΔA等效', 'K', 'K来源', '重介灰分', '总灰分',
+                      'ρ旧', 'ρ新', 'Δρ建议', 'ΔA等效', 'K', 'K来源', '重介灰分', '重介灰分来源', '总灰分',
                       '带煤量', '原煤灰分', '脱粉473', '脱粉474', '系统A', '系统B', '系统401', '系统402',
                       '工作面', '精磁尾液位', '实测密度',
                       '响应状态', '响应时间', '滞后(分)', '响应来源', 'ρ实测', '重介灰分实测', 'Δρ实测', 'ΔA实测'];
@@ -1958,7 +1972,8 @@ const App = {
                         : r.invalidated ? `作废(${r.reason || ''})` : '已闭环';
             return [
                 e.ts, e.trigger, e.scheme === 'heavy' ? '重介版' : '总灰分版', e.target, e.tol,
-                e.rhoCur, e.rhoNew, e.deltaRho, e.deltaA, e.kUsed, e.kSource, e.heavyAsh, e.totalAsh,
+                e.rhoCur, e.rhoNew, e.deltaRho, e.deltaA, e.kUsed, e.kSource, e.heavyAsh,
+                (c.heavyAshSource === 'manual' ? '手动(采样)' : '计算(502在线+密度)'), e.totalAsh,
                 c.coalAmount ?? '', c.rawAsh ?? '', c.desl473 ?? '', c.desl474 ?? '',
                 c.sysA ?? '', c.sysB ?? '', c.sys401 ?? '', c.sys402 ?? '', c.miningFace ?? '', c.levelTail ?? '',
                 c.densityActual ?? '',
@@ -1980,6 +1995,8 @@ const App = {
             ['响应状态', '待补记=决策后尚未出现人工化验；作废=窗口内又发生了新的密度决策，累积量无法归属'],
             ['响应来源', '只取人工化验（采样记录 / 在线仪表手动录入）；不用在线仪表自动值——那是被控量，闭环下 ΔA≈0'],
             ['滞后(分)', '从决策到取样化验的分钟数，用于判断过程是否已到位'],
+            ['重介灰分来源', '手动(采样)=操作员填的化验值优先；计算(502在线+密度)=由 502 在线值加密度仿真得出。'
+                          + '后者随密度计变化，因此"调密度→灰分变化→总灰分达标"这条链只在计算档下成立'],
             ['实测密度', '决策时的实测密度计读数（人工录入）。**仅记录、不参与建议密度的计算**；'
                        + '与 ρ旧(在线密度计) 相减即为两台密度计的偏差，可用于标定在线密度计'],
         ];
@@ -2537,8 +2554,21 @@ const App = {
     getHeavyAsh() {
         const cfg = (this.store.heavyAshInput && this.store.heavyAshInput) || {};
         const m = cfg.manual;
-        if (typeof m === 'number' && isFinite(m) && m >= 0 && this._manualValid(cfg, 'heavyAsh')) return m;
+        // 来源=手动 且 有有效值 → 用手动；否则走计算（502在线，已含密度仿真增量）
+        if (this.store.heavyAshManualOn !== false
+            && typeof m === 'number' && isFinite(m) && m >= 0
+            && this._manualValid(cfg, 'heavyAsh')) {
+            return m;
+        }
         return this.resolveInstrument('ash_502');
+    },
+
+    // 当前重介精煤灰分来源（供界面与决策日志标注）：'manual' | 'calc'
+    heavyAshSource() {
+        const cfg = (this.store.heavyAshInput && this.store.heavyAshInput) || {};
+        const m = cfg.manual;
+        const usable = typeof m === 'number' && isFinite(m) && m >= 0 && this._manualValid(cfg, 'heavyAsh');
+        return (this.store.heavyAshManualOn !== false && usable) ? 'manual' : 'calc';
     },
 
     // 重介精煤灰分（在线仪表行）：手动 > 502在线 > 默认
@@ -2547,15 +2577,19 @@ const App = {
     heavyAshLayer() {
         const cfg = (this.store.heavyAshInput && this.store.heavyAshInput) || {};
         const m = cfg.manual;
-        if (typeof m === 'number' && isFinite(m) && m >= 0) {
-            return this._manualValid(cfg, 'heavyAsh') ? '手动(采样)' : this._heavyAutoLayer();
-        }
-        return this._heavyAutoLayer();
+        if (this.heavyAshSource() === 'manual') return '手动(采样)';
+        // 计算档：说明它由 502 在线值 + 密度仿真算出（密度计因此在起作用）
+        return '计算(' + this._heavyAutoLayer() + '+密度)';
     },
 
     // 重介灰分自动层文案:502 在线值 > 默认
     _heavyAutoLayer() {
         return this.latestBeltAsh('502') != null ? '502在线' : '默认7.9';
+    },
+
+    // 计算档下的重介灰分值（不含手动覆盖）—— 用于界面并列显示"计算值"
+    heavyAshComputed() {
+        try { return this.resolveInstrument('ash_502'); } catch (e) { return null; }
     },
 
     setHeavyAshInput(patch) {
@@ -2567,6 +2601,15 @@ const App = {
         if ('manual' in patch) {
             patch = Object.assign({}, patch);
             patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
+            // 双击填了值 = 明确想用手动值 → 自动切到手动档。
+            // （否则会出现"填了却不生效"的最糟意外；清空值时不动档位，计算值自然接管。）
+            if (typeof patch.manual === 'number' && isFinite(patch.manual)) {
+                patch.heavyAshManualOn = true;
+            }
+        }
+        if ('heavyAshManualOn' in patch) {
+            this.store.heavyAshManualOn = !!patch.heavyAshManualOn;
+            delete patch.heavyAshManualOn;
         }
         Object.assign(this.store.heavyAshInput, patch);
         // 人工改数 → 递增外部纪元（自动执行重算目标密度）
