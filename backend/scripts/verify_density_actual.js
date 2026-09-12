@@ -87,12 +87,12 @@ const api = async (p, init) => {
         let ready = false, lastErr = null;
         for (let i = 0; i < 60; i++) {
             try {
-                if (await evalJs("typeof App !== 'undefined' && !!App.store && !!App.store.coarseCoal"
+                if (await evalJs("typeof App !== 'undefined' && App.__ready === true && !!App.store"
                     + " && typeof CollectPage !== 'undefined' && typeof OverviewPage !== 'undefined'")) { ready = true; break; }
             } catch (e) { lastErr = e.message; }
             await sleep(500);
         }
-        if (!ready) throw new Error('页面 30 秒内未完成初始化（等 App/CollectPage/OverviewPage）' + (lastErr ? '；' + lastErr : ''));
+        if (!ready) throw new Error('页面 30 秒内未完成初始化（等 App.__ready）（等 App/CollectPage/OverviewPage）' + (lastErr ? '；' + lastErr : ''));
 
         // ---------- 1) 在线仪表表里有一行"实测密度计"，初始未录入 ----------
         const row0 = JSON.parse(await evalJs(`(() => {

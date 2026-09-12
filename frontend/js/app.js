@@ -183,6 +183,10 @@ const App = {
         // 放在 autoPullIfStale **之后**：若刚刚做了反向同步，服务器数据已成为权威，
         // 旧快照已过时（_applyServerState 会清槽），不应再推回去。
         this.retryMirrorIfPending();
+        // 初始化完成标志：给自动化脚本/其它页面一个**明确**的就绪信号。
+        // 为什么需要：App.store 在脚本加载时就存在，而 init()（灌种子/补齐默认值）要等
+        // DOMContentLoaded —— 只检查 App.store 的脚本可能在 init 之前就开跑，读到空 store。
+        this.__ready = true;
         // 补记历史密度决策的灰分响应(页面打开时兜底一次)
         this._completeDensityDecisionResponses();
         // 存量 influence_value 一次性重算（旧口径写死 8.50 → 当前口径），__fixes.influence 标记只跑一次

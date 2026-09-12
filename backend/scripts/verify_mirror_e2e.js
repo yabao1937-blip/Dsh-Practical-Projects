@@ -163,14 +163,15 @@ async function seed() {
         let appReady = false, lastErr = null;
         for (let i = 0; i < 60; i++) {
             try {
-                if (await evalJs("typeof App !== 'undefined' && !!App.store && !!App.store.coarseCoal")) {
+                if (await evalJs("typeof App !== 'undefined' && App.__ready === true && !!App.store"
+                    + " && typeof CollectPage !== 'undefined' && typeof OverviewPage !== 'undefined'")) {
                     appReady = true; break;
                 }
             } catch (e) { lastErr = e.message; }   // 记下来，别让失败没有信息量
             await sleep(500);
         }
         if (!appReady) {
-            throw new Error('页面 30 秒内未完成初始化（typeof App 仍不可用）'
+            throw new Error('页面 30 秒内未完成初始化（等 App.__ready）（typeof App 仍不可用）'
                 + (lastErr ? '；最后一次求值异常: ' + lastErr : ''));
         }
         await sleep(800);   // 再给 autoPullIfStale 一点时间（它不影响下面的断言，只影响基线值）
