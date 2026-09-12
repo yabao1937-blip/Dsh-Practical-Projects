@@ -75,6 +75,8 @@ a:hover { color: var(--accent-blue); }
     display: flex;
     align-items: center;
     gap: 16px;
+    flex-shrink: 0;          /* 标题不被压缩 */
+    white-space: nowrap;
 }
 
 .logo {
@@ -95,22 +97,30 @@ a:hover { color: var(--accent-blue); }
     white-space: nowrap;
 }
 
-.system-subtitle {
-    font-size: 12px;
-    color: var(--text-muted);
-    padding-left: 16px;
-    border-left: 1px solid var(--border-color);
-}
-
 .top-bar-center {
-    flex: 1;
+    flex: 1 1 auto;
     display: flex;
     justify-content: center;
+    /* `safe center`：空间够时居中；**放不下时退回起点对齐**，
+       否则居中会让内容向两侧同时溢出，压在左侧标题和右侧时钟上（实测 1280px 就是这个现象）。
+       min-width:0 是让 flex 子项能被压缩的关键；配 overflow-x:auto 后，
+       窗口太窄时导航横向滚动，而不是把文字折成竖排（那会被 56px 的页头裁掉）。 */
+    justify-content: safe center;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;          /* Firefox：隐藏横向滚动条 */
+}
+
+.top-bar-center::-webkit-scrollbar {
+    display: none;                  /* Chromium：同上 */
 }
 
 .main-nav {
     display: flex;
     gap: 4px;
+    flex-wrap: nowrap;              /* 导航项永不换行 */
+    width: max-content;             /* 内容宽度由内容决定，滚动条交给外层 */
 }
 
 .nav-item {
@@ -118,6 +128,8 @@ a:hover { color: var(--accent-blue); }
     align-items: center;
     gap: 6px;
     padding: 8px 18px;
+    white-space: nowrap;            /* 每个导航项内部也不折行 */
+    flex: 0 0 auto;
     border-radius: var(--radius-md);
     color: var(--text-secondary);
     font-size: 14px;
@@ -139,10 +151,38 @@ a:hover { color: var(--accent-blue); }
     font-size: 14px;
 }
 
+/* 页头分档：目标是 7 个入口在常见宽度下**全部可见且不换行**（换行会被 56px 的页头裁掉）。
+   实测：完整档导航需 976px，紧凑档 839px，中间区可用宽 ≈ 视口 − 48 − 136 − 342。 */
+@media (max-width: 1520px) {
+    .nav-item {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+    .main-nav {
+        gap: 2px;
+    }
+}
+
+/* 再窄一档：隐藏装饰性图标（保留文字），让 1280 这类现场屏幕也能一屏放下 7 个入口 */
+@media (max-width: 1364px) {
+    .nav-item {
+        padding: 8px 9px;
+        font-size: 12.5px;
+    }
+    .main-nav {
+        gap: 0;
+    }
+    .nav-icon {
+        display: none;
+    }
+}
+
 .top-bar-right {
     display: flex;
     align-items: center;
     gap: 16px;
+    flex-shrink: 0;          /* 时钟/告警不被压缩 */
+    white-space: nowrap;
 }
 
 .sys-status {
@@ -274,6 +314,8 @@ a:hover { color: var(--accent-blue); }
     font-size: 20px;
     font-weight: 600;
     color: var(--text-primary);
+    white-space: nowrap;        /* 标题永不折行（原来会被右侧操作区挤成两行） */
+    flex: 0 0 auto;
 }
 
 .page-header-actions {
@@ -283,6 +325,35 @@ a:hover { color: var(--accent-blue); }
     flex-wrap: wrap;
     justify-content: flex-end;
     row-gap: 6px;
+    min-width: 0;
+}
+
+/* 现场常见 1280/1366：收紧操作区，让 8 个控件（筛选/刷新/版本/钳制容差/训练/备份/清除）
+   在一行内放下；若仍放不下则横向滚动，而不是折成多行把标题栏撑高。 */
+@media (max-width: 1400px) {
+    .page-header-actions {
+        gap: 6px;
+        row-gap: 6px;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .page-header-actions::-webkit-scrollbar {
+        display: none;
+    }
+    .page-header-actions .btn,
+    .page-header-actions select,
+    .page-header-actions input,
+    .page-header-actions label {
+        font-size: 12px;
+    }
+    .page-header-actions .btn {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+    .page-header-actions .filter-group {
+        gap: 4px;
+    }
 }
 
 /* ---------- 面板 ---------- */
