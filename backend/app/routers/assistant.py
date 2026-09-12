@@ -42,8 +42,8 @@ KNOWLEDGE = """【系统知识】重介密控系统:选煤厂重介分选密度�
 · 三张数据表:表1粗精煤泥多因素(10特征:原煤灰分/带煤量/系统开关A·B·401·402/脱粉473·474/停机标志/精磁尾液位,目标=315灰分);
   表2浮精(灰分/煤量/压滤机);表3灰分密度(皮带501=总混配→在线总灰分;皮带502=仅重介精煤→在线重介灰分,是重介灰分权威在线来源)。
 · 建议密度算法:灰分偏差→专家表→限幅[1.35,1.60],灰分偏高→降密度。
-  专家表口径(2026-09-12现场访谈确认):死区±0.05%不调;偏差0.15%→调0.01;0.30%→调0.02;更大时0.03封顶。
-  等价公式 Δρ=min(|ΔA|/15, 0.03),隐含增益15%/单位密度。
+  专家表口径(2026-09-12现场访谈确认):死区±0.05%不调;偏差0.15%→调0.01;0.30%→调0.02。
+  等价公式 Δρ=min(|ΔA|/15, 0.03),隐含增益15%/单位密度;偏差超过0.45%才触及0.03封顶。
 · 逐步发布与驻留:建议分步执行,单步不超过 maxStep(现场确认默认0.02,上限0.03),并给出完整目标与步数;
   每次调密度后有30分钟驻留期(过程到位+化验周期)不给新建议,但**新化验数据到达会立即解除驻留**。
 · 建议密度(推测值):按增益把偏差线性外推归零处的"一步到位终点",与分步建议分开显示;
@@ -58,24 +58,40 @@ KNOWLEDGE = """【系统知识】重介密控系统:选煤厂重介分选密度�
 
 
 def _llm_config():
-    """按环境变量解析 (base_url, model, key);未配置返回 None。"""
+    """兼容旧接口:返回回退链首选。"""
+    chain = _llm_chain()
+    return chain[0] if chain else None
+
+
+def _llm_chain():
+    """按环境变量解析回退链 [(base_url, model, key, 名字), ...]。
+
+    顺序:显式 ASSISTANT_* > ZAI(编程套餐) > DeepSeek。
+    2026-09-12 实测:zai coding 通道会出现"流式空返回"故障(完整→截断→全空的渐进劣化),
+    因此助手改为 缓冲式+多供应商回退:任一供应商失败/空答自动切下一个,可靠性优先。
+    """
+    chain = []
     if os.environ.get("ASSISTANT_API_KEY"):
-        return (os.environ.get("ASSISTANT_BASE_URL") or "https://api.z.ai/api/coding/paas/v4",
-                os.environ.get("ASSISTANT_MODEL") or "glm-4.6",
-                os.environ["ASSISTANT_API_KEY"])
+        chain.append((os.environ.get("ASSISTANT_BASE_URL") or "https://api.z.ai/api/coding/paas/v4",
+                      os.environ.get("ASSISTANT_MODEL") or "glm-4.6",
+                      os.environ["ASSISTANT_API_KEY"], "assistant-explicit"))
     if os.environ.get("ZAI_API_KEY"):
-        return ("https://api.z.ai/api/coding/paas/v4", "glm-4.6", os.environ["ZAI_API_KEY"])
+        chain.append(("https://api.z.ai/api/coding/paas/v4", "glm-4.6",
+                      os.environ["ZAI_API_KEY"], "zai-coding"))
     if os.environ.get("DEEPSEEK_API_KEY"):
-        return ("https://api.deepseek.com", "deepseek-chat", os.environ["DEEPSEEK_API_KEY"])
-    return None
+        chain.append(("https://api.deepseek.com", "deepseek-chat",
+                      os.environ["DEEPSEEK_API_KEY"], "deepseek"))
+    return chain
 
 
 @router.get("/status")
 def assistant_status():
-    cfg = _llm_config()
+    chain = _llm_chain()
+    cfg = chain[0] if chain else None
     return {"configured": cfg is not None,
-            "provider": (cfg[0].split("//")[1].split("/")[0] if cfg else None),
-            "model": (cfg[1] if cfg else None)}
+            "provider": (cfg[3] if cfg else None),
+            "model": (cfg[1] if cfg else None),
+            "fallbacks": [c[3] for c in chain[1:]]}
 
 
 # ---------------- 实时快照(只读查询) ----------------
@@ -144,11 +160,10 @@ class AskIn(BaseModel):
 
 @router.post("/ask")
 def ask(body: AskIn, db: Session = Depends(get_db)):
-    cfg = _llm_config()
-    if cfg is None:
-        raise HTTPException(503, "AI 助手未配置 LLM 凭证:请设置环境变量 ZAI_API_KEY(或 "
-                                 "ASSISTANT_API_KEY/ASSISTANT_BASE_URL/ASSISTANT_MODEL)后重启后端")
-    base_url, model, key = cfg
+    chain = _llm_chain()
+    if not chain:
+        raise HTTPException(503, "AI 助手未配置 LLM 凭证:请设置环境变量 ZAI_API_KEY 或 DEEPSEEK_API_KEY"
+                                 "(或 ASSISTANT_API_KEY/ASSISTANT_BASE_URL/ASSISTANT_MODEL)后重启后端")
     snap = build_snapshot(db)
     msgs = [{"role": "system", "content": SYSTEM_PROMPT},
             {"role": "system", "content": KNOWLEDGE + "\n\n【实时快照】\n" +
@@ -160,35 +175,32 @@ def ask(body: AskIn, db: Session = Depends(get_db)):
             msgs.append({"role": role, "content": content})
     msgs.append({"role": "user", "content": body.question})
 
-    payload = json.dumps({"model": model, "messages": msgs, "stream": True,
-                          "max_tokens": MAX_TOKENS, "temperature": 0.3}).encode()
-    req = urllib.request.Request(
-        base_url.rstrip("/") + "/chat/completions", data=payload,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
-    try:
-        resp = urllib.request.urlopen(req, timeout=TIMEOUT_S)
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "ignore")[:200]
-        raise HTTPException(502, f"LLM 服务返回错误 HTTP {e.code}: {detail}")
-    except Exception as e:
-        raise HTTPException(502, f"无法连接 LLM 服务: {e}")
-
-    def gen():
+    # 缓冲式 + 多供应商回退(2026-09-12):上游流式通道出现过"空返回/中途断流"故障,
+    # 改为非流式取完整回答;任一供应商 失败/空答/内容过短 自动切下一个。
+    errors = []
+    for base_url, model, key, name in chain:
+        payload = json.dumps({"model": model, "messages": msgs, "stream": False,
+                              "max_tokens": MAX_TOKENS, "temperature": 0.3}).encode()
+        req = urllib.request.Request(
+            base_url.rstrip("/") + "/chat/completions", data=payload,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
         try:
-            for raw in resp:
-                line = raw.decode("utf-8", "ignore").strip()
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    delta = json.loads(data)["choices"][0]["delta"].get("content")
-                except Exception:
-                    continue
-                if delta:
-                    yield delta
-        finally:
-            resp.close()
-
-    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
+            resp = urllib.request.urlopen(req, timeout=TIMEOUT_S)
+            try:
+                data = json.loads(resp.read().decode("utf-8", "ignore"))
+            finally:
+                resp.close()
+            text = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+            if len(text.strip()) >= 20:
+                def gen():
+                    # 按~120字符分块伪流式输出,前端阅读节奏接近真流式
+                    for i in range(0, len(text), 120):
+                        yield text[i:i + 120]
+                return StreamingResponse(gen(), media_type="text/plain; charset=utf-8",
+                                         headers={"X-LLM-Provider": name})
+            errors.append(f"{name}: 空回答")
+        except urllib.error.HTTPError as e:
+            errors.append(f"{name}: HTTP {e.code} " + e.read().decode("utf-8", "ignore")[:120])
+        except Exception as e:
+            errors.append(f"{name}: {type(e).__name__} {e}")
+    raise HTTPException(502, "所有 LLM 供应商均失败: " + ";".join(errors))
