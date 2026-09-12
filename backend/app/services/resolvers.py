@@ -3,6 +3,7 @@
 state 为 store 字典（来自 seed_store.json 或 DB 快照）。本模块覆盖 seed 无手动覆盖的
 主路径；手动有效期(manual_at>=auto_at)的完整判定在 validity.py 中单独实现。
 """
+from .density import DENSITY_GUIDE
 import json
 import math
 
@@ -62,6 +63,31 @@ def resolve_instrument(store, inst_id):
         entry = _latest_calc_value(store, "ash_meter", "501" if inst_id == "ash_501" else "502")
         if entry is None:
             entry = _latest_belt_ash(store, "501" if inst_id == "ash_501" else "502")
+        # 密度→灰分仿真（与前端 resolveInstrument 同口径；2026-09-12 补上以消除前后端不一致：
+        # 此前只有前端有这一项，同一份 store 两侧取值不同 → 简报与卡片会对不上）：
+        #   ① 只在密度**有真实来源**（手动值或 ash_density 录入）时叠加——默认密度是死数据，
+        #      叠加会凭空把 502 的 7.9% 变成 6.57%，那是编造出来的偏差；
+        #   ② 限幅 ±1.0（远离工作点时不做线性外推）；
+        #   ③ 基准点取最新 ash_density 记录的密度，取不到用 simBaseRho。
+        density_cfg = (store.get("instrumentInputs") or {}).get("density") or {}
+        manual_rho = density_cfg.get("manual")
+        has_manual = _is_num(manual_rho) and manual_rho >= 0
+        base_rho = None
+        for l in reversed(store.get("calcLogs") or []):
+            if l.get("calc_type") != "ash_density":
+                continue
+            try:
+                dv = json.loads(l.get("input_json") or "{}").get("density")
+                if _is_num(dv) and 1.3 <= dv <= 1.6:
+                    base_rho = float(dv)
+                    break
+            except Exception:
+                continue
+        if entry is not None and (has_manual or base_rho is not None):
+            rho = float(manual_rho) if has_manual else float(base_rho)
+            anchor = float(base_rho) if base_rho is not None else float(DENSITY_GUIDE["simBaseRho"])
+            delta = (rho - anchor) / DENSITY_GUIDE["simK"]
+            entry = round(float(entry) + max(-1.0, min(1.0, delta)), 4)
     elif inst_id == "density":
         for l in reversed(store.get("calcLogs") or []):
             if l.get("calc_type") != "ash_density":

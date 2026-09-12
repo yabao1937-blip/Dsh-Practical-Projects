@@ -28,8 +28,10 @@ K_PREDICT = 0.075
 # stepwise=True 时发布的建议不超过 maxStep，同时给出完整目标与步数：
 # 整步修正要么依赖"专家表=增益律"这一未验证前提，要么在闭环里震荡（实测 ρ:1.52→1.433→1.588→…）。
 DENSITY_GUIDE = {
-    "deadband": 0.05, "maxStep": 0.01, "rhoMin": 1.35, "rhoMax": 1.60,
-    "kFallback": 0.03, "simBaseRho": 1.49, "simK": 0.03, "stepwise": True,
+    # maxStep：单次建议步长上限（2026-09-12 现场确认：最多 0.03，默认取 0.02）
+    "deadband": 0.05, "maxStep": 0.02, "rhoMin": 1.35, "rhoMax": 1.60,
+    # simK：密度→灰分仿真增益倒数（2026-09-12 按现场确认增益 15%/单位反推：0.867/15 ≈ 0.0578）
+    "kFallback": 0.03, "simBaseRho": 1.49, "simK": 0.0578, "stepwise": True,
 }
 
 

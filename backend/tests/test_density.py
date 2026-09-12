@@ -49,11 +49,11 @@ def test_guidance_total_down_stepwise_and_full_target():
     st = {"rho_cur": 1.49, "heavy_ash": 8.50, "actual_total": 9.00, "scheme": "total", "tol": 0.1}
     g = compute_density_guidance(st, 8.50)
     assert g["direction"] == "down"
-    assert abs(g["deltaRho"] + 0.01) < 1e-9              # 发布的一步（≤maxStep）
+    assert abs(g["deltaRho"] + 0.02) < 1e-9              # 发布的一步（≤maxStep=0.02）
     assert abs(g["deltaRhoFull"] + 0.03) < 1e-9          # 完整修正量（现场封顶 0.03）
     assert abs(g["rhoTargetFull"] - 1.46) < 1e-9         # 完整目标
-    assert abs(g["rhoNew"] - 1.48) < 1e-9                # 本步目标
-    assert g["steps"] >= 3 and g["stepwise"] is True
+    assert abs(g["rhoNew"] - 1.47) < 1e-9                # 本步目标
+    assert g["steps"] >= 2 and g["stepwise"] is True
 
 
 def test_guidance_full_step_still_available():
@@ -71,7 +71,7 @@ def test_guidance_stepwise_respects_upper_bound():
     st = {"rho_cur": 1.45, "heavy_ash": 8.50, "actual_total": 7.0, "scheme": "total", "tol": 0.1}
     g = compute_density_guidance(st, 10.20)
     assert g["direction"] == "up"
-    assert g["rhoNew"] == 1.46
+    assert g["rhoNew"] == 1.47
     assert g["rhoTargetFull"] <= 1.60
 
 

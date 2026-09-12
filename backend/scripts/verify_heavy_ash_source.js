@@ -252,7 +252,7 @@ const api = async (p) => {
                 advice: +(g2.rhoNew - g2.rhoCur).toFixed(3), reason: g2.reason.slice(0, 60) } });
         })()`));
         check('RATCHET_STOPPED',
-            Math.abs(ratchet.first.advice) <= 0.01001 && ratchet.second.direction === 'stable'
+            Math.abs(ratchet.first.advice) <= 0.02001 && ratchet.second.direction === 'stable'
             && ratchet.second.advice === 0,
             `第一步建议 ${ratchet.first.advice}（逐步=${ratchet.first.stepwise}，完整目标 ${ratchet.first.full}，`
             + `共 ${ratchet.first.steps} 步）；照做后再算 → ${ratchet.second.direction}／${ratchet.second.advice}`
@@ -275,11 +275,16 @@ const api = async (p) => {
             return JSON.stringify({ steps, tol: App.store.ashTargetTol });
         })()`));
         const lastStep = conv.steps[conv.steps.length - 1];
-        const noOvershoot = conv.steps.every(s => s.dA == null || Math.sign(s.dA) === Math.sign(conv.steps[0].dA));
+        // 收敛判据：不越过目标（同号）且 ≤6 步进入容差。
+        // 仿真增益已按现场确认的 15%/单位密度标定（simK = 0.867/15），所以这里的收敛速度
+        // 与实机应当一致；若哪天又不一致，多半是 simK 或专家表被改动。
+        const amps = conv.steps.map(s => Math.abs(s.dA == null ? 0 : s.dA));
+        const shrinking = amps.every((v, i) => i === 0 || v <= amps[i - 1] + 1e-9);
+        const crossedZero = conv.steps.some(s => s.dA != null && Math.sign(s.dA) !== Math.sign(conv.steps[0].dA));
         check('STEPWISE_CONVERGES',
-            Math.abs(lastStep.dA) <= conv.tol && noOvershoot && conv.steps.length <= 6,
+            Math.abs(lastStep.dA) <= conv.tol && shrinking && !crossedZero && conv.steps.length <= 6,
             `${conv.steps.length - 1} 步后偏差 ${lastStep.dA}%（容差 ±${conv.tol}）；`
-            + `轨迹 ${conv.steps.map(s => s.rho + ':' + s.dA).join(' → ')}；未越过目标=${noOvershoot}`);
+            + `轨迹 ${conv.steps.map(s => s.rho + ':' + s.dA).join(' → ')}；不越零=${!crossedZero} 幅值收敛=${shrinking}`);
 
         // ---------- 10) P0 守卫：默认密度下不再有"凭空"的仿真灰分偏移 ----------
         // 门控 + 限幅（直接验证逻辑本身，不依赖该 store 恰好处于哪一层）

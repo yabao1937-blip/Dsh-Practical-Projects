@@ -47,7 +47,9 @@ const App = {
         guideScheme: 'total',      // 密度指导版本：total=总灰分版 | heavy=重介精煤灰分版（总览页可切换）
         totalAshManualOn: false,   // 总灰分修改开关：默认关=总灰分公式计算级别（不可手动修改）；开=手动化验值优先，公式因素锁定
         ashTarget: 8.50,                   // 目标总精煤灰分（卡片箭头调整后持久化，密度自动执行读取）
-        densityGuide: { maxStep: 0.01, deadband: 0.05 },   // 密度指导钳制幅度/死区（页面可调）
+        densityGuide: { maxStep: 0.02, deadband: 0.05 },   // 密度指导钳制幅度/死区（页面可调）
+        // maxStep 默认 0.02：2026-09-12 现场确认「偏差 0.15%→0.01、0.30%→0.02、最多 0.03」，
+        // 取 0.02 覆盖"大多数"情形一步到位、又低于上限 0.03。界面「钳制」随时可改。
         densityAutoOn: true,               // 密度自动执行开关：默认开启，持久化（刷新不变）
         // 在线仪表可修改项（手动 > 录入/计算/模型 > 默认）
         coarseAshInput: { manual: null },   // 粗精煤泥灰分：默认=模型预测
@@ -107,6 +109,16 @@ const App = {
         // 在线仪表可修改项补齐
         if (!this.store.coarseAshInput) { this.store.coarseAshInput = { manual: null }; this.saveStore(true); }
         if (!this.store.heavyAshInput) { this.store.heavyAshInput = { manual: null }; this.saveStore(true); }
+        // 一次性迁移（2026-09-12）：老 store 里存着 densityGuide.maxStep = 0.01（旧默认）会覆盖
+        // 新默认，而现场确认的单次上限是 0.02（最多 0.03）。仅当它恰好等于旧默认 0.01 时改写；
+        // 用户自己设过的其它值一律不动。__fixes 标记保证只跑一次。
+        if (!(this.store.__fixes && this.store.__fixes.maxStep02)) {
+            if (this.store.densityGuide && this.store.densityGuide.maxStep === 0.01) {
+                this.store.densityGuide.maxStep = 0.02;
+            }
+            this.store.__fixes = Object.assign({}, this.store.__fixes, { maxStep02: true });
+            this.saveStore(true);
+        }
         if (this.store.heavyAshManualOn == null) {
             // 迁移：升级前"有手动值就是手动优先"。为不悄悄改变现场行为，按这个事实初始化一次；
             // 之后由在线仪表行的 手动/计算 下拉决定。
@@ -789,7 +801,7 @@ const App = {
             ashTargetTol: 0.1,
             guideScheme: 'total',
             ashTarget: 8.50,
-            densityGuide: { maxStep: 0.01, deadband: 0.05 },
+            densityGuide: { maxStep: 0.02, deadband: 0.05 },
             densityAutoOn: true,
             coarseAshInput: { manual: null },
             floatAshInput: { manual: null },
@@ -1543,8 +1555,12 @@ const App = {
     //  ρ建议 = ρ当前 + K×(A目标 − A实际)；灰分偏高(A实际>A目标)→降密度
     //  K：表3历史『灰分~密度』线性回归斜率；死区±0.05%；单次限幅±0.01；范围1.35~1.60
     // ============================================================
-    DENSITY_GUIDE: { deadband: 0.05, maxStep: 0.01, rhoMin: 1.35, rhoMax: 1.60, kFallback: 0.03,
-                     simBaseRho: 1.49, simK: 0.03 },   // 灰分测量响应仿真：密度↑0.01 → 灰分↑≈0.33%
+    DENSITY_GUIDE: { deadband: 0.05, maxStep: 0.02, rhoMin: 1.35, rhoMax: 1.60, kFallback: 0.03,
+                     // simK：密度→灰分仿真的增益倒数。2026-09-12 按**现场确认的增益 15%/单位密度**反推：
+        //   总灰分增益 = 配煤权重(0.867) / simK ⇒ simK = 0.867/15 ≈ 0.0578
+        // （旧值 0.03 对应 28.9%/单位 = 现场值的 1.93 倍，会让按现场口径定的步长越过目标。）
+        // P3 阶跃实验测出真实增益后，用实测值替换这里。
+        simBaseRho: 1.49, simK: 0.0578 },   // 灰分测量响应仿真：密度↑0.01 → 总灰分↑≈0.15%
 
     // 专家经验调整表（总灰分偏差 → 密度修正量）——**2026-09-12 现场访谈确认后的口径**：
     //   偏差 0.15% → 调 0.01；0.30% → 0.02；更大时**最多 0.03**（不再线性外推）；
