@@ -70,11 +70,12 @@ const api = async (p) => {
         };
         let ready = false, lastErr = null;
         for (let i = 0; i < 60; i++) {
-            try { if (await evalJs("typeof App !== 'undefined' && !!App.store && !!App.store.coarseCoal")) { ready = true; break; } }
+            try { if (await evalJs("typeof App !== 'undefined' && !!App.store && !!App.store.coarseCoal"
+                    + " && typeof CollectPage !== 'undefined' && typeof OverviewPage !== 'undefined'")) { ready = true; break; } }
             catch (e) { lastErr = e.message; }
             await sleep(500);
         }
-        if (!ready) throw new Error('页面 30 秒内未完成初始化' + (lastErr ? '；' + lastErr : ''));
+        if (!ready) throw new Error('页面 30 秒内未完成初始化（等 App/CollectPage/OverviewPage）' + (lastErr ? '；' + lastErr : ''));
 
         // ---------- 1) 下拉存在 ----------
         const ui = JSON.parse(await evalJs(`(() => {
