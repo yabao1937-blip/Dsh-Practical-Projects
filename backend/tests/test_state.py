@@ -246,6 +246,63 @@ def test_mirror_does_not_wipe_heavy_samples():
     client.put("/api/v1/state?force=true", json=SEED)
 
 
+def test_force_get_payload_roundtrip_is_not_destructive():
+    """回归（2026-09-11 第二次事故）：把 GET /state 的结果**原样 force 写回**，不得清掉
+    GET 不返回的那几张表。
+
+    事故经过：GET /api/v1/state 只返回 24 个键，**不含** manualEntries / importLogs /
+    alerts / coarseModelHistory / heavySamples；而 force 原先会先把所有表删空再按载荷重写
+    → 一次"看起来无害的原样写回"把 manual_entries 242 → 0、import_logs 3 → 0、alerts 1 → 0、
+    coarse_model_history 1 → 0（靠 force 前置自动备份才救回来）。
+    修法：快照只拥有它**携带**的表（migrate.TABLE_OWNER_KEYS）——缺键 ≠ 空表。
+    """
+    from app.database import SessionLocal
+    from app.models import Alert, ImportLog, ManualEntry
+
+    # 造出"GET 不返回但有数据"的现场
+    st = json.loads(json.dumps(SEED))
+    st["alerts"] = [{"system": "合并", "level": "警告", "message": "回归用例", "time": "2026-09-01 08:00:00"}]
+    assert client.put("/api/v1/state?force=true", json=st).json()["ok"] is True
+    db = SessionLocal()
+    try:
+        before = (db.query(ManualEntry).count(), db.query(ImportLog).count(), db.query(Alert).count())
+    finally:
+        db.close()
+    assert before[0] > 0 and before[2] == 1, f"前置数据没造好: {before}"
+
+    # 拿到 GET 的载荷（这正是事故里被"原样写回"的东西）并确认它确实不带这些键
+    got = client.get("/api/v1/state").json()
+    for k in ("manualEntries", "importLogs", "alerts", "coarseModelHistory", "heavySamples"):
+        assert k not in got, f"前提变了：GET /state 现在会返回 {k}，本用例需要重新设计"
+
+    j = client.put("/api/v1/state?force=true", json=got).json()
+    assert j["ok"] is True, j
+    assert "manual_entries" in j["untouched"] and "alerts" in j["untouched"], j
+    db = SessionLocal()
+    try:
+        after = (db.query(ManualEntry).count(), db.query(ImportLog).count(), db.query(Alert).count())
+    finally:
+        db.close()
+    assert after == before, f"原样 force 写回清掉了未携带的表: {before} → {after}"
+    # 携带的表照常被重写（快照语义没变）
+    assert len(client.get("/api/v1/state").json()["coarseCoal"]) == 113
+
+    # 反过来：载荷**显式携带**空列表时仍应清空（真正的整库恢复/清库语义）
+    st2 = json.loads(json.dumps(SEED))
+    st2["manualEntries"] = []
+    st2["alerts"] = []
+    j2 = client.put("/api/v1/state?force=true", json=st2).json()
+    assert j2["ok"] is True and "manual_entries" in j2["owned"], j2
+    db = SessionLocal()
+    try:
+        assert db.query(ManualEntry).count() == 0
+        assert db.query(Alert).count() == 0
+    finally:
+        db.close()
+    # 恢复种子供后续用例
+    client.put("/api/v1/state?force=true", json=SEED)
+
+
 def test_decision_log_roundtrip():
     """密度决策日志(Stage 0)经 auto_state 持久化:PUT 后 GET 应原样返回。"""
     st = json.loads(json.dumps(SEED))

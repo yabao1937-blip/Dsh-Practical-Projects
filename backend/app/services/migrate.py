@@ -220,6 +220,26 @@ def _bulk(session: Session, model: type, rows: list[dict]) -> None:
 # manualEntries=242/importLogs=3/alerts=0 与服务器 242/3/1 本来就不同步）。
 # 因此改为**按自然键合并、只增不删**：浏览器新产生的行能上行，缺失的行不会被删掉。
 # 真正要整库回退（备份恢复）走 force=true。
+# 「快照拥有哪张表」由载荷里**是否出现**对应键决定（缺键 ≠ 空表）。
+# 为什么必须这样：GET /api/v1/state 只返回 24 个键，manualEntries / importLogs / alerts /
+# regressionModels / coarseModelHistory / heavySamples **都不在其中**。
+# 于是"把 GET 的结果原样 PUT 回去"这种看起来无害的往返，在 force=true 下会把这几张表清空
+# —— 2026-09-11 实测发生过（manual_entries 242 → 0，靠 force 前置备份救回）。
+# 规则：快照只能删除与重写它**携带**的表；没带的表一律不碰。
+TABLE_OWNER_KEYS = {
+    "coal_records": ("coarseCoal", "floatCoal", "calcLogs"),
+    "calc_logs": ("calcLogs",),
+    "manual_entries": ("manualEntries",),
+    "import_logs": ("importLogs",),
+    "alerts": ("alerts",),
+    "regression_models": ("regressionModels",),
+    "coarse_model_history": ("coarseModelHistory",),
+    "coarse_models": ("coarseModel",),
+    "heavy_samples": ("heavySamples",),
+}
+# settings / auto_state 是键值表：**不整表删除**，只按载荷携带的键 upsert（见 _apply_in_session）
+KV_TABLES = ("settings", "auto_state")
+
 MERGE_ONLY_KEYS = {
     "manual_entries": ("ts", "category"),
     "import_logs": ("ts", "category", "filename"),
@@ -380,11 +400,15 @@ def replace(store: dict, force: bool = False) -> dict:
     为什么按类别细分而不是只比总数：总数相等也可能已经回退
     （如 ash_density 少 20 条、coarse 多 20 条 → 总数不变，只比总数的旧规则会放行）。
 
-    写入范围（force=False）：coal_records / calc_logs / coarse_models / settings / auto_state
-    为"清空后按快照重写"；heavy_samples 完全不碰；manual_entries / import_logs / alerts /
-    regression_models / coarse_model_history 按自然键**只增不删**（见 MERGE_ONLY_KEYS）。
-    force=True 仍是整库覆盖（备份恢复用），且**覆盖前会自动备份**（见 backup_database），
-    备份路径写在响应的 backup 字段里；出错时用该文件即可回滚。
+    写入范围**由载荷携带的键决定**（缺键 ≠ 空表，见 TABLE_OWNER_KEYS）：
+      · force=False（浏览器整库镜像）：清空后重写 coal_records / calc_logs / coarse_models；
+        settings / auto_state 按携带的键 upsert；heavy_samples 完全不碰；
+        manual_entries / import_logs / alerts / regression_models / coarse_model_history
+        按自然键**只增不删**（见 MERGE_ONLY_KEYS）。
+      · force=True（备份恢复/清库）：跳过防回退守卫，**仍然只清它携带的表** ——
+        所以"把 GET /state 的结果原样写回"不会再清掉 GET 不返回的那几张表。
+    覆盖前会自动备份（见 backup_database），路径写在响应的 backup 字段里；
+    响应同时给出 owned（本次拥有并重写的表）与 untouched（未触碰的表），便于诊断。
     """
     p = _plan(store)
     backup_path = backup_database("force") if force else None
@@ -413,17 +437,23 @@ def replace(store: dict, force: bool = False) -> dict:
             merged = _merge_only(db, p)
             for k in MERGE_ONLY_KEYS:
                 p[k] = []                 # 交给 _merge_only，不参与 wipe + 重写
-        wipe = [CoalRecord, CalcLog, CoarseModelHistory, RegressionModel,
-                ManualEntry, Alert, ImportLog, CoarseModel, Setting, AutoState]
-        if force:
-            wipe.append(HeavySample)      # 只有显式整库恢复才覆盖采样表
-        else:
-            wipe = [t for t in wipe if t not in MERGE_ONLY_TABLES]
-        for t in wipe:
-            db.query(t).delete()
+        # 只清"这次载荷确实携带了"的表（缺键 ≠ 空表，见 TABLE_OWNER_KEYS 注释）
+        owned = {name for name, keys in TABLE_OWNER_KEYS.items() if any(k in store for k in keys)}
+        untouched = sorted(set(TABLE_OWNER_KEYS) - owned) + list(KV_TABLES)
+        all_tables = [CoalRecord, CalcLog, CoarseModelHistory, RegressionModel,
+                      ManualEntry, Alert, ImportLog, CoarseModel, HeavySample]
+        if not force:
+            # 非 force（浏览器整库镜像）：不拥有 heavy_samples，也不拥有"只增不删"的那几张表
+            owned.discard("heavy_samples")
+            owned -= set(MERGE_ONLY_KEYS)
+        # 采样表只在显式携带 heavySamples 时才清（force 的备份恢复会带它）
+        wipe = [tb for tb in all_tables if tb.__tablename__ in owned]
+        for tb in wipe:
+            db.query(tb).delete()
         _apply_in_session(db, p)
         db.commit()
         return {"counts": {t: len(p[t]) for t in p}, "merged": merged,
+                "owned": sorted(owned), "untouched": untouched,
                 "backup": backup_path, "ok": True}
     except Exception as e:
         db.rollback()
