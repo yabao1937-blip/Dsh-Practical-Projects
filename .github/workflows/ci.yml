@@ -54,6 +54,9 @@ jobs:
   #   用例0  冷启动空配置的整库写必须不被 stale 守卫拒绝（缺陷1 的复现路径）
   #   用例1  写失败不得静默：待发副本 + 提示 + online 重试后服务器真实收到
   #   （密度决策日志链路：设定密度 → 日志条目 → PUT 落库）
+  #   （实测密度计仅展示：设置实测值前后所有计算结果逐项一致）
+  #   （重介灰分来源 手动/计算 + 闭环收敛 + 推测值与经验范围）
+  #   用例4  新化验不被最短驻留挡住（2026-09-12 现场实测缺陷的复现路径）
   # 用 windows-latest 是因为 GitHub 的 Windows 镜像自带 Edge，路径与本机一致；
   # ubuntu 镜像没有 Edge（需要单独装 microsoft-edge-stable）。
   # 断言全部落在 stdout 的 PASS/FAIL 上，脚本遇到任一 FAIL 返回非 0，
@@ -103,7 +106,7 @@ jobs:
       # 上一步 Start-Process 起的 uvicorn，到下一步就已经死了，脚本只报
       # `fetch failed`，而"等待就绪"那一步明明刚探到 200（这正是 e2e 一直红的原因）。
       # 失败时发 GitHub annotation：注解可经公开 API 读到，而作业日志需要管理员权限。
-      - name: 起后端 → 跑两个 E2E 脚本 → 停后端（完整输出，不截断）
+      - name: 起后端 → 跑五个 E2E 脚本 → 停后端（完整输出，不截断）
         shell: pwsh
         run: |
           $srvOut = "$env:TEMP\ci-server.log"
@@ -140,7 +143,8 @@ jobs:
               @{ name = '镜像写路径'; file = 'scripts/verify_mirror_e2e.js'; allowReal = $null },
               @{ name = '密度决策日志'; file = 'scripts/verify_decision_log.js'; allowReal = $null },
               @{ name = '实测密度计(仅展示)'; file = 'scripts/verify_density_actual.js'; allowReal = '1' },
-              @{ name = '重介灰分来源与闭环'; file = 'scripts/verify_heavy_ash_source.js'; allowReal = '1' }
+              @{ name = '重介灰分来源与闭环'; file = 'scripts/verify_heavy_ash_source.js'; allowReal = '1' },
+              @{ name = '新化验不被驻留挡住'; file = 'scripts/verify_dwell_bypass.js'; allowReal = '1' }
             )
             foreach ($c in $cases) {
               $log = Join-Path $env:TEMP ("e2e-" + [IO.Path]::GetFileNameWithoutExtension($c.file) + ".log")

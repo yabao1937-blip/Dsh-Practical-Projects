@@ -164,8 +164,12 @@ const OverviewPage = {
             document.getElementById(`density-${sys.id}`).textContent = guide.rhoNew.toFixed(3);
             const subEl = document.getElementById(`density-sub-${sys.id}`);
             if (subEl) {
+                // 「保持」分两种：真达标而保持 / 被守卫挡住（等新化验、或同一份化验只动作一次）。
+                // 混在一起会误导操作员 —— 用户 2026-09-12 实测就把它读成了"已达标"。
+                const holdTxt = guide.hold ? '保持（等新化验/新数据）'
+                    : (guide.direction === 'down' ? '降密' : guide.direction === 'up' ? '提密' : '达标保持');
                 subEl.textContent = guide.valid
-                    ? `密度计 ${guide.rhoCur.toFixed(3)} · 目标密度 ${guide.rhoNew.toFixed(3)} · ${guide.direction === 'down' ? '降密' : guide.direction === 'up' ? '提密' : '达标保持'}`
+                    ? `密度计 ${guide.rhoCur.toFixed(3)} · 目标密度 ${guide.rhoNew.toFixed(3)} · ${holdTxt}`
                     : `密度计 ${guide.rhoCur.toFixed(3)}`;
             }
 
@@ -491,7 +495,7 @@ const OverviewPage = {
                               + `属推测值（增益待阶跃实验实测），请以化验验证</span>`
                             : '—'}</td></tr>
                     <tr><td>重介灰分预测(调密后)</td><td>${g.valid && Math.abs(g.deltaRho) > 1e-9 ? (g.heavyAsh + (g.rhoNew - g.rhoCur) / (g.K || 0.03)).toFixed(2) + '%（仅预测，不参与计算，请采样验证）' : '—'}</td></tr>
-                    <tr><td>达标判定</td><td>${g.valid && Math.abs(g.deltaA) <= g.deadband ? '<span style="color:var(--accent-green)">✓ 已达标（' + (g.scheme === 'heavy' ? '重介口径±' + (g.deadband * g.totalAmt / g.heavyAmt).toFixed(3) + '%，等效总灰分±' + g.deadband : '容差±' + g.deadband) + '%）</span>' : '<span style="color:var(--accent-orange)">未达标</span>'}</td></tr>
+                    <tr><td>达标判定</td><td>${g.hold ? '<span style="color:var(--accent-orange)">保持（等新化验/新数据）</span>：' + (g.reason || g.holdReason || '') : (g.valid && Math.abs(g.deltaA) <= g.deadband ? '<span style="color:var(--accent-green)">✓ 已达标（' + (g.scheme === 'heavy' ? '重介口径±' + (g.deadband * g.totalAmt / g.heavyAmt).toFixed(3) + '%，等效总灰分±' + g.deadband : '容差±' + g.deadband) + '%）</span>' : '<span style="color:var(--accent-orange)">未达标</span>')}</td></tr>
                     <tr><td>重介灰分反推值(仅展示)</td><td>${App.store.heavyAshBackcalc != null ? App.store.heavyAshBackcalc.toFixed(2) + '%' : '—'}</td></tr>
                 </table>
                 <p style="color:var(--text-secondary)">${g.reason}</p>

@@ -1340,12 +1340,39 @@ const App = {
         return `${scheme}|${src}|${stamp || 0}|${v == null ? 'na' : (+v).toFixed(3)}`;
     },
 
+    // 「人工化验时刻」：最近一次人工录入、且**当前真正在用**的灰分化验值是什么时候进来的。
+    // 用途：判断"上次调密度之后有没有来新化验"。驻留（DENSITY_DWELL_MS）的本意是
+    // "等过程到位 + 等新化验"，所以新化验到了就该放行给下一步建议；
+    // 而在线/导入数据的连续刷新**不算**新化验 —— 否则自动执行会追着在线噪声一直动密度，
+    // 那正是驻留要防的事。（用户 2026-09-12 实测："改完化验，建议还停在旧值"就是被驻留挡的。）
+    _densityManualEpoch() {
+        let t = 0;
+        const bump = v => { if (typeof v === 'number' && isFinite(v) && v > t) t = v; };
+        const totalManual = (this.store.ashInputs && this.store.ashInputs.totalAsh) || {};
+        if (this.store.totalAshManualOn && typeof totalManual.manual === 'number') bump(totalManual.manualAt);
+        if (this.heavyAshSource() === 'manual') bump((this.store.heavyAshInput || {}).manualAt);
+        const coarseCfg = this.store.coarseAshInput || {};
+        if (typeof coarseCfg.manual === 'number' && isFinite(coarseCfg.manual) && coarseCfg.manual >= 0
+            && this._manualValid(coarseCfg, 'coarseAsh')) bump(coarseCfg.manualAt);
+        const floatCfg = this.store.floatAshInput || {};
+        if (typeof floatCfg.manual === 'number' && isFinite(floatCfg.manual) && floatCfg.manual >= 0
+            && this._manualValid(floatCfg, 'floatAsh')) bump(floatCfg.manualAt);
+        return t;
+    },
+
     // 该记录一份"已按某份数据动作过"的闩锁（在操作员/自动执行真正改了密度时调用）
     _latchDensityAction() {
         const st = this.store;
         if (!st.densityActionLatch) st.densityActionLatch = null;
-        if (this._lastDriveKey) {
-            st.densityActionLatch = { key: this._lastDriveKey, at: Date.now(), rho: this.resolveDensity() };
+        // 用"当前这份驱动数据"的键（不是"上次给建议时"的键）：操作员是对着眼前这份数据动的密度，
+        // 闩锁要盖住的也是这份数据。否则中间只要发生过达标/切方案，"闩锁对象"就会记错。
+        let key = this._lastDriveKey;
+        try {
+            key = this._densityDriveKey(this.resolveTotalAsh(), this.getHeavyAsh(),
+                (st.guideScheme === 'heavy') ? 'heavy' : 'total');
+        } catch (e) { /* 数据不全时退回"上次建议的键" */ }
+        if (key) {
+            st.densityActionLatch = { key: key, at: Date.now(), rho: this.resolveDensity() };
             this.saveStore();
         }
     },
@@ -1527,10 +1554,17 @@ const App = {
             patch = Object.assign({}, patch);
             patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
             if (!('autoExec' in patch)) patch.autoExec = false;   // 操作员手动写入清除自动执行标记
-            // P0②：密度真的被改了 → 记闩锁（同一份驱动数据不再重复给建议），并记下变动时刻
+            // P0②：密度**真的**被改了 → 记闩锁（同一份驱动数据不再重复给建议），并记下变动时刻。
+            // 同值写入（把建议值原样写回、或自动执行到位后重复写）**不算**动作：
+            // 否则会凭一次没发生的"动作"起 30 分钟驻留窗口，把随后的新化验建议一起挡掉。
             if (id === 'density' && typeof patch.manual === 'number' && isFinite(patch.manual)) {
-                this.store.densityLastMoveAt = Date.now();
-                this._latchDensityAction();
+                const prevRho = this.resolveDensity();
+                const realMove = !(typeof prevRho === 'number' && isFinite(prevRho))
+                    || Math.abs(patch.manual - prevRho) > 1e-9;
+                if (realMove) {
+                    this.store.densityLastMoveAt = Date.now();
+                    this._latchDensityAction();
+                }
             }
         }
         // 决策日志:操作员手动设定密度(有效范围内)——记录决策上下文,45分钟后自动补记灰分响应
@@ -1709,18 +1743,24 @@ const App = {
         const latch = this.store.densityActionLatch;
         const key = this._densityDriveKey(s.actualTotal, s.heavyAsh, s.scheme);
         const lastMove = this.store.densityLastMoveAt || 0;
+        // 新化验判定：上次改密度之后又人工录入了新的化验值 → 驻留放行。
+        // 驻留的目的是"等过程到位 + 等新化验"，新化验既然到了，就不该再挡着不给建议
+        // （否则现场看到的是"改了化验，建议纹丝不动"，像系统坏了）。
+        const labEpoch = this._densityManualEpoch();
+        const dataIsNewer = !!(lastMove && labEpoch > lastMove);
+        const sinceMoveMin = lastMove ? Math.round((now - lastMove) / 60000) : null;
         let hold = false, holdReason = '';
         if (latch && latch.key === key) {
             hold = true;
             holdReason = '已按当前这份数据调整过密度（同一份化验只动作一次）；'
                 + '请等新的化验/在线数据后再看下一步建议';
-        } else if (lastMove && (now - lastMove) < this.DENSITY_DWELL_MS) {
+        } else if (lastMove && (now - lastMove) < this.DENSITY_DWELL_MS && !dataIsNewer) {
             hold = true;
-            holdReason = `刚调整过密度（${Math.round((now - lastMove) / 60000)} 分钟前），`
-                + `过程到位与化验需要时间，${Math.round(this.DENSITY_DWELL_MS / 60000)} 分钟内不再给新建议；`
-                + '如已拿到新化验，录入后会自动重新计算';
+            holdReason = `刚调整过密度（${sinceMoveMin} 分钟前），此后还没有新的化验/在线数据 —— `
+                + `过程到位需要时间，等新数据来了再动下一步（最长等 ${Math.round(this.DENSITY_DWELL_MS / 60000)} 分钟）`;
         }
-        return { placeholder, hold, holdReason, driveKey: key };
+        return { placeholder, hold, holdReason, driveKey: key, dataIsNewer: dataIsNewer,
+                 sinceMoveMin: sinceMoveMin, labEpoch: labEpoch };
     },
 
     computeDensityGuidance(targetTotalAshOverride) {
@@ -1854,6 +1894,17 @@ const App = {
                   ? `；完整修正目标 ${r.rhoTargetFull.toFixed(3)}（本步只走 ${Math.abs(r.deltaRho).toFixed(3)}，`
                     + `共约 ${r.steps} 步，每步之后等新的化验/在线数据再走下一步）`
                   : '');
+        // 驻留被"新化验"放行时说明原因：否则现场会以为系统没把新化验算进去。
+        // 同时提示取样时刻风险 —— 若这份化验是调密度之前取的煤样，它反映的还是旧密度下的产品。
+        if (p0guard.dataIsNewer && p0guard.sinceMoveMin != null) {
+            r.dwellBypassed = true;
+            r.sinceMoveMin = p0guard.sinceMoveMin;
+            r.reason += `（距上次调密 ${p0guard.sinceMoveMin} 分钟，此后已录入新的化验值 —— 按新数据给下一步）`;
+            if (p0guard.sinceMoveMin < 5) {
+                r.sampleMayPrecedeMove = true;
+                r.reason += ' 提示：这份化验距调密时间很近，若它是调密前取的煤样，请以下一份化验为准。';
+            }
+        }
         return r;
     },
 
