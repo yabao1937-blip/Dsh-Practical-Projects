@@ -7,6 +7,26 @@ const FloatPage = {
     linkageChart: null,
     distChart: null,
 
+    // 本页数据起点（现场要求 2026-09-17：去掉图表里 5 月的数据）。
+    // 为什么是 6-01 而不是"删掉 5 月那 5 条"：
+    //   5 月那 5 条（05-21~05-25，煤量 26~27 t/h、灰分 8.2~10.4）与 8 月以后
+    //   （19.5~22.6 t/h、9.4~14.0）不是同一工况；联动趋势图的 X 轴按真实时间比例分布，
+    //   把它们画在一起会把轴拉到 3 个多月、中间 6~8 月留一大段空白，
+    //   还会把"动态波动范围"的标准差算大。按日期起点排除比按条数删更稳（将来补 5 月数据也不会漏）。
+    // 作用范围：**仅本页**（联动趋势图 / 分布图 / 四张数值卡 / 明细表 / 卡片详情）。
+    //   不改 store.floatCoal —— 总灰分公式（resolveFloatAsh）、密度建议、模型训练照旧用全部浮精数据。
+    FLOAT_DATA_START: '2026-06-01',
+
+    // 本页数据集：同一采样时间去重 + 剔除"明确早于数据起点"的记录。
+    // 时间戳解析不出来的记录**保留**（宁可多显示，不静默丢数据）。
+    _pageData() {
+        const start = new Date(this.FLOAT_DATA_START + 'T00:00:00').getTime();
+        return this._uniqueByTime(App.store.floatCoal).filter(d => {
+            const t = new Date(String((d && d.timestamp) || '').replace(' ', 'T')).getTime();
+            return !(isFinite(t) && t < start);
+        });
+    },
+
     init() {
         this.initTimeRange();
         this.refresh();
@@ -160,7 +180,7 @@ const FloatPage = {
     },
 
     updateCards() {
-        const data = this._uniqueByTime(App.store.floatCoal);
+        const data = this._pageData();
         if (data.length === 0) {
             const fAshEmpty = App.resolveFloatAsh();
             document.getElementById('float-current-ash').innerHTML =
@@ -320,8 +340,9 @@ const FloatPage = {
     updateCharts() {
         if (!this.linkageChart || !this.distChart) return;
         // 按真实时间排序并按采样时间去重（同批数据跨系统重复导入时同一时刻只显示一次）；
-        // 同时把每点时间戳交给图表，使 X 轴按真实时间间隔比例分布（与数据条数无关）
-        const data = this._uniqueByTime(this._sortByTime(App.store.floatCoal));
+        // 同时把每点时间戳交给图表，使 X 轴按真实时间间隔比例分布（与数据条数无关）。
+        // 数据经 _pageData() 过滤：不含 FLOAT_DATA_START（2026-06-01）之前的 5 月数据。
+        const data = this._sortByTime(this._pageData());
         const heavyAmt = 250;
         const pad = n => String(n).padStart(2, '0');
         // 完整时间既用于悬停提示，也用于 X 轴定位（按真实时间间隔比例分布，与数据条数无关）
@@ -374,7 +395,7 @@ const FloatPage = {
     },
 
     renderTable() {
-        const data = this._uniqueByTime(App.store.floatCoal);
+        const data = this._pageData();
         const tbody = document.getElementById('float-tbody');
         tbody.innerHTML = data.slice().reverse().slice(0, 30).map(d => {
             const pressTag = d.filter_press_running ?
@@ -479,9 +500,10 @@ const FloatPage = {
     },
 
     showCardDetail(cardType) {
-        const data = this._uniqueByTime(App.store.floatCoal);
+        const data = this._pageData();
         const heavyAmt = 250;
-        const latest = data.length > 0 ? data[data.length - 1] : null;
+        // 时间上最新的一条（store 的数组顺序不保证按时间，取 data[length-1] 可能取错记录）
+        const latest = this._latestByTime(data);
         const heavyAsh = latest ? (App.getAshByTime(latest.timestamp) ?? 8.50) : 8.50;
         let html = '';
 
@@ -557,6 +579,7 @@ const FloatPage = {
                 html = `
                     <div style="line-height:2.2;font-size:14px">
                         <h4 style="margin:0 0 12px;color:var(--accent-blue)">动态波动范围（标准差）</h4>
+                        <p style="color:var(--text-secondary);font-size:12px">数据范围：${this.FLOAT_DATA_START} 起（已排除 5 月早期工况数据）</p>
                         <p><strong>一、公式</strong></p>
                         <p style="color:var(--text-secondary)">σ = sqrt( Σ(xi - x̄)² / n )</p>
                         <p><strong>二、计算过程</strong></p>

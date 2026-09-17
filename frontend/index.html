@@ -498,6 +498,7 @@
                         <span>至</span>
                         <input type="datetime-local" id="float-end-time">
                         <button class="btn btn-primary" onclick="FloatPage.query()">查询</button>
+                        <span style="color:var(--text-muted);font-size:12px">数据分析起点 2026-06-01（已排除 5 月早期工况）</span>
                     </div>
                 </div>
             </div>
@@ -525,7 +526,7 @@
                 <div class="stat-card accent-green" onclick="FloatPage.showCardDetail('range')">
                     <div class="stat-card-label">动态波动范围</div>
                     <div class="stat-card-value" id="float-dynamic-range">±0.08<span class="stat-unit">%</span></div>
-                    <div class="stat-card-sub">近24h标准差</div>
+                    <div class="stat-card-sub" id="float-range-sub">标准差（2026-06 起，不含5月）</div>
                 </div>
             </div>
 
@@ -807,7 +808,7 @@
     <script src="js/overview.js?v=44"></script>
     <script src="js/collect.js?v=25"></script>
     <script src="js/coarse.js?v=19"></script>
-    <script src="js/float.js?v=14"></script>
+    <script src="js/float.js?v=15"></script>
     <script src="js/import.js?v=26"></script>
     <script src="js/brief.js?v=2"></script>
     <script src="js/history.js?v=2"></script>
