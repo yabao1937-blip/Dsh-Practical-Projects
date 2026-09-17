@@ -161,15 +161,29 @@ const OverviewPage = {
             const aLabelEl = document.getElementById(`actual-ash-label-${sys.id}`);
             if (aLabelEl) aLabelEl.textContent = heavyMode ? '实测重介灰分' : '实际灰分';
 
-            document.getElementById(`density-${sys.id}`).textContent = guide.rhoNew.toFixed(3);
+            // 守在「保持」时**不给建议值**（现场要求 2026-09-17）：
+            // 调完密度、正在等新化验/新数据的那段时间里，系统没有建议可给。
+            // 若照旧把"当前密度"填进建议位（rhoNew=rhoCur），会被读成"建议=当前值=已达标"，
+            // 这正是 9-12 那次实测误读的来源。所以这里显示「—」，把状态交给副标题说清楚。
+            const ashOk = guide.valid && guide.deltaA != null && Math.abs(guide.deltaA) <= guide.deadband;
+            const noAdvice = guide.hold === true && !ashOk;     // 保持中且并未达标 → 无建议
+            const dNumEl = document.getElementById(`density-${sys.id}`);
+            if (dNumEl) {
+                dNumEl.textContent = noAdvice ? '—' : guide.rhoNew.toFixed(3);
+                dNumEl.style.color = noAdvice ? 'var(--text-muted)' : '';
+                dNumEl.title = noAdvice ? '保持中：等新化验/新数据后再给建议' : '';
+            }
             const subEl = document.getElementById(`density-sub-${sys.id}`);
             if (subEl) {
                 // 「保持」分两种：真达标而保持 / 被守卫挡住（等新化验、或同一份化验只动作一次）。
                 // 混在一起会误导操作员 —— 用户 2026-09-12 实测就把它读成了"已达标"。
-                const holdTxt = guide.hold ? '保持（等新化验/新数据）'
-                    : (guide.direction === 'down' ? '降密' : guide.direction === 'up' ? '提密' : '达标保持');
+                const holdTxt = ashOk ? '达标保持'
+                    : (guide.hold ? '保持（等新化验/新数据）'
+                        : (guide.direction === 'down' ? '降密' : guide.direction === 'up' ? '提密' : '达标保持'));
                 subEl.textContent = guide.valid
-                    ? `密度计 ${guide.rhoCur.toFixed(3)} · 目标密度 ${guide.rhoNew.toFixed(3)} · ${holdTxt}`
+                    ? (noAdvice
+                        ? `密度计 ${guide.rhoCur.toFixed(3)} · ${holdTxt}`
+                        : `密度计 ${guide.rhoCur.toFixed(3)} · 目标密度 ${guide.rhoNew.toFixed(3)} · ${holdTxt}`)
                     : `密度计 ${guide.rhoCur.toFixed(3)}`;
             }
 
@@ -476,8 +490,12 @@ const OverviewPage = {
                     <tr><td>预测增益 K</td><td>${g.K.toFixed(4)}　${App.kStateText(g.kInfo)}
                         <span title="${App.kSystemsText(g.kInfo)}" style="cursor:help;color:var(--accent-blue)">［分系统明细］</span>
                         <br><span style="color:var(--text-secondary);font-size:12px">仅用于"调密后重介灰分预测"，不参与调整量计算</span></td></tr>
-                    <tr><td>密度修正量</td><td>${g.valid ? (g.deltaRho > 0 ? '+' : '') + g.deltaRho.toFixed(3) : '—'} g/cm³（建议值，人工执行后录入实际密度）</td></tr>
-                    <tr><td>目标密度(本次一步)</td><td><strong>${g.rhoNew.toFixed(3)} g/cm³</strong>（范围1.35~1.60）</td></tr>
+                    <tr><td>密度修正量</td><td>${(g.valid && !g.hold)
+                        ? (g.deltaRho > 0 ? '+' : '') + g.deltaRho.toFixed(3) + ' g/cm³（建议值，人工执行后录入实际密度）'
+                        : '—<span style="color:var(--text-secondary);font-size:12px">（保持中：等新化验/新数据，本次不给修正量）</span>'}</td></tr>
+                    <tr><td>目标密度(本次一步)</td><td>${g.hold
+                        ? '—<span style="color:var(--text-secondary);font-size:12px">（保持中，不给新的目标密度）</span>'
+                        : '<strong>' + g.rhoNew.toFixed(3) + ' g/cm³</strong>（范围1.35~1.60）'}</td></tr>
                     <tr><td><strong>建议密度(推测值)</strong></td><td>${
                         (g.rhoPredict != null && g.valid)
                             ? `<strong style="color:${g.predictBeyondRange ? 'var(--text-muted)' : 'var(--accent-cyan)'}">`

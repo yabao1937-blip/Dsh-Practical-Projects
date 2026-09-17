@@ -151,9 +151,14 @@ const api = async (p) => {
             const mains = [...document.querySelectorAll('[id^="density-"]')]
                 .filter(e => /^density-(sub-)?(total|float|heavy)/.test(e.id) && !e.id.includes('sub'))
                 .map(e => e.id + '=' + e.textContent);
+            OverviewPage.showCardDetail('total');
+            const mb = document.getElementById('modal-body');
+            const modal = mb ? mb.innerHTML : '';
+            App.closeModal();
             return JSON.stringify({
                 total: App.resolveTotalAsh(), deltaA: g.deltaA, hold: g.hold, reason: g.reason || '',
                 dir: g.direction, deltaRho: g.deltaRho, rhoNew: g.rhoNew, subs: subs, mains: mains,
+                modalNum: modal.includes('1.512 g/cm³'), modalKeepHint: modal.includes('保持中'),
             });
         })()`));
         console.log('  新化验 8.3:', JSON.stringify({ total: newLab.total, deltaA: newLab.deltaA, rhoNew: newLab.rhoNew, dir: newLab.dir }));
@@ -166,6 +171,10 @@ const api = async (p) => {
             newLab.subs.some(s => s.includes('降密')) && !newLab.subs.some(s => s.includes('达标保持'))
             && newLab.mains.some(m => m.includes('1.512')),
             `副标题=${JSON.stringify(newLab.subs)} 主数字=${JSON.stringify(newLab.mains)}`);
+        // 有建议时弹窗必须给出目标值（防止"一律留空"这种假修法把功能改死）
+        check('ADVICE_MODAL_SHOWS_TARGET',
+            newLab.modalNum === true && newLab.modalKeepHint === false,
+            `弹窗含 1.512 g/cm³=${newLab.modalNum} 误显示"保持中"=${newLab.modalKeepHint}`);
 
         // ---------- 4) 真改密度 → 闩锁与驻留（P0②③ 不被削弱）----------
         const latch = JSON.parse(await evalJs(`(() => {
@@ -182,6 +191,12 @@ const api = async (p) => {
             out.dwellHold = gDwell.hold; out.dwellReason = gDwell.reason || ''; out.dwellRho = gDwell.rhoNew;
             OverviewPage.refresh();
             out.subsHold = [...document.querySelectorAll('[id^="density-sub-"]')].map(e => e.textContent);
+            const dn = document.getElementById('density-total');
+            out.mainHold = dn ? dn.textContent : null;
+            OverviewPage.showCardDetail('total');
+            const mb = document.getElementById('modal-body');
+            out.modalHold = mb ? mb.innerHTML : '';
+            App.closeModal();
             return JSON.stringify(out);
         })()`));
         check('REAL_MOVE_ARMS_LATCH',
@@ -196,6 +211,15 @@ const api = async (p) => {
         check('HOLD_TEXT_DISTINCT',
             latch.subsHold.some(s => s.includes('等新化验')) && !latch.subsHold.some(s => s.includes('达标保持')),
             `副标题=${JSON.stringify(latch.subsHold)}`);
+        // 现场要求（2026-09-17）：保持中不给建议值 —— 右边显示「—」，副标题说明在等什么
+        check('HOLD_NO_ADVICE_ON_CARD',
+            latch.mainHold === '—' && latch.subsHold.every(s => !s.includes('目标密度'))
+            && latch.subsHold.some(s => s.includes('保持（等新化验')),
+            `建议位="${latch.mainHold}" 副标题=${JSON.stringify(latch.subsHold)}`);
+        check('HOLD_NO_ADVICE_IN_MODAL',
+            latch.modalHold.includes('（保持中，不给新的目标密度）')
+            && latch.modalHold.includes('（保持中：等新化验/新数据，本次不给修正量）'),
+            `弹窗出现"保持中"说明=${latch.modalHold.includes('保持中')}`);
 
         // ---------- 5) 调密之后来了新化验 → 放行（本次修复的核心）----------
         const afterMove = JSON.parse(await evalJs(`(() => {
