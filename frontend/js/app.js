@@ -278,15 +278,102 @@ const App = {
     // 不能借启动流程镜像覆盖服务器上的新数据（服务器侧导入/训练成果）。
     saveStore(skipMirror) {
         let body = null;
+        let ok = false;
         try {
             body = JSON.stringify(this.store);      // 一次序列化，本地写与镜像复用
-            localStorage.setItem('dmcs_store', body);
+            try {
+                localStorage.setItem('dmcs_store', body);
+                ok = true;
+            } catch (e) {
+                ok = this._retryStoreWriteAfterQuota(e, body);
+            }
         } catch (e) {
             console.warn('localStorage 保存失败:', e);
         }
+        this._noteStorageWrite(ok, body);
         if (skipMirror || body === null) return;
         if (!window.Api || !window.location.protocol.startsWith('http')) return;
         this._scheduleMirror(body);                 // 镜像合并后发送（见 _scheduleMirror）
+    },
+
+    // ============================================================
+    //  本地存储容量防线（2026-09）—— 与镜像失败同型的历史教训：静默失败比报错更危险。
+    //  dmcs_store 只增不减，浏览器 localStorage 配额(约 5MB)到顶后 setItem 会持续抛
+    //  QuotaExceededError；此前只 console.warn —— 界面一切正常，而**从此所有改动不再落盘**
+    //  （刷新即丢），现场无从察觉。
+    //  处置：
+    //   ① 先尝试释放"待发镜像"单槽（纯瞬态副本，内容与 body 同一份）后重写，成功仅提示；
+    //   ② 仍失败 → 横幅 + toast + 状态区显红，明说"本次改动不会持久化"；
+    //   ③ 每次 saveStore 都重走此逻辑，空间恢复后自动回归正常；
+    //   ④ 常态监控 store 体积（总览「系统状态」区显示），接近阈值提前预警。
+    // ============================================================
+    STORAGE_WARN_BYTES: 2.5 * 1024 * 1024,   // 提前预警阈值（接近浏览器 5MB 级配额）
+    STORAGE_DANGER_BYTES: 4 * 1024 * 1024,   // 高危阈值
+    storageHealth: { bytes: 0, lastError: null, failCount: 0, lastRenderAt: 0, alerted: false },
+
+    _retryStoreWriteAfterQuota(err, body) {
+        this.storageHealth.lastError = (err && err.name) || String(err);
+        // 唯一可安全释放的本页大对象：镜像待发单槽（与 body 内容相同，属瞬态缓存）
+        let pendingRaw = null;
+        try { pendingRaw = localStorage.getItem(this.MIRROR_PENDING_KEY); } catch (e) { return false; }
+        if (!pendingRaw) return false;
+        try {
+            localStorage.removeItem(this.MIRROR_PENDING_KEY);
+            localStorage.setItem('dmcs_store', body);
+            this.showToast('本地存储空间紧张：已释放待发镜像缓存后写回（镜像将在下次保存时重发）', 'warning');
+            return true;
+        } catch (e2) {
+            try { localStorage.setItem(this.MIRROR_PENDING_KEY, pendingRaw); } catch (e3) { /* 尽力还原 */ }
+            return false;
+        }
+    },
+
+    _noteStorageWrite(ok, body) {
+        const h = this.storageHealth;
+        if (body !== null && typeof body === 'string') h.bytes = this._mirrorBytes(body);
+        if (ok) { h.failCount = 0; h.alerted = false; } else { h.failCount++; }
+        if (!ok && !h.alerted) {
+            h.alerted = true;
+            try {
+                this.showToast('⚠ 本地保存失败（浏览器存储空间已满）：本次改动刷新后会丢失！请导出备份并联系维护清理历史数据', 'error');
+                const banner = document.getElementById('alert-banner');
+                const text = document.getElementById('alert-banner-text');
+                if (banner && text) {
+                    text.textContent = '本地存储写入失败（已累计 ' + h.failCount + ' 次）：存储空间已满，新改动不会持久化。请导出备份并清理历史数据。';
+                    banner.classList.remove('hidden');
+                }
+            } catch (e) { /* 提示失败不影响主流程 */ }
+        }
+        const now = Date.now();
+        if (now - (h.lastRenderAt || 0) > 2500) {   // 渲染节流：saveStore 有 1s 级调用点
+            h.lastRenderAt = now;
+            this._renderStorageHealth();
+        }
+    },
+
+    _renderStorageHealth() {
+        const el = document.getElementById('status-storage');
+        if (!el) return;   // 状态汇总不在当前页面时静默
+        const h = this.storageHealth;
+        const kb = h.bytes / 1024;
+        const sizeText = kb >= 1024 ? (kb / 1024).toFixed(2) + ' MB' : kb.toFixed(0) + ' KB';
+        if (h.failCount) {
+            el.textContent = '写入失败×' + h.failCount;
+            el.className = 'status-val error';
+            el.title = 'localStorage 写入失败（配额已满）：新改动刷新后会丢失。请导出备份并清理历史数据，或连接服务器模式后从服务器恢复。';
+        } else if (h.bytes >= this.STORAGE_DANGER_BYTES) {
+            el.textContent = sizeText + '(高危)';
+            el.className = 'status-val error';
+            el.title = '数据快照体积已接近浏览器 localStorage 配额（约 5MB）。到达上限后新改动将无法保存——请导出备份并清理历史数据。';
+        } else if (h.bytes >= this.STORAGE_WARN_BYTES) {
+            el.textContent = sizeText + '(偏高)';
+            el.className = 'status-val warn';
+            el.title = '数据快照体积偏高，留意继续增长。到达浏览器配额（约 5MB）后新改动将无法保存。';
+        } else {
+            el.textContent = sizeText;
+            el.className = 'status-val good';
+            el.title = 'localStorage 数据快照体积（接近 5MB 配额会预警）。';
+        }
     },
 
     // ============================================================

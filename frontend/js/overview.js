@@ -287,6 +287,7 @@ const OverviewPage = {
         }
 
         document.getElementById('status-manual-count').textContent = App.store.manualEntries.length + '条';
+        App._renderStorageHealth();   // 本地存储体积/写入健康(容量防线,见 app.js saveStore)
     },
 
     initTrendChart() {
