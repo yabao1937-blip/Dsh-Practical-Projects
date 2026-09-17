@@ -155,10 +155,15 @@ const api = async (p) => {
             const mb = document.getElementById('modal-body');
             const modal = mb ? mb.innerHTML : '';
             App.closeModal();
+            const dEl = document.getElementById('direction-total');
+            const eEl = document.getElementById('effect-total');
             return JSON.stringify({
                 total: App.resolveTotalAsh(), deltaA: g.deltaA, hold: g.hold, reason: g.reason || '',
                 dir: g.direction, deltaRho: g.deltaRho, rhoNew: g.rhoNew, subs: subs, mains: mains,
                 modalNum: modal.includes('1.512 g/cm³'), modalKeepHint: modal.includes('保持中'),
+                dirVis: dEl ? dEl.style.visibility : null,
+                dirText: dEl ? (dEl.textContent || '').trim() : null,
+                effectTxt: eEl ? (eEl.textContent || '').trim() : null,
             });
         })()`));
         console.log('  新化验 8.3:', JSON.stringify({ total: newLab.total, deltaA: newLab.deltaA, rhoNew: newLab.rhoNew, dir: newLab.dir }));
@@ -197,6 +202,12 @@ const api = async (p) => {
             const mb = document.getElementById('modal-body');
             out.modalHold = mb ? mb.innerHTML : '';
             App.closeModal();
+            const dEl = document.getElementById('direction-total');
+            const eEl = document.getElementById('effect-total');
+            out.dirVis = dEl ? dEl.style.visibility : null;
+            out.dirDisplay = dEl ? dEl.style.display : null;     // 占位隐藏：display 不该被动
+            out.dirText = dEl ? (dEl.textContent || '').trim() : null;
+            out.effectTxt = eEl ? (eEl.textContent || '').trim() : null;
             return JSON.stringify(out);
         })()`));
         check('REAL_MOVE_ARMS_LATCH',
@@ -220,6 +231,16 @@ const api = async (p) => {
             latch.modalHold.includes('（保持中，不给新的目标密度）')
             && latch.modalHold.includes('（保持中：等新化验/新数据，本次不给修正量）'),
             `弹窗出现"保持中"说明=${latch.modalHold.includes('保持中')}`);
+        // 现场要求（2026-09-17 第二轮）：保持中时右侧方向建议「建议下调/上调」必须隐藏（占位隐藏，卡片不跳动）
+        check('HOLD_HIDES_DIRECTION',
+            latch.dirVis === 'hidden' && !latch.dirDisplay
+            && latch.effectTxt.includes('保持中：等新化验/新数据'),
+            `方向指示 visibility="${latch.dirVis}" display="${latch.dirDisplay || ''}" 底部效果="${latch.effectTxt}"`);
+        // 有建议时方向指示必须重新可见且给出方向（防止"一直藏着"这种假修法）
+        check('ADVICE_SHOWS_DIRECTION',
+            !newLab.dirVis && newLab.dirText.includes('建议下调')
+            && !newLab.effectTxt.includes('保持中：等新化验'),
+            `方向指示 visibility="${newLab.dirVis || ''}" 文本="${newLab.dirText}" 底部效果="${newLab.effectTxt}"`);
 
         // ---------- 5) 调密之后来了新化验 → 放行（本次修复的核心）----------
         const afterMove = JSON.parse(await evalJs(`(() => {

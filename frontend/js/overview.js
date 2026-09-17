@@ -234,7 +234,11 @@ const OverviewPage = {
             // 达标提示（当前版本口径）
             const effectEl = document.getElementById(`effect-${sys.id}`);
             if (effectEl) {
-                if (hasData && Math.abs(dev) <= tolShow) {
+                if (noAdvice) {
+                    // 建议处于"保持"（刚调过密度/等新化验）时，底部不再解释"该往哪调" ——
+                    // 右侧方向指示已隐藏，这里若还写"适度降密可降低灰分…"等于自相矛盾。
+                    effectEl.innerHTML = '<span style="color:var(--text-muted)">保持中：等新化验/新数据后再判断</span>';
+                } else if (hasData && Math.abs(dev) <= tolShow) {
                     effectEl.innerHTML = heavyMode
                         ? `<span style="color:var(--accent-green)">✓ 已达标：实测重介灰分 ${actualShow.toFixed(2)}% 与目标重介灰分 ${targetShow.toFixed(2)}% 偏差 ${dev > 0 ? '+' : ''}${dev.toFixed(2)}% ≤ ±${tolShow}%（等效总灰分容差±${tol}%）</span>`
                         : `<span style="color:var(--accent-green)">✓ 已达标：实际总灰分 ${actual.toFixed(2)}% 与期望 ${target.toFixed(2)}% 偏差 ${dev > 0 ? '+' : ''}${dev.toFixed(2)}% ≤ ±${tol}%</span>`;
@@ -271,6 +275,9 @@ const OverviewPage = {
             const dirEl = document.getElementById(`direction-${sys.id}`);
             const arrow = direction === 'up' ? '&#9650;' : direction === 'down' ? '&#9660;' : '&#9644;';
             dirEl.innerHTML = `<span class="direction-arrow ${direction}">${arrow}</span><span class="direction-text">${dirText}</span>`;
+            // 现场要求（2026-09-17）：建议处于"保持"时，右侧不再显示方向建议。
+            // 用 visibility 而不是 display：位置留着，建议出现/消失时卡片不会跳动。
+            dirEl.style.visibility = noAdvice ? 'hidden' : '';
         });
 
         // 状态汇总
