@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -807,12 +807,15 @@
     <script src="js/app.js?v=85"></script>
     <script src="js/overview.js?v=45"></script>
     <script src="js/collect.js?v=25"></script>
-    <script src="js/coarse.js?v=19"></script>
+    <script src="js/coarse.js?v=20"></script>
     <script src="js/float.js?v=15"></script>
     <script src="js/import.js?v=26"></script>
     <script src="js/brief.js?v=2"></script>
     <script src="js/history.js?v=2"></script>
-    <script src="js/assistant.js?v=1"></script>
-    <script>Assistant.init();</script>
+    <!-- AI 解读助手：按现场要求（2026-09-18）移除界面入口，右下角不再出现悬浮「AI」按钮与聊天面板。
+         前端 js/assistant.js、style.css 的 .ai-* 样式与后端 /api/v1/assistant/ask 都保留未动，
+         以后要恢复只需把下面两行加回来：
+           <script src="js/assistant.js?v=1"></script>
+           <script>Assistant.init();</script> -->
 </body>
 </html>

@@ -1195,6 +1195,54 @@ sheet(
               "自动化守卫": HIGH_FILL, "遗留": LOW_FILL},
 )
 
+# ------------------- 12 界面：移除右下角 AI 入口（2026-09-18，现场要求）
+sheet(
+    wb, "界面-移除右下角AI入口",
+    "移除界面右下角的 AI 解读助手入口：范围、可恢复性、验证",
+    ["议题", "结论 / 做法", "原因", "验证 / 以后怎么改"],
+    [20, 60, 64, 60],
+    [
+        ["现场要求（2026-09-18）",
+         "把界面右下角的 AI 去掉。落地为：**摘掉页面上的挂载**，右下角不再出现悬浮「AI」按钮与聊天面板。",
+         "该入口是一个 `position:fixed; right:24px; bottom:24px` 的圆形按钮 + 400×540 面板，"
+         "全页面常驻、盖在趋势图右下角。",
+         "只改 frontend/index.html 末尾的挂载两行。"],
+        ["做法",
+         "删掉 `<script src=\"js/assistant.js?v=1\"></script>` 与 `<script>Assistant.init();</script>`，"
+         "并在原处留一段注释写明「移除原因 + 恢复方法（把这两行加回来）」。",
+         "Assistant 只在 `Assistant.init()` 被调用时才 buildUi() —— 不调用就完全不生成 DOM，"
+         "所以摘挂载即可，无需改 js 或 CSS。",
+         "恢复：把注释里的两行加回 `</body>` 之前即可（两行、零风险）。"],
+        ["为什么这次不删文件与后端接口",
+         "`frontend/js/assistant.js`、`style.css` 的 `.ai-*` 样式、后端 `/api/v1/assistant/ask` "
+         "与 `backend/tests/test_assistant.py` **全部保留未动**。",
+         "这套是另一个 agent 近期的提交（9ce6086 AI 助手升级、b087b2d 缓冲式+多供应商回退、"
+         "a641a62 LLM 密钥文件支持），后端测试仍在 CI 的 pytest 里跑。只摘入口 = 零冲突、可两行恢复；"
+         "删文件会让对方的后续改动直接撞车。",
+         "现场若确认**永久**不要：再删 js/assistant.js + `.ai-*` 样式块 + routers/assistant.py "
+         "与它的路由注册、test_assistant.py、verify_assistant.js，并同步更新本表。"],
+        ["验证（一次性无头浏览器检查，不入库）",
+         "5 项断言全 PASS：NO_AI_BUTTON（无 #ai-assistant-btn）／NO_AI_PANEL（无 #ai-assistant-panel）／"
+         "ASSISTANT_NOT_LOADED（`typeof Assistant === 'undefined'`，脚本清单里没有 assistant.js）／"
+         "PAGE_STILL_OK（App.__ready、密度卡片、FloatPage 正常）／"
+         "MANUAL_READD_STILL_WORKS（把脚本手动加回来，按钮立刻出现）。",
+         "最后一条是**反向证明**：说明被移除的是「自动挂载」，不是把 js 改坏了 —— "
+         "同时也验证了「两行即可恢复」这个承诺。",
+         "另核对：去掉 HTML 注释后，服务端首页的 12 个 `<script src>` 里已无 assistant.js，"
+         "注释块闭合正常（注释内保留的两行不会被浏览器执行）。"],
+        ["影响面",
+         "只改 frontend/index.html；后端接口保留但页面已无调用方（接口本身只读、零写入）。",
+         "其余页面功能不受影响（PAGE_STILL_OK 断言覆盖总览卡片与浮精页脚本加载）。",
+         "本页暂无自动化守卫（CI 的 6 个 E2E 用例都不涉及该入口）——"
+         "若希望「永远不要再出现」，可把 NO_AI_BUTTON 加进某个 E2E 脚本；"
+         "但那样会让另一个 agent 正常恢复该功能时 CI 变红，故本轮未加。"],
+    ],
+    fill_col=1,
+    fill_map={"现场要求（2026-09-18）": HIGH_FILL, "做法": OK_FILL,
+              "为什么这次不删文件与后端接口": MID_FILL,
+              "验证（一次性无头浏览器检查，不入库）": HIGH_FILL, "影响面": LOW_FILL},
+)
+
 DOCS.mkdir(parents=True, exist_ok=True)
 wb.save(OUT)
 print("已生成:", OUT)
