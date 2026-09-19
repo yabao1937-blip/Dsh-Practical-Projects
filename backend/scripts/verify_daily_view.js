@@ -1,20 +1,38 @@
-// 修复版:等 App 完全就绪后再操作
+// 端到端验证:粗精煤泥「按日」聚合视图 + 日级模型(切按日→图表/卡片/表格/因子→切回)
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const URL = 'http://127.0.0.1:8000/';
-const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const PORT = 9391;
-const UD = path.join(process.env.TEMP, 'dmcs-cdp-daily2');
+
+// 与 verify_decision_log.js 同一套环境变量惯例:DMCS_URL 切目标(临时库后端),
+// DMCS_EDGE 指定浏览器;候选列表覆盖 Windows/Windows-x64/Linux 常见路径
+const BASE = (process.env.DMCS_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+const URL = BASE + '/';
+// 注意:本文件的 `const URL` 是字符串,会**遮蔽**全局 URL 类,不能写 new URL(URL) —— 直接剥协议前缀
+const HOST = BASE.replace(/^https?:\/\//, '');   // 形如 127.0.0.1:8000
+const CANDIDATES = [
+    process.env.DMCS_EDGE,
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    '/usr/bin/microsoft-edge-stable', '/usr/bin/microsoft-edge', '/usr/bin/chromium',
+    '/usr/bin/google-chrome', '/usr/bin/chromium-browser',
+];
+const EDGE = CANDIDATES.find(p => p && fs.existsSync(p));
+const PORT = 9300 + Math.floor(Math.random() * 400);   // 随机端口:避免连到遗留的调试浏览器
+const UD = path.join(process.env.TEMP || '/tmp', 'dmcs-cdp-daily-' + Date.now());
 if (fs.existsSync(UD)) fs.rmSync(UD, { recursive: true, force: true });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 (async () => {
+    if (!EDGE) {
+        console.error('ERROR: 未找到浏览器可执行文件,请用环境变量 DMCS_EDGE 指定');
+        process.exit(2);
+    }
+    console.log('浏览器:', EDGE, '| 目标:', URL);
     const edge = spawn(EDGE, ['--headless=new', '--disable-gpu', '--no-first-run',
         `--user-data-dir=${UD}`, `--remote-debugging-port=${PORT}`, '--window-size=1680,1200', URL], { stdio: 'ignore' });
     try {
         let page;
         for (let i = 0; i < 30; i++) {
-            try { const l = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json(); page = l.find(t => t.type === 'page' && t.url.includes('127.0.0.1')); if (page) break; } catch (e) {}
+            try { const l = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json(); page = l.find(t => t.type === 'page' && t.url.includes(HOST)); if (page) break; } catch (e) {}
             await sleep(500);
         }
         const ws = new WebSocket(page.webSocketDebuggerUrl);
