@@ -10,6 +10,7 @@ const CoarsePage = {
     scatterChart: null,
     viewModel: 'production',   // 'production' | 'mlr' | 'pls'
     rollTimer: null,
+    _dailyModel: null,          // 日级模型缓存(懒加载,切换到按日视图时训练)
 
     init() {
         this.refresh();
@@ -62,6 +63,100 @@ const CoarsePage = {
             if (isFinite(t) && t > latestT) { latestT = t; latest = d; }
         });
         return latest || (data && data.length ? data[data.length - 1] : null);
+    },
+
+    // ============================================================
+    //  日级聚合视图(2026-09-12):按天合并采样点,日均值消除小时内噪声
+    //  实验:日级10因子 R²=0.66 合格率62% vs 小时级 R²=0.54 合格率29%
+    //  模型用现有 MLR/PLS 训练函数,数据改为日均值;懒加载缓存
+    // ============================================================
+
+    _dailyAggregate(data) {
+        const byDay = {};
+        (data || []).forEach(d => {
+            if (!d || !d.timestamp) return;
+            const day = String(d.timestamp).slice(0, 10);
+            if (!byDay[day]) byDay[day] = [];
+            byDay[day].push(d);
+        });
+        const days = [];
+        Object.keys(byDay).sort().forEach(day => {
+            const recs = byDay[day];
+            const valid = recs.filter(r => typeof r.ash_content === 'number' && r.ash_content > 0);
+            if (!valid.length) return;
+            const mean = arr => {
+                const v = (arr || []).filter(x => typeof x === 'number' && isFinite(x));
+                return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
+            };
+            const majority = fn => recs.filter(fn).length > recs.length / 2 ? 1 : 0;
+            days.push({
+                day: day, n: valid.length,
+                ash_content: mean(valid.map(r => r.ash_content)),
+                raw_ash: mean(recs.map(r => r.raw_ash)),
+                coal_amount: mean(recs.map(r => r.coal_amount)),
+                level: mean(recs.map(r => r.level)),
+                moisture: mean(recs.map(r => r.moisture)),
+                sysA: majority(r => r.sysA === 1), sysB: majority(r => r.sysB === 1),
+                sys401: majority(r => r.sys401 === 1), sys402: majority(r => r.sys402 === 1),
+                desliming473: majority(r => r.desliming473 === 1),
+                desliming474: majority(r => r.desliming474 === 1),
+                is_stoppage: majority(r => r.is_stoppage === 1),
+                mining_face: (recs[0] && recs[0].mining_face) || '',
+                records: recs,
+            });
+        });
+        return days;
+    },
+
+    _ensureDailyModel() {
+        if (this._dailyModel) return this._dailyModel;
+        const data = this._uniqueByTime(App.store.coarseCoal);
+        const days = this._dailyAggregate(data);
+        const feats = App.MLR_FEATURES;
+        if (days.length < feats.length + 2) return null;
+        const means = feats.map(f => {
+            const vals = days.map(d => d[f]).filter(v => typeof v === 'number' && isFinite(v));
+            return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
+        });
+        const X = days.map(d => feats.map((f, j) => {
+            const v = d[f];
+            return (typeof v === 'number' && isFinite(v)) ? v : means[j];
+        }));
+        const y = days.map(d => d.ash_content);
+        const mlr = App.trainMlr(X, y);
+        const pls = App.trainPls(X, y, feats.length);
+        if (!mlr && !pls) return null;
+        let production = 'pls';
+        if (mlr && pls) production = (pls.metrics.q2 >= mlr.metrics.q2) ? 'pls' : 'mlr';
+        else if (mlr) production = 'mlr';
+        this._dailyModel = { mlr, pls, production, days, feats, n: days.length };
+        return this._dailyModel;
+    },
+
+    _dailyPred(dayRec, dm) {
+        if (!dm) return null;
+        const model = dm[dm.production];
+        if (!model) return null;
+        const feats = dm.feats;
+        let v = model.intercept;
+        for (let j = 0; j < feats.length; j++) {
+            const x = dayRec[feats[j]];
+            const val = (typeof x === 'number' && isFinite(x)) ? x : (model.imputeMeans ? model.imputeMeans[j] : 0);
+            v += (model.coefs[j] || 0) * val;
+        }
+        return v;
+    },
+
+    _dailyMetrics(dm) {
+        if (!dm || !dm.days || !dm.days.length) return null;
+        const y = dm.days.map(d => d.ash_content);
+        const yh = dm.days.map(d => this._dailyPred(d, dm));
+        return App._metrics(y, yh, App.MLR_FEATURES.length);
+    },
+
+    _isDailyView() {
+        const el = document.getElementById('coarse-view-mode');
+        return el && el.value === 'day';
     },
 
     // 按时间升序排序（无法解析的时间戳排到最后）
@@ -194,14 +289,22 @@ const CoarsePage = {
         const cumSub = document.getElementById('coarse-cumulative-sub');
         if (cumSub) cumSub.textContent = shiftInfo;
 
-        // 卡片4：模型拟合度（R² + ±容差合格率）
-        const m = this._liveMetrics(data);
+        // 卡片4：模型拟合度（R² + ±容差合格率）— 日级视图用日级模型指标
         const tol = (App.store.coarseTolerance !== undefined) ? App.store.coarseTolerance : 0.8;
+        let m;
+        if (this._isDailyView()) {
+            const dm = this._ensureDailyModel();
+            m = dm ? this._dailyMetrics(dm) : null;
+        } else {
+            m = this._liveMetrics(data);
+        }
         document.getElementById('coarse-fit-r2').innerHTML = m
             ? `${m.r2.toFixed(3)}` : '--';
         const fitSub = document.getElementById('coarse-fit-sub');
         if (fitSub) fitSub.innerHTML = m
-            ? `合格率 <strong>${m.passRate.toFixed(0)}%</strong> (±${tol}%) · MAE ${m.mae.toFixed(2)}` : '需先导入数据';
+            ? `合格率 <strong>${m.passRate.toFixed(0)}%</strong> (±${tol}%) · MAE ${m.mae.toFixed(2)}` +
+              (this._isDailyView() ? ` · <span style="color:var(--accent-green)">日级模型</span>` : '')
+            : '需先导入数据';
     },
 
     initCharts() {
@@ -253,8 +356,8 @@ const CoarsePage = {
 
     updateCharts() {
         if (!this.trendChart) return;
-        // 按真实时间排序并去重（同批数据跨系统重复导入时同一时刻只显示一个点）；
-        // 同时把每点时间戳交给图表，使 X 轴按真实时间间隔比例分布（与数据条数无关）
+        if (this._isDailyView()) return this._updateDailyChart();
+
         const data = this._uniqueByTime(this._sortByTime(App.store.coarseCoal));
         const pad = n => String(n).padStart(2, '0');
         const times = [];
@@ -282,6 +385,23 @@ const CoarsePage = {
         this.trendChart.update('none');
     },
 
+    // 日级趋势图:一天一点(日均值),日级模型预测
+    _updateDailyChart() {
+        const dm = this._ensureDailyModel();
+        if (!dm || !dm.days.length) return;
+        const labels = dm.days.map(d => d.day.slice(5));   // MM-DD
+        this.trendChart.xTickLabels = labels;               // 每天都标注
+
+        this.trendChart.data.labels = labels;
+        this.trendChart.data.datasets[0].data = dm.days.map(d => +d.ash_content.toFixed(2));
+        this.trendChart.data.datasets[1].data = dm.days.map(d => {
+            const p = this._dailyPred(d, dm);
+            return p != null ? +p.toFixed(2) : null;
+        });
+        this.trendChart.data.datasets[2].data = dm.days.map(() => 13.0);
+        this.trendChart.update('none');
+    },
+
     updateScatter() { this._drawLevelChart(); },
 
     // 自定义数值 X 轴散点图：X=精磁尾液位(线性比例) Y=灰分，实际值+预测值各一条记录一点
@@ -302,14 +422,25 @@ const CoarsePage = {
         ctx.clearRect(0, 0, w, h);
         const FONT = '12px Microsoft YaHei, sans-serif';
 
-        const valid = this._uniqueByTime(App.store.coarseCoal)
-            .filter(d => typeof d.ash_content === 'number' && d.ash_content > 0 && this._getLevel(d) > 0);
-        if (valid.length === 0) {
+        let valid, pts;
+        if (this._isDailyView()) {
+            const dm = this._ensureDailyModel();
+            if (dm) {
+                valid = dm.days.filter(d => d.ash_content != null && d.level != null && d.level > 0);
+                pts = valid.map(d => ({ lv: d.level, act: d.ash_content,
+                                        pred: this._dailyPred(d, dm) }));
+            }
+        }
+        if (!pts) {
+            valid = this._uniqueByTime(App.store.coarseCoal)
+                .filter(d => typeof d.ash_content === 'number' && d.ash_content > 0 && this._getLevel(d) > 0);
+            pts = valid.map(d => ({ lv: this._getLevel(d), act: d.ash_content, pred: this._pred(d) }));
+        }
+        if (!pts || pts.length === 0) {
             ctx.fillStyle = '#7b8da6'; ctx.font = FONT; ctx.textAlign = 'center';
             ctx.fillText('暂无数据，请先导入多因素历史数据', w / 2, h / 2);
             this._levelPts = []; return;
         }
-        const pts = valid.map(d => ({ lv: this._getLevel(d), act: d.ash_content, pred: this._pred(d) }));
         const lvs = pts.map(p => p.lv);
         const ys = pts.flatMap(p => [p.act, p.pred]);
         const xMin = Math.floor(Math.min(...lvs)) - 1, xMax = Math.ceil(Math.max(...lvs)) + 1;
@@ -402,9 +533,21 @@ const CoarsePage = {
     // 因子权重条形：|标准化系数|，正绿负红，标签带↑↓
     updateFactorChart() {
         if (!this.factorChart) return;
-        const model = App.getCoarseModel(this._which());
-        const stdCoef = model.stdCoef || [];
-        const feats = App.MLR_FEATURES;
+        // 日级视图用日级模型的标准系数(与小时级模型不同)
+        let stdCoef, feats;
+        if (this._isDailyView()) {
+            const dm = this._ensureDailyModel();
+            if (dm) {
+                const prodModel = dm[dm.production];
+                stdCoef = (prodModel && prodModel.stdCoef) || [];
+                feats = dm.feats;
+            }
+        }
+        if (!stdCoef || !stdCoef.length) {
+            const model = App.getCoarseModel(this._which());
+            stdCoef = model.stdCoef || [];
+            feats = App.MLR_FEATURES;
+        }
         const items = feats.map((f, i) => ({ name: App.FEATURE_LABELS[f] || f, val: stdCoef[i] || 0 }))
                            .sort((a, b) => Math.abs(b.val) - Math.abs(a.val));
         this.factorChart.data.labels = items.map(it => `${it.name}${it.val >= 0 ? '↑' : '↓'}`);
@@ -413,13 +556,37 @@ const CoarsePage = {
         this.factorChart.update();
     },
 
-    // 近10天公式校验表
+    // 近10天公式校验表(日级视图按天聚合展示)
     renderTable() {
         const tol = (App.store.coarseTolerance !== undefined) ? App.store.coarseTolerance : 0.8;
-        const recs = this._recentRecords(App.store.coarseCoal, 10)
-            .slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 50);
         const tbody = document.getElementById('coarse-tbody');
         if (!tbody) return;
+
+        if (this._isDailyView()) {
+            const dm = this._ensureDailyModel();
+            if (!dm || !dm.days.length) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">暂无数据</td></tr>';
+                return;
+            }
+            const rows = dm.days.slice(-20).reverse();
+            tbody.innerHTML = rows.map(d => {
+                const pred = this._dailyPred(d, dm);
+                const dev = pred !== null ? pred - d.ash_content : 0;
+                const ok = Math.abs(dev) <= tol;
+                return `<tr>
+                    <td style="font-size:12px">${d.day}</td>
+                    <td>${d.ash_content.toFixed(2)}</td>
+                    <td>${pred !== null ? pred.toFixed(2) : '--'}</td>
+                    <td class="${ok ? '' : 'text-warn'}">${dev > 0 ? '+' : ''}${dev.toFixed(2)}</td>
+                    <td><span class="annotate-tag ${ok ? 'normal' : 'press-filter'}">${ok ? '合格 ✓' : '超差 ✗'}</span></td>
+                    <td style="font-size:12px">${d.n}条/日</td>
+                </tr>`;
+            }).join('');
+            return;
+        }
+
+        const recs = this._recentRecords(App.store.coarseCoal, 10)
+            .slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 50);
         if (recs.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">暂无数据，请先导入多因素历史数据</td></tr>';
             return;
@@ -470,6 +637,23 @@ const CoarsePage = {
         }
         html += `<div class="summary-item"><span class="summary-label">生产算法：</span><span class="summary-val">${prodTxt}</span></div>`;
         html += `<div class="summary-item"><span class="summary-label">最近训练：</span><span class="summary-val" style="font-size:12px">${trainedTxt}</span></div>`;
+
+        // 日级模型摘要(按日视图时额外展示)
+        if (this._isDailyView()) {
+            const dm = this._ensureDailyModel();
+            if (dm) {
+                const dMetrics = this._dailyMetrics(dm);
+                const dProd = dm[dm.production];
+                html += `<div class="summary-item"><span class="summary-label">日级模型：</span><span class="summary-val" style="color:var(--accent-green)">${dm.production.toUpperCase()} (n=${dm.n}天)</span></div>`;
+                if (dMetrics) {
+                    html += `<div class="summary-item"><span class="summary-label">日级R²：</span><span class="summary-val" style="color:${dMetrics.r2 >= 0.6 ? 'var(--accent-green)' : 'var(--accent-orange)'}">${dMetrics.r2.toFixed(3)}</span></div>`;
+                    html += `<div class="summary-item"><span class="summary-label">日级合格率：</span><span class="summary-val" style="color:${dMetrics.passRate >= 50 ? 'var(--accent-green)' : 'var(--accent-orange)'}">${dMetrics.passRate.toFixed(0)}%</span></div>`;
+                    html += `<div class="summary-item"><span class="summary-label">日级RMSE：</span><span class="summary-val">${dMetrics.rmse.toFixed(2)}%</span></div>`;
+                }
+                html += `<div class="summary-item" style="font-size:11px;color:var(--text-muted)"><span class="summary-label">说明：</span>按天聚合均值训练,消除小时内采样噪声</div>`;
+            }
+        }
+
         if (el) el.innerHTML = html;
 
         // 重训练历史 mini 表
@@ -561,7 +745,18 @@ const CoarsePage = {
         const el = document.getElementById('coarse-auto-roll'); if (el) el.checked = false;
     },
 
-    switchView() { this.updateCharts(); this.updateCards(); },
+    switchView() {
+        // 切到按日时预热日级模型(懒加载)
+        if (this._isDailyView()) this._ensureDailyModel();
+        this.updateCharts();
+        this.updateCards();
+        // 下面这张"近10天公式校验表"也要跟着换口径：按日视图是每天一行(renderTable 里已有按日分支，
+        // 原先 switchView 漏调它，于是图表/卡片都按日、唯独表格还停在小时级)。
+        this.renderTable();
+        this._drawLevelChart();
+        this.updateFactorChart();
+        this.updateModelSummary();
+    },
 
     // ---------- 卡片详情 ----------
     showCardDetail(type) {
