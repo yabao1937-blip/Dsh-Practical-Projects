@@ -141,10 +141,14 @@ jobs:
             # allowReal：CI 的用例**顺序共用同一个库**，跑到后面的用例时库里已有前面的
             # 用例播种的记录，于是"非空库拒跑"会把它挡下（本地是各起一个全新临时库才没暴露）。
             # CI 的库是一次性的、且本来就归这些用例所有，所以给靠后的用例显式放行；
-            # 前两个仍保持严格 —— 那条守卫是给"人对着真实库跑"准备的。
+            # 只有第一个（镜像写路径）保持严格 —— 它本身就是"冷启动空库"用例，必须真跑在空库上。
+            #
+            # 2026-09-19：密度决策日志原先是 $null（那时它没有守卫）。补上守卫后它在 CI 里会被
+            # 前一个用例播种的数据挡下（run 35426363602 就是这样红的），故改为放行 —— 它会写密度，
+            # 本就该像其它写库用例一样显式放行。
             $cases = @(
               @{ name = '镜像写路径'; file = 'scripts/verify_mirror_e2e.js'; allowReal = $null },
-              @{ name = '密度决策日志'; file = 'scripts/verify_decision_log.js'; allowReal = $null },
+              @{ name = '密度决策日志'; file = 'scripts/verify_decision_log.js'; allowReal = '1' },
               @{ name = '实测密度计(仅展示)'; file = 'scripts/verify_density_actual.js'; allowReal = '1' },
               @{ name = '重介灰分来源与闭环'; file = 'scripts/verify_heavy_ash_source.js'; allowReal = '1' },
               @{ name = '新化验不被驻留挡住'; file = 'scripts/verify_dwell_bypass.js'; allowReal = '1' },
