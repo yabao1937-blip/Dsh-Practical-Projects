@@ -90,6 +90,18 @@ const api = async (p) => {
         }
         if (!ready) throw new Error('页面 30 秒内未完成初始化（等 App.__ready）' + (lastErr ? '；' + lastErr : ''));
 
+        // 本脚本会反复写密度（1.532/1.512/1.492…）与重介灰分（8.04/8.51…）。
+        // 先存档，末尾原样恢复：一旦被 allowReal 指到真实库，测试值不能留在现场
+        // （2026-09-19 真实发生过同类事故：密度被写成 1.485 留在生产库）。
+        const savedState = JSON.parse(await evalJs(`JSON.stringify({
+            inst: App.store.instrumentInputs || {},
+            heavy: App.store.heavyAshInput || {},
+            heavyOn: (App.store.heavyAshManualOn === undefined) ? null : App.store.heavyAshManualOn,
+            totalOn: !!App.store.totalAshManualOn,
+            latch: App.store.densityActionLatch || null,
+            lastMove: App.store.densityLastMoveAt || 0,
+        })`));
+
         // ---------- 0) 标定：本库种子量下"重介灰分 → 总灰分"的权重 + 达标点 ----------
         // 用户当时的跳变是 重介 7.8346 → 8.3（+0.4654），总灰分 8.4975 → 8.9（≈+0.40）。
         // 这里不硬编用户的具体数值，而是用当前库的量测出权重，再把"达标点"与"+0.4654 的新化验点"算出来，
@@ -284,6 +296,30 @@ const api = async (p) => {
             heavySch.scheme === 'heavy' && heavySch.g1Hold === false && heavySch.hold === false
             && heavySch.dir === 'down' && heavySch.rhoNew < 1.512,
             `重介偏差=${heavySch.deltaAHeavy}% hold=${heavySch.hold} 建议=${heavySch.rhoNew}`);
+
+        // 收尾：把密度层/重介灰分/开关/守卫书签恢复成跑之前的样子，并冲一次镜像
+        const restored = JSON.parse(await evalJs(`(async () => {
+            const S = ${JSON.stringify(savedState)};
+            const st = App.store;
+            st.instrumentInputs = S.inst;
+            st.heavyAshInput = S.heavy;
+            if (S.heavyOn === null) delete st.heavyAshManualOn; else st.heavyAshManualOn = S.heavyOn;
+            st.totalAshManualOn = S.totalOn;
+            st.densityActionLatch = S.latch;
+            st.densityLastMoveAt = S.lastMove;
+            await Api.putStateBody(JSON.stringify(st), {});
+            const now = {
+                inst: st.instrumentInputs || {}, heavy: st.heavyAshInput || {},
+                heavyOn: (st.heavyAshManualOn === undefined) ? null : st.heavyAshManualOn,
+                totalOn: !!st.totalAshManualOn,
+                latch: st.densityActionLatch || null, lastMove: st.densityLastMoveAt || 0,
+            };
+            return JSON.stringify({ ok: JSON.stringify(now) === JSON.stringify(S), now: now });
+        })()`, true));
+        check('STATE_RESTORED', restored.ok === true,
+            `密度层=${JSON.stringify(((restored.now || {}).inst || {}).density)}`
+            + ` 重介灰分=${JSON.stringify((restored.now || {}).heavy)}`);
+        await sleep(500);
 
         ws.close();
     } catch (e) {

@@ -74,6 +74,29 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
             coarse: (srv0.coarseCoal || []).length, float: (srv0.floatCoal || []).length,
             ashDensity: (srv0.calcLogs || []).length,
         }));
+        // 非空库守卫（与 verify_mirror_e2e.js 同规格）：本脚本会**真的写密度**并产生一条
+        // density_set 决策日志，指到真实库就会把测试值留在现场（2026-09-19 已发生过一次：
+        // 密度被写成 1.485、决策日志多出一条测试条目）。因此非空库一律拒跑，除非显式放行。
+        const nonEmpty = ['coarseCoal', 'floatCoal', 'calcLogs'].some(k => (srv0[k] || []).length > 0);
+        if (nonEmpty && process.env.DMCS_ALLOW_REAL_DB !== '1') {
+            console.error('ERROR: 目标库非空（' + JSON.stringify({
+                coarse: (srv0.coarseCoal || []).length, float: (srv0.floatCoal || []).length,
+                ash_density: (srv0.calcLogs || []).length,
+            }) + '），本脚本会写密度值并新增决策日志；'
+                + '请指向临时库（DMCS_URL=...），或确知后果后设置 DMCS_ALLOW_REAL_DB=1。');
+            // 不能用 process.exit()：此时 CDP 的 WebSocket 还开着，Node 会在 win/async.c 触发
+            // `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)` 直接崩（exit 0xC0000409）。
+            // 设 exitCode 后 return，交给 finally 关浏览器、再按 exitCode 退出。
+            process.exitCode = 2;
+            return;
+        }
+
+        // 先存档密度层（manual/manualAt/autoExec）与决策日志条数，跑完原样恢复：
+        // 这条"用测试值改现场密度"的路径必须自己收尾，不能留给现场。
+        const savedDensity = JSON.parse(await evalJs(
+            `JSON.stringify(((App.store.instrumentInputs || {}).density) || null)`));
+        const savedLatch = JSON.parse(await evalJs('JSON.stringify(App.store.densityActionLatch || null)'));
+        const savedLastMove = await evalJs('App.store.densityLastMoveAt || 0');
 
         const n0 = await evalJs('(App.store.densityDecisionLog || []).length');
         // 操作员手动设定密度(决策日志应记录 density_set,含工况上下文)
@@ -112,8 +135,23 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         await sleep(300);
         const n1 = await evalJs('(App.store.densityDecisionLog || []).length');
         console.log('节流(10分钟内同类不重复):', n1 === n0 + 1 ? 'PASS' : `FAIL(${n0}->${n1})`);
+
+        // 收尾：把密度层与守卫书签恢复成跑之前的样子，并冲一次镜像
+        const restored = JSON.parse(await evalJs(`(async () => {
+            const st = App.store;
+            if (!st.instrumentInputs) st.instrumentInputs = {};
+            if (${JSON.stringify(savedDensity)} === null) delete st.instrumentInputs.density;
+            else st.instrumentInputs.density = ${JSON.stringify(savedDensity)};
+            st.densityActionLatch = ${JSON.stringify(savedLatch)};
+            st.densityLastMoveAt = ${JSON.stringify(savedLastMove)};
+            await Api.putStateBody(JSON.stringify(st), {});
+            const now = st.instrumentInputs.density || null;
+            return JSON.stringify({ now: now, ok: JSON.stringify(now) === ${JSON.stringify(JSON.stringify(savedDensity))} });
+        })()`, true));
+        console.log('RESTORE: ' + (restored.ok ? 'PASS' : 'FAIL')
+            + ' | 密度层已恢复为 ' + JSON.stringify(restored.now));
         ws.close();
-        process.exitCode = (ok && n1 === n0 + 1) ? 0 : 1;
+        process.exitCode = (ok && n1 === n0 + 1 && restored.ok) ? 0 : 1;
     } catch (e) {
         console.error('ERROR:', e.message);
         process.exitCode = 1;

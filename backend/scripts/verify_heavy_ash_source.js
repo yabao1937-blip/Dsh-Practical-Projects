@@ -77,6 +77,18 @@ const api = async (p) => {
         }
         if (!ready) throw new Error('页面 30 秒内未完成初始化（等 App.__ready）（等 App/CollectPage/OverviewPage）' + (lastErr ? '；' + lastErr : ''));
 
+        // 本脚本会反复写密度与重介灰分（1.49/1.51/1.52/1.60、8.6/8.66/9.6/8.55 等），
+        // 之前跑完不恢复 —— 一旦被 allowReal 指到真实库，测试值就留在现场
+        // （2026-09-19 真实发生过：密度被写成 1.485）。这里先存档，末尾原样恢复。
+        const savedState = JSON.parse(await evalJs(`JSON.stringify({
+            inst: App.store.instrumentInputs || {},
+            heavy: App.store.heavyAshInput || {},
+            heavyOn: (App.store.heavyAshManualOn === undefined) ? null : App.store.heavyAshManualOn,
+            totalOn: !!App.store.totalAshManualOn,
+            latch: App.store.densityActionLatch || null,
+            lastMove: App.store.densityLastMoveAt || 0,
+        })`));
+
         // ---------- 1) 下拉存在 ----------
         const ui = JSON.parse(await evalJs(`(() => {
             App.goToPage('page-collect');
@@ -368,6 +380,30 @@ const api = async (p) => {
         })()`));
         check('PLACEHOLDER_BLOCKED', ph.valid === false && ph.reason.includes('占位值'),
             `valid=${ph.valid}｜${ph.reason.slice(0, 60)}`);
+
+        // 收尾：把密度层/重介灰分/开关/守卫书签恢复成跑之前的样子，并冲一次镜像
+        const restored = JSON.parse(await evalJs(`(async () => {
+            const S = ${JSON.stringify(savedState)};
+            const st = App.store;
+            st.instrumentInputs = S.inst;
+            st.heavyAshInput = S.heavy;
+            if (S.heavyOn === null) delete st.heavyAshManualOn; else st.heavyAshManualOn = S.heavyOn;
+            st.totalAshManualOn = S.totalOn;
+            st.densityActionLatch = S.latch;
+            st.densityLastMoveAt = S.lastMove;
+            await Api.putStateBody(JSON.stringify(st), {});
+            const now = {
+                inst: st.instrumentInputs || {}, heavy: st.heavyAshInput || {},
+                heavyOn: (st.heavyAshManualOn === undefined) ? null : st.heavyAshManualOn,
+                totalOn: !!st.totalAshManualOn,
+                latch: st.densityActionLatch || null, lastMove: st.densityLastMoveAt || 0,
+            };
+            return JSON.stringify({ ok: JSON.stringify(now) === JSON.stringify(S), now: now });
+        })()`, true));
+        check('STATE_RESTORED', restored.ok === true,
+            `密度层=${JSON.stringify((restored.now || {}).inst && restored.now.inst.density)}`
+            + ` 重介灰分=${JSON.stringify((restored.now || {}).heavy)}`);
+        await sleep(500);
 
         ws.close();
     } catch (e) {

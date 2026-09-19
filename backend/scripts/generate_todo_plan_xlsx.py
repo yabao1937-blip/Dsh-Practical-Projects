@@ -1243,6 +1243,73 @@ sheet(
               "验证（一次性无头浏览器检查，不入库）": HIGH_FILL, "影响面": LOW_FILL},
 )
 
+# ------------- 13 测试脚本误写生产库 · 事故复盘（2026-09-19）
+sheet(
+    wb, "测试脚本误写生产库-复盘",
+    "E2E 脚本误打到真实库：多了一条决策日志、密度被写成 1.485 —— 盘点、恢复、防复发",
+    ["议题", "事实 / 结论", "原因", "修法 / 守卫"],
+    [20, 62, 66, 58],
+    [
+        ["发生了什么",
+         "为验证「7 个 E2E 用例能否像 CI 那样顺序通过」，我起了一个临时库服务并带 "
+         "DMCS_ALLOW_REAL_DB=1 跑全套。结果**临时服务没绑上端口**（8000 已被生产服务占用，"
+         "Start-Process 静默失败），脚本全部打到**真实库**。",
+         "后果：verify_decision_log.js 把密度写成 **1.485** 并新增一条 density_set 决策日志；"
+         "其余脚本的写入没有落库（auto_state 各键 updated_at 仍是 9-18，未被今天触碰）。",
+         "发现方式：核对 densityDecisionLog 只有 2 条，其中 2026-09-19 14:15:35 那条 rhoNew=1.485 "
+         "正是测试值；instrumentInputs.density.manualAt = 今天 14:15:36。"],
+        ["影响面（逐项盘点）",
+         "**只有两处被改动**：① instrumentInputs.density.manual 1.53 → 1.485；"
+         "② densityDecisionLog 多一条测试条目。",
+         "未变的项（逐项核对）：coal_records 152/17/360 条、ashTarget 8.5、heavyAshInput 7.5（9-18）、"
+         "amountInputs.floatAmount 40（9-18）、autoState 在线值（9-10）、manual_entries 242 条。",
+         "证据：auto_state 表按键看 updated_at —— 只有 instrumentInputs / densityDecisionLog / "
+         "autoState / amountInputs 被今天那次整库 PUT 触碰，其余键仍是 9-18 的时间戳。"],
+        ["恢复",
+         "先备份数据库（sqlite3 backup API，WAL 下安全）："
+         "backend/data/backups/dense_medium-pollution-fix-20260919-141707-036.db；"
+         "再把密度改回 **1.53**（manualAt 用 9-18 09:39:01 那次真实操作时刻）、"
+         "删掉那条 1.485 的测试日志。",
+         "1.53 的依据：9-18 那条真实决策日志 rhoCur=1.53、autoState.density.v=1.53（在线层）。",
+         "恢复后复核：instrumentInputs = {density:{manual:1.53}}；densityDecisionLog 回到 1 条。"],
+        ["根因①（脚本侧）",
+         "**verify_decision_log.js 一直没有非空库守卫** —— 其余 6 个脚本都有，唯独它没有，"
+         "于是 allowReal 没设也照跑，直接在真实库上写密度。",
+         "它要验证的正是「设密度 → 产生决策日志 → 落库」这条链，天生就会写库；"
+         "没有守卫 + 默认指向 8000 = 一旦有人在生产环境跑它，现场密度就被测试值改掉。",
+         "补守卫（与 verify_mirror_e2e.js 同规格文案，非空库拒跑并提示 DMCS_ALLOW_REAL_DB=1）；"
+         "注意用 process.exitCode = 2; return; 而不是 process.exit(2) —— 后者在 CDP WebSocket "
+         "仍打开时会触发 Node 的 Assertion failed: !(handle->flags & UV_HANDLE_CLOSING) 直接崩。"],
+        ["根因②（操作侧）",
+         "我在 8000 上重复起服务且没有确认它是否真的绑定成功，还带了 allowReal。",
+         "Start-Process 对端口冲突**不报错**，脚本于是连到了生产服务；"
+         "而「带 allowReal」正是我自己为了模拟 CI 加的。",
+         "以后本地跑 E2E 固定用 **8010 + DMCS_URL**，并加**身份检查**："
+         "临时库 /api/v1/state 必须是空的（生产库是 152/17/360），不是空的中止不跑。"],
+        ["防复发（脚本收尾）",
+         "三个会写密度的脚本现在跑完会**原样恢复**：verify_decision_log.js（密度层 + 守卫书签）、"
+         "verify_heavy_ash_source.js、verify_dwell_bypass.js（密度层/重介灰分/开关/闩锁/变动时刻）。",
+         "测试脚本改现场输入，不该靠「记得用临时库」这种纪律兜着 —— "
+         "让脚本自己把改动收干净，才是可继承的做法。",
+         "各自新增断言：决策日志脚本 RESTORE: PASS；另两个 STATE_RESTORED: PASS（逐字段比对）。"],
+        ["本轮验证",
+         "临时库（8010，**身份检查 coarse=0/float=0/calc=0 → 确认是空临时库**）顺序跑 7 个用例："
+         "全部 PASS。",
+         "含新增断言：RESTORE: PASS（密度层恢复为 {manual:null}）、"
+         "STATE_RESTORED: PASS ×2（密度层与重介灰分都回到 {manual:null}）。",
+         "CI 现在跑 7 个用例（第 7 个是粗精煤泥按日视图）。"],
+        ["遗留",
+         "verify_daily_view.js 仍无非空库守卫（它是只读脚本：只点导航、读图表，不写 store）。",
+         "不加守卫的理由：它唯一的写路径是「页面加载时整库镜像 PUT」，这与人工打开页面完全同路径，"
+         "守卫拦不住也不该拦。",
+         "若仍要加：可照搬同一段守卫文案，代价是它对真实库运行时会直接拒跑（少一个现场诊断手段）。"],
+    ],
+    fill_col=1,
+    fill_map={"发生了什么": HIGH_FILL, "影响面（逐项盘点）": HIGH_FILL, "恢复": OK_FILL,
+              "根因①（脚本侧）": HIGH_FILL, "根因②（操作侧）": HIGH_FILL,
+              "防复发（脚本收尾）": MID_FILL, "本轮验证": LOW_FILL, "遗留": LOW_FILL},
+)
+
 DOCS.mkdir(parents=True, exist_ok=True)
 wb.save(OUT)
 print("已生成:", OUT)
