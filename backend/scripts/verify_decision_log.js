@@ -49,17 +49,23 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
         // 等页面初始化完成（轮询，不用固定 sleep：CI 冷启动更慢）
         // typeof App（不是 window.App）：app.js 的 App 是脚本作用域的 const
+        //
+        // 2026-09-21 CI run 35556015087 红的教训：原来只等 `!!App.store.coarseCoal`
+        // ——**空数组也满足**，于是脚本在种子数据还没装进 store 时就往下走，
+        // 整库 PUT 被 stale 守卫正确拒掉（coarse 0<113），DECISION_LOG 假红。
+        // 必须等 App.__ready === true（它在种子数据与迁移之后才置位，其他 verify_*.js 都这么等）。
         let appReady = false, lastErr = null;
         for (let i = 0; i < 60; i++) {
             try {
-                if (await evalJs("typeof App !== 'undefined' && !!App.store && !!App.store.coarseCoal")) {
+                if (await evalJs("typeof App !== 'undefined' && App.__ready === true"
+                        + " && !!App.store && Array.isArray(App.store.coarseCoal)")) {
                     appReady = true; break;
                 }
             } catch (e) { lastErr = e.message; }
             await sleep(500);
         }
         if (!appReady) {
-            throw new Error('页面 30 秒内未完成初始化（typeof App 仍不可用）'
+            throw new Error('页面 30 秒内未完成初始化（等 App.__ready）'
                 + (lastErr ? '；最后一次求值异常: ' + lastErr : ''));
         }
 
