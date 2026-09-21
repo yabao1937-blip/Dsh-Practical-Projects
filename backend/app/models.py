@@ -8,7 +8,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint,
+    JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,7 +23,7 @@ class CoalRecord(Base):
     """三表合并主表：coarse=表1粗精煤泥多因素 / float=表2浮精 / ash_density=表3灰分密度"""
     __tablename__ = "coal_records"
     __table_args__ = (
-        UniqueConstraint("category", "ts", "system", name="uq_coal_cat_ts_sys"),
+        Index("uq_coal_measurement", "category", "ts", "system", text("coalesce(belt, '')"), unique=True),
         Index("ix_coal_ts", "ts"),
         Index("ix_coal_cat_ts", "category", "ts"),
     )
@@ -99,6 +99,7 @@ class HeavySample(Base):
     __tablename__ = "heavy_samples"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     ts: Mapped[str] = mapped_column(String(19), nullable=False)
     rho: Mapped[float] = mapped_column(Float, nullable=False)
     ash_content: Mapped[float] = mapped_column(Float, nullable=False)

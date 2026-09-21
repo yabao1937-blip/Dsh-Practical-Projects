@@ -111,6 +111,7 @@ def _plan(store: dict) -> dict:
         plan["heavy_samples"].append(dict(
             ts=r.get("timestamp"), rho=r.get("rho"), ash_content=r.get("ash_content"),
             source=r.get("source") or "采样",
+            client_id=r.get("client_id"),
         ))
 
     # 导入日志
@@ -389,7 +390,7 @@ def backup_database(tag: str = "force") -> str | None:
         return None
 
 
-def replace(store: dict, force: bool = False) -> dict:
+def replace(store: dict, force: bool = False, require_revision: bool = False) -> dict:
     """清空业务表后整体重写（PUT /state 整库快照用）。
 
     清表与写入在同一事务内：若写入失败回滚，清表也一并回滚，不会清库后丢数据。
@@ -416,6 +417,15 @@ def replace(store: dict, force: bool = False) -> dict:
     backup_path = backup_database("force") if force else None
     db: Session = SessionLocal()
     try:
+        from sqlalchemy import text
+        from .state import state_revision
+        if db.bind.dialect.name == 'sqlite':
+            db.execute(text('BEGIN IMMEDIATE'))
+        if require_revision and not force:
+            revision = state_revision(db)
+            if store.get('_revision') != revision:
+                return {"ok": False, "conflict": True, "revision": revision,
+                        "error": "服务器版本已变化或缺少版本号，请核对本地待同步数据后再恢复服务器数据"}
         if not force:
             incoming, current = _plan_vector(p), _record_vector(db)
             regressed = {k: (incoming[k], current[k]) for k in current if incoming[k] < current[k]}
@@ -453,10 +463,12 @@ def replace(store: dict, force: bool = False) -> dict:
         for tb in wipe:
             db.query(tb).delete()
         _apply_in_session(db, p)
+        db.flush()
+        revision = state_revision(db)
         db.commit()
         return {"counts": {t: len(p[t]) for t in p}, "merged": merged,
                 "owned": sorted(owned), "untouched": untouched,
-                "backup": backup_path, "ok": True}
+                "backup": backup_path, "ok": True, "revision": revision}
     except Exception as e:
         db.rollback()
         return {"ok": False, "error": str(e)}

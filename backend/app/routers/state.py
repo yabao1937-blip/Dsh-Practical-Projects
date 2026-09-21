@@ -1,5 +1,7 @@
 """整库快照（GET /state 读取、PUT /state 整体重写，供前端数据层切换）"""
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..auth import require_force_allowed, require_write
@@ -13,6 +15,8 @@ router = APIRouter(prefix="/state", tags=["状态"])
 @router.get("")
 def get_state(db: Session = Depends(get_db)):
     """返回前端 App.store 等价结构（DB → store 桥接）"""
+    if db.bind.dialect.name == 'sqlite':
+        db.execute(text('BEGIN'))  # 数据与版本来自同一读快照
     return load_store(db)
 
 
@@ -27,4 +31,5 @@ async def put_state(request: Request, store: dict,
     """
     if force:
         await require_force_allowed(request)
-    return migrate.replace(store, force)
+    result = migrate.replace(store, force, require_revision=True)
+    return JSONResponse(result, status_code=409 if result.get('conflict') else 200)

@@ -64,10 +64,19 @@ def case_store(case):
     if case == "missing_ash":
         s["calcLogs"] = [{"timestamp": "2026-09-01 08:02:00", "calc_type": "ash_meter",
                           "input_json": json.dumps({"belt": "501", "value": None})}]
+    if case in ("manual_pinned", "manual_source_off", "balance", "balance_zero", "balance_outside"):
+        s.update(totalAshManualOn=case != "manual_source_off",
+                 ashInputs={"totalAsh": {"manual": 0.1 if case == "balance_outside" else 9.3, "manualAt": NOW - 2000}},
+                 autoState={"totalAsh": {"v": 8.1, "t": NOW - 1000}},
+                 amountInputs={k: {"manual": v, "manualAt": NOW} for k, v in
+                               (("denseAmount", 0 if case == "balance_zero" else 400), ("floatAmount", 30), ("coarseAmount", 40))},
+                 floatAshInput={"manual": 9.5, "manualAt": NOW},
+                 coarseAshInput={"manual": 13, "manualAt": NOW})
     return s
 
 
-@pytest.mark.parametrize("case", ["measured", "constant", "heavy", "step", "dwell", "new_lab", "placeholder", "latch", "density_meter", "expired_manual", "missing_ash"])
+@pytest.mark.parametrize("case", ["measured", "constant", "heavy", "step", "dwell", "new_lab", "placeholder", "latch", "density_meter", "expired_manual", "missing_ash",
+                                 "manual_pinned", "manual_source_off", "balance", "balance_zero", "balance_outside"])
 def test_guidance_matches_live_frontend(case):
     node = shutil.which("node")
     if not node:
@@ -82,6 +91,9 @@ def test_guidance_matches_live_frontend(case):
     assert front["ash501"] == resolvers.resolve_instrument(store, "ash_501")
     assert front["ash502"] == resolvers.get_heavy_ash(store)
     assert front["density"] == guide["rhoCur"]
+    for key, ash in (("inferredHeavy", resolvers.resolve_total_ash(store)), ("targetHeavy", store.get("ashTarget", 8.5))):
+        expected = resolvers.back_calc_heavy_ash(store, ash)
+        assert front[key] == (pytest.approx(expected, abs=1e-6) if expected is not None else None)
     for key in ("valid", "hold", "placeholderManual", "driveKey", "direction", "actualTotal",
                 "heavyAsh", "rhoNew", "deltaRho", "targetHeavy", "maxStep"):
         expected, actual = front["guidance"][key], guide[key]
@@ -95,6 +107,14 @@ def test_guidance_matches_live_frontend(case):
         assert not guide["valid"]
     if case == "new_lab":
         assert not guide["hold"] and guide["direction"] == "down"
+    if case == "manual_pinned":
+        assert guide["actualTotal"] == 9.3
+    if case == "manual_source_off":
+        assert resolvers.resolve_total_ash_ex(store)["source"] == "formula"
+        assert guide["actualTotal"] != 9.3
+        assert store["ashInputs"]["totalAsh"]["manual"] == 9.3
+    if case == "balance_outside":
+        assert front["inferredHeavy"] < 0, "不应将不合理输入的反推结果钳制成看似合理的值"
 
 
 def test_density_change_does_not_fabricate_ash_response():
@@ -137,4 +157,28 @@ def test_action_protection_and_source_switch_survive_database_roundtrip():
     for key in ("densityLastMoveAt", "densityActionLatch", "heavyAshManualOn"):
         assert restored[key] == store[key]
     assert build_density_guidance(restored, NOW)[0]["hold"]
+    engine.dispose()
+
+
+def test_total_ash_workflow_in_frontend():
+    node = shutil.which("node")
+    if not node:
+        pytest.fail("Node.js is required for frontend workflow regression")
+    subprocess.run([node, str(SCRIPT.with_name("verify_total_ash_workflow.js"))],
+                   text=True, encoding="utf-8", capture_output=True, check=True)
+
+
+@pytest.mark.parametrize("manual_on", [True, False])
+def test_saved_manual_total_survives_source_switch_and_database_roundtrip(manual_on):
+    store = case_store("manual_pinned")
+    store["totalAshManualOn"] = manual_on
+    engine = create_engine("sqlite://")
+    models.Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        _apply_in_session(db, _plan(store))
+        db.commit()
+        restored = load_store(db)
+    assert restored["ashInputs"] == store["ashInputs"]
+    assert restored["totalAshManualOn"] is manual_on
+    assert resolvers.resolve_total_ash_ex(restored) == resolvers.resolve_total_ash_ex(store)
     engine.dispose()

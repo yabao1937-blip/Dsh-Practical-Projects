@@ -1,21 +1,9 @@
 /* ========================================
    页面二：数据采集与手工补录
-   - 录入总精煤量/灰分/皮带秤/仪表等，含手动来源冻结提示
+   - 录入总精煤量/灰分/皮带秤/仪表等，人工总灰分与公式核算并列
    ======================================== */
 
 const CollectPage = {
-    // 总精煤灰分的影响链：手动来源时，这些行全部标红冻结
-    totalAshInfluence: {
-        heavyAsh: '重介灰分 → 总精煤灰分（直接）',
-        floatAsh: '浮精灰分 → 总精煤灰分（直接）',
-        floatAmount: '浮精量 → 总精煤灰分（直接）',
-        coarseAsh: '粗精煤泥灰分 → 总精煤灰分（直接）',
-        coarseAmount: '粗精煤泥量 → 总精煤灰分（直接）',
-        totalAmount: '总煤量 → 总精煤灰分（直接：分母与加权）',
-        scale_501: '501皮带秤 → 总煤量 → 总精煤灰分（间接）',
-        scale_502: '502皮带秤 → 总煤量 → 总精煤灰分（间接）',
-        level_tail: '精磁尾液位 → 粗精煤泥灰分(模型因子) → 总精煤灰分（间接）',
-    },
     instruments: [
         { id: 'ash_501', name: '501皮带灰分仪', metric: '灰分', unit: '%', min: 7, max: 9.5, value: 8.52, source: '自动', special: 'ash_501' },
         { id: 'ash_502', name: '502皮带灰分仪', metric: '灰分', unit: '%', min: 7, max: 9.5, value: 10.68, source: '自动', special: 'ash_502' },
@@ -110,9 +98,6 @@ const CollectPage = {
         const tbody = document.getElementById('collect-tbody');
         tbody.innerHTML = this.instruments.map(inst => {
             const isTotal = !!inst.special;
-            // 总灰分为"手动"来源时，其影响链上的行全部标红冻结
-            const chain = this.totalAshInfluence[inst.special];
-            const lockedFactor = !!App.store.totalAshManualOn && !!chain;
             // 可修改行（special）：由统一数据源解析（手动>录入/计算/模型>默认）
             let value = isTotal ? this._specialValue(inst.special) : inst.value;
             if (isTotal && value == null && inst.special === 'floatAsh') value = inst.value;   // 浮精灰分仪无数据时显示仪表默认
@@ -124,6 +109,18 @@ const CollectPage = {
             const statusIcon = hasValue ? (ok ? '&#10003;' : '&#9888;') : '';
             // 实测密度计：当前值后面直接跟上与在线密度计的偏差（Δ），超阈值标黄
             let devHtml = '';
+            if (inst.special === 'totalAsh') {
+                const formula = App.formulaTotalAsh();
+                const cfg = (App.store.ashInputs && App.store.ashInputs.totalAsh) || {};
+                const savedManual = typeof cfg.manual === 'number' && isFinite(cfg.manual) && cfg.manual >= 0;
+                devHtml += `<br><span style="font-size:11px;color:var(--text-muted)">公式核算：${formula == null ? '量/灰分数据不完整' : formula.toFixed(2) + '%'}</span>`;
+                if (savedManual && !App.store.totalAshManualOn) {
+                    devHtml += `<br><span style="font-size:11px;color:var(--text-muted)">已保存人工值：${cfg.manual.toFixed(2)}%（切回手动可用）</span>`;
+                }
+                if (savedManual && formula != null) {
+                    devHtml += `<br><span style="font-size:11px;color:var(--text-muted)">核算 − 人工：${(formula - cfg.manual).toFixed(2)} 个百分点（请核对采样时段）</span>`;
+                }
+            }
             if (inst.special === 'density_actual') {
                 const d = App.densityActualDeviation();
                 if (d.dev != null) {
@@ -133,17 +130,19 @@ const CollectPage = {
                         + `Δ${d.dev > 0 ? '+' : ''}${d.dev}</span>`;
                 }
             }
-            // 重介精煤灰分行：手动档下并列显示"计算值"（必须在 valueCell 之前拼进 devHtml）
-            if (inst.special === 'heavyAsh' && App.heavyAshSource() === 'manual') {
-                const cv = App.heavyAshComputed();
-                if (cv != null) {
-                    devHtml += ` <span style="font-size:11px;color:var(--text-muted)"`
-                        + ` title="若切到「计算」，本行将取 502 测量值；调密后的灰分需等待新测量">`
-                        + `计算 ${(+cv).toFixed(2)}</span>`;
-                }
+            // 实际重介灰分旁显示质量平衡目标，不再并列显示 502 的“计算值”。
+            if (inst.special === 'heavyAsh') {
+                const target = App.store.ashTarget ?? 8.5;
+                const targetHeavy = App.backCalcHeavyAsh(target);
+                const invalid = targetHeavy != null && (targetHeavy < 0 || targetHeavy > 100);
+                const hint = targetHeavy == null ? '量/灰分数据不完整，暂无法反推目标'
+                    : `达到目标总灰分 ${target}% 所需的重介灰分；公式推算，非实测`;
+                devHtml += ` <span style="font-size:11px;color:var(--${invalid ? 'accent-orange' : 'text-muted'})"`
+                    + ` title="${hint}">目标重介灰分 ${targetHeavy == null ? '—' : targetHeavy.toFixed(3) + '%'}`
+                    + `${invalid ? '（超出0~100%，请核对输入）' : ''}</span>`;
             }
             const valueCell = isTotal
-                ? `<span class="total-edit-cell" title="${lockedFactor ? chain : '双击修改（手动值，清空恢复自动）'}" ondblclick="CollectPage.editTotalInput('${inst.special}', this)"${lockedFactor ? ' style="color:var(--accent-red);opacity:0.75"' : ''}>${hasValue ? value : '—'}</span>${devHtml}`
+                ? `<span class="total-edit-cell" title="双击修改（手动值，清空恢复自动）" ondblclick="CollectPage.editTotalInput('${inst.special}', this)">${hasValue ? value : '—'}</span>${devHtml}`
                 : `<span style="font-weight:600;${ok ? '' : 'color:var(--accent-orange)'}">${inst.value}</span>`;
             // 总精煤灰分 / 重介精煤灰分：数据来源切换下拉（手动/计算）
             const sourceSelect = (id, isManual, handler, title) =>
@@ -154,24 +153,20 @@ const CollectPage = {
             const sourceCell = (isTotal && inst.special === 'totalAsh')
                 ? sourceSelect('totalash-source', !!App.store.totalAshManualOn,
                     'CollectPage.onTotalAshSourceChange()',
-                    '总精煤灰分来源：计算=按公式由各因素算出；手动=用你填的化验值（公式因素会被冻结）')
-                : (isTotal && inst.special === 'heavyAsh' && !lockedFactor)
+                    '总精煤灰分来源：手动=人工输入；计算=公式核算。切换保留人工值，组分可继续录入')
+                : (isTotal && inst.special === 'heavyAsh')
                 ? sourceSelect('heavyash-source', App.heavyAshSource() === 'manual',
                     'CollectPage.onHeavyAshSourceChange()',
                     '重介精煤灰分来源：手动=用你填的化验值（优先，且不随密度计变化）；'
                     + '计算=502测量值（调密后等待新化验或仪表数据，不模拟灰分变化）')
                 : isTotal
-                    ? (lockedFactor
-                        ? `<span style="color:var(--accent-red);font-size:12px" title="${chain}">冻结</span>`
-                        : `<span style="color:var(--accent-cyan)">${layer}</span>`)
+                    ? `<span style="color:var(--accent-cyan)">${layer}</span>`
                     : `<span style="color:var(--accent-cyan)">${inst.source}</span>`;
             const actionCell = isTotal
-                ? (lockedFactor
-                    ? `<span style="color:var(--accent-red);font-size:12px" title="${chain}">已冻结</span>`
-                    : '<span style="color:var(--text-muted);font-size:12px">双击修改</span>')
+                ? '<span style="color:var(--text-muted);font-size:12px">双击修改</span>'
                 : `<button class="link-btn" onclick="CollectPage.switchToManual('${inst.id}')">手工补录</button>`;
-            return `<tr${lockedFactor ? ' style="background:rgba(239,68,68,0.07)"' : ''}>
-                <td>${inst.name}${lockedFactor ? ' <span style="color:var(--accent-red);font-size:11px" title="' + chain + '">(冻结)</span>' : ''}</td>
+            return `<tr>
+                <td>${inst.name}</td>
                 <td>${inst.metric}</td>
                 <td>${valueCell}</td>
                 <td>${inst.unit}</td>
@@ -188,13 +183,6 @@ const CollectPage = {
     onHeavyAshSourceChange() {
         const el = document.getElementById('heavyash-source');
         const wantManual = el ? el.value === 'manual' : false;
-        // 「总灰分修改」开启时公式因素冻结，重介灰分也属于被冻结的因素
-        if (App.store.totalAshManualOn) {
-            App.showToast('"总灰分修改"开启中，公式因素（含重介灰分）已冻结；'
-                + '关闭总灰分开关后才能切换来源', 'warning');
-            this.renderTable();
-            return;
-        }
         const hv = (App.store.heavyAshInput && App.store.heavyAshInput.manual);
         const hasManual = typeof hv === 'number' && isFinite(hv);
         App.store.heavyAshManualOn = wantManual;
@@ -212,34 +200,20 @@ const CollectPage = {
         }
     },
 
-    // 总精煤灰分数据来源切换：手动→公式因素冻结；计算→清空手动值、解冻
+    // 总精煤灰分来源切换保留人工输入及其原始录入时间。
     onTotalAshSourceChange() {
         const el = document.getElementById('totalash-source');
         const v = el ? el.value : 'calc';
-        if (v === 'manual') {
-            App.store.totalAshManualOn = true;
-            App.saveStore();
-            App._onExternalInput();
-            this.renderTable();
-            App.showToast('总灰分来源已切换为手动：公式因素已冻结（标红）', 'warning');
-        } else {
-            App.store.totalAshManualOn = false;
-            App.saveStore();
-            App.setAshInput('totalAsh', { manual: null });   // 恢复公式计算
-            this.renderTable();
-            App.showToast('总灰分来源已切换为计算：公式因素解冻', 'info');
-        }
-        if (typeof OverviewPage !== 'undefined' && OverviewPage.chart) OverviewPage.refresh();
+        App.setTotalAshSource(v === 'manual');
+        this.renderTable();
+        App.showToast(v === 'manual'
+            ? '使用人工总灰分；各组分可继续录入，公式核算单独显示'
+            : '使用公式总灰分；人工输入已保留，可切回手动', 'info');
     },
 
     // 任务四：双击进入编辑（可修改行 手动值），清空=恢复自动/默认
     editTotalInput(special, el) {
         if (el.querySelector && el.querySelector('input')) return;
-        // 总灰分为"手动"来源时，其影响链上的行全部冻结
-        if (App.store.totalAshManualOn && this.totalAshInfluence[special]) {
-            App.showToast(`总灰分当前为"手动"来源，${this.totalAshInfluence[special]}已冻结；将总灰分来源切换为"计算"后可编辑`, 'warning');
-            return;
-        }
         const inst = this.instruments.find(i => i.special === special);
         let cur = this._specialValue(special);
         if (cur == null && inst) cur = inst.value;
@@ -399,26 +373,34 @@ const CollectPage = {
 
     submitManual() {
         const cat = document.getElementById('manual-category').value;
-        // "总灰分修改"开启时公式因素锁定：采样录入暂缓
-        if (cat === 'heavy_ash_sample' && App.store.totalAshManualOn) {
-            App.showToast('"总灰分修改"开启中，采样录入已锁定；关闭开关后可采样', 'warning');
-            return;
-        }
         const fields = this.categoryFields[cat] || [];
         const values = {};
         let valid = true;
         fields.forEach(f => {
             const el = document.getElementById(`manual-field-${f.key}`);
             if (el) {
-                values[f.key] = el.value;
-                if (f.type === 'number' && !el.value) valid = false;
+                values[f.key] = f.type === 'number' ? App.measurementNumber(el.value) : el.value;
+                if (f.type === 'number') {
+                    const n = values[f.key];
+                    const density = f.key === 'density' || cat.startsWith('density_');
+                    const percent = /灰分|水分|液位/.test(f.label);
+                    if (n == null || n < 0 || (percent && n > 100) || (density && (n < 1.3 || n > 1.65))) valid = false;
+                }
+            } else {
+                valid = false;
             }
         });
         if (!valid) {
-            App.showToast('请填写所有必填字段', 'error');
+            App.showToast('请输入有效数值：灰分、水分和液位为 0–100，密度为 1.300–1.650，煤量不得为负', 'error');
             return;
         }
-        const time = document.getElementById('manual-time').value.replace('T', ' ');
+        let time = document.getElementById('manual-time').value.replace('T', ' ');
+        if (time.length === 16) time += ':00';
+        if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(time) || !Number.isFinite(new Date(time.replace(' ', 'T')).getTime())
+            || App.formatDate(new Date(time.replace(' ', 'T'))) !== time) {
+            App.showToast('请填写有效采样时间', 'error');
+            return;
+        }
         const remark = document.getElementById('manual-remark').value;
 
         // 保存到手工录入记录
@@ -444,12 +426,13 @@ const CollectPage = {
                 App.store.heavySamples = App.store.heavySamples || [];
                 App.store.heavySamples.push({
                     id: App.store.heavySamples.length + 1,
+                    client_id: App.newSampleId(), synced: false,
                     timestamp: time,
                     rho: +rho.toFixed(3),
                     ash_content: +ash.toFixed(2),
                     source: '采样'
                 });
-                App.setHeavyAshInput({ manual: ash });
+                App.setHeavyAshInput({ manual: ash, sampleAt: new Date(time.replace(' ', 'T')).getTime() });
                 if (rho > 0) App.setInstrumentInput('density', { manual: +rho.toFixed(3) });
                 break;
             }
@@ -500,6 +483,7 @@ const CollectPage = {
 
         // 持久化到 localStorage
         App.saveStore();
+        if (cat === 'heavy_ash_sample') App.syncHeavySamples();
 
         // 新数据 → 自动执行重算目标密度
         App._onExternalInput();
@@ -520,22 +504,19 @@ const CollectPage = {
         this.loadHistory();
         this.resetManual();
 
-        // 重介精煤灰分采样：算实际总灰分并与期望对比，给出达标判定
+        // 新重介采样用于公式核算；独立人工总灰分继续保留，核算结果不能冒充总灰分化验。
         if (cat === 'heavy_ash_sample') {
             const ash = parseFloat(values.value) || 0;
             const rho = parseFloat(values.density) || App.resolveDensity() || 0;
             const tol = (App.store.ashTargetTol != null) ? App.store.ashTargetTol : 0.3;
-            const actual = App.calcTotalAsh(
-                ash, App.resolveAmount('denseAmount'),
-                App.resolveFloatAsh(), App.resolveAmount('floatAmount'),
-                App.resolveCoarseAsh(), App.resolveAmount('coarseAmount'));
+            const actual = App.formulaTotalAsh();
             const target = App.store.ashTarget != null ? App.store.ashTarget : 8.50;
             if (actual != null) {
                 const dev = actual - target;
                 if (Math.abs(dev) <= tol) {
-                    App.showToast(`✓ 采样已记录（ρ=${rho.toFixed(3)}，灰分=${ash.toFixed(2)}%）：实际总灰分 ${actual.toFixed(2)}%，与期望 ${target.toFixed(2)}% 偏差 ${dev >= 0 ? '+' : ''}${dev.toFixed(2)}% ≤ ±${tol}% —— 已达标`, 'success');
+                    App.showToast(`采样已记录（ρ=${rho.toFixed(3)}，灰分=${ash.toFixed(2)}%）：公式核算总灰分 ${actual.toFixed(2)}%，与目标 ${target.toFixed(2)}% 偏差 ${dev >= 0 ? '+' : ''}${dev.toFixed(2)}% ≤ ±${tol}%；实际达标仍需总灰分化验验证`, 'success');
                 } else {
-                    App.showToast(`采样已记录（ρ=${rho.toFixed(3)}，灰分=${ash.toFixed(2)}%）：实际总灰分 ${actual.toFixed(2)}%，未达标（与期望 ${target.toFixed(2)}% 差 ${dev >= 0 ? '+' : ''}${dev.toFixed(2)}%，容差±${tol}%）`, 'warning');
+                    App.showToast(`采样已记录（ρ=${rho.toFixed(3)}，灰分=${ash.toFixed(2)}%）：公式核算总灰分 ${actual.toFixed(2)}%，超出目标容差（与 ${target.toFixed(2)}% 差 ${dev >= 0 ? '+' : ''}${dev.toFixed(2)}%，容差±${tol}%）；人工总灰分保留`, 'warning');
                 }
             } else {
                 App.showToast(`采样已记录（灰分=${ash.toFixed(2)}%），数据不完整暂无法计算总灰分`, 'info');

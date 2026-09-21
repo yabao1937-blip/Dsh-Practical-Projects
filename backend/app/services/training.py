@@ -9,8 +9,8 @@
 关键镜像点（勿改，否则对拍失败）：
 - z-score 用样本标准差 ddof=1，std < 1e-9 置 1（_col_means_std）；
 - 岭回归 λ 网格 = [0,1e-6,1e-5,1e-4,1e-3,1e-2] × diagMean，λ 仅加到特征列对角、
-  截距列不惩罚；λ 选优用 hat 矩阵 LOOCV SSE（严格 < 比较，平局取网格靠前者）；
-- PLS1 NIPALS + 全局预处理 LOOCV 选 A（严格 > 比较，平局取小 A）；
+  截距列不惩罚；每折独立填补/标准化后按 LOOCV SSE 选 λ（严格 <，平局取靠前者）；
+- PLS1 NIPALS + 折内填补/标准化/中心化 LOOCV 选 A（严格 >，平局取小 A）；
 - 高斯消元列主元，|pivot| < 1e-12 返回 None（该 λ 跳过）；
 - _timeCvQ2 walk-forward：n<30→None；b1=max(12,round(0.7n))，b2=max(b1+8,round(0.85n))；
   测试段 sst 按每块测试均值分别中心化后跨块累加；cnt<10→None；
@@ -27,7 +27,7 @@ LAM_FACTORS = [0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]
 
 def _is_num(v):
     """数值判定（排除 bool，因 isinstance(True,int) 为 True）。"""
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
 # ---------------- 基础工具（镜像 App._mean/_std/_sst 等） ----------------
@@ -248,11 +248,42 @@ def build_coarse_xy(records, range_="jun_jul", features=MLR_FEATURES):
                 row.append(means[i])
         X.append(row)
     y = [r["ash_content"] for r in rows]
-    return {"X": X, "y": y, "means": means, "rows": rows}
+    raw_x = [[r.get(f) if _is_num(r.get(f)) and math.isfinite(r[f]) else None for f in features] for r in rows]
+    return {"X": raw_x, "y": y, "means": means, "rows": rows}
+
+
+def _impute(X):
+    means = []
+    for j in range(len(X[0])):
+        vals = [r[j] for r in X if _is_num(r[j]) and math.isfinite(r[j])]
+        means.append(_mean(vals) if vals else 0.0)
+    return [[r[j] if _is_num(r[j]) and math.isfinite(r[j]) else means[j] for j in range(len(means))] for r in X], means
+
+
+def _ridge_context(X, y):
+    filled, impute = _impute(X)
+    means, stds = _col_means_std(filled)
+    Z = _standardize(filled, means, stds)
+    k = len(means) + 1
+    A, b = [[0.0] * k for _ in range(k)], [0.0] * k
+    for row, target in zip(Z, y):
+        v = [1.0] + row
+        for p in range(k):
+            b[p] += v[p] * target
+            for q in range(k):
+                A[p][q] += v[p] * v[q]
+    active = [A[p][p] for p in range(1, k) if A[p][p] > 1e-12]
+    diag = _mean(active) if active else 0.0
+    for p in range(1, k):
+        if A[p][p] <= 1e-12:
+            A[p][p] = 1.0
+    return A, b, diag, means, stds, impute
 
 
 # ---------------- MLR（镜像 trainMlr） ----------------
 def train_mlr(X, y, tol=0.8):
+    raw_x = X
+    X, impute = _impute(X)
     drop = _const_cols(X)
     Xd = [[row[j] for j in range(len(row)) if j not in drop] for row in X] if drop else X
     n = len(Xd)
@@ -276,11 +307,12 @@ def train_mlr(X, y, tol=0.8):
     diag_mean = 0.0
     for p in range(1, K):
         diag_mean += A[p][p]
-    diag_mean /= (K - 1)
+    diag_mean /= max(1, K - 1)
     lam_grid = [f * diag_mean for f in LAM_FACTORS]
+    folds = [_ridge_context(raw_x[:i] + raw_x[i + 1:], y[:i] + y[i + 1:]) for i in range(n)]
 
     best = None
-    for lam in lam_grid:
+    for factor, lam in zip(LAM_FACTORS, lam_grid):
         if lam > 0:
             Ar = [row[:] for row in A]
             for i in range(1, K):
@@ -290,24 +322,21 @@ def train_mlr(X, y, tol=0.8):
         beta = _solve(Ar, b)
         if beta is None:
             continue
-        Minv = _mat_inv(Ar)
-        if Minv is None:
-            continue
         sse = 0.0
         for i in range(n):
-            yh = beta[0]
-            for p in range(1, K):
-                yh += beta[p] * Z[i][p - 1]
-            h = 0.0
-            for p in range(K):
-                mp = 1.0 if p == 0 else Z[i][p - 1]
-                inner = 0.0
-                for q in range(K):
-                    mq = 1.0 if q == 0 else Z[i][q - 1]
-                    inner += Minv[p][q] * mq
-                h += mp * inner
-            loo = (y[i] - yh) / (1 - h) if h < 1 - 1e-9 else (y[i] - yh)
-            sse += loo * loo
+            fa, fb, diag, fm, fs, fi = folds[i]
+            ar = [row[:] for row in fa]
+            for j in range(1, len(ar)):
+                ar[j][j] += factor * diag
+            fitted = _solve(ar, fb)
+            if fitted is None:
+                sse = float('inf')
+                break
+            yh = fitted[0]
+            for j, value in enumerate(raw_x[i]):
+                v = value if _is_num(value) and math.isfinite(value) else fi[j]
+                yh += fitted[j + 1] * (v - fm[j]) / fs[j]
+            sse += (y[i] - yh) ** 2
         if best is None or sse < best["sse"]:
             best = {"sse": sse, "lam": lam, "beta": beta}
     if best is None:
@@ -337,7 +366,7 @@ def train_mlr(X, y, tol=0.8):
     full = _un_drop({"coefs": coefs, "means": means, "stds": stds, "stdCoef": std_coef}, drop, len(X[0]))
     return {"type": "mlr", "intercept": intercept, "coefs": full["coefs"], "means": full["means"],
             "stds": full["stds"], "stdCoef": full["stdCoef"], "yhat": yhat, "metrics": m,
-            "n": n, "k": k, "drop": drop, "lambda": best["lam"]}
+            "n": n, "k": k, "drop": drop, "lambda": best["lam"], "imputeMeans": impute}
 
 
 # ---------------- PLS（镜像 trainPls / _plsCore） ----------------
@@ -398,6 +427,8 @@ def _pls_core(Z, yc, A):
 
 
 def train_pls(X, y, tol=0.8, amax=None):
+    raw_x = X
+    X, impute = _impute(X)
     drop = _const_cols(X)
     Xd = [[row[j] for j in range(len(row)) if j not in drop] for row in X] if drop else X
     n = len(Xd)
@@ -415,13 +446,19 @@ def train_pls(X, y, tol=0.8, amax=None):
     if n >= 10:
         sse_by_a = [0.0] * (amax + 1)
         for i in range(n):
-            Zt = [Z[r] for r in range(n) if r != i]
-            yct = [yc[r] for r in range(n) if r != i]
+            Xt, fold_impute = _impute(raw_x[:i] + raw_x[i + 1:])
+            fold_means, fold_stds = _col_means_std(Xt)
+            Zt = _standardize(Xt, fold_means, fold_stds)
+            yt = y[:i] + y[i + 1:]
+            fold_y_mean = _mean(yt)
+            yct = [v - fold_y_mean for v in yt]
+            test = [(v if _is_num(v) and math.isfinite(v) else fold_impute[j]) for j, v in enumerate(raw_x[i])]
+            test_z = [(v - fold_means[j]) / fold_stds[j] for j, v in enumerate(test)]
             for A in range(1, amax + 1):
                 core = _pls_core(Zt, yct, A)
-                pred = y_mean
-                for j in range(k):
-                    pred += core["Bstd"][j] * Z[i][j]
+                pred = fold_y_mean
+                for j in range(len(test_z)):
+                    pred += core["Bstd"][j] * test_z[j]
                 e = y[i] - pred
                 sse_by_a[A] += e * e
         for A in range(1, amax + 1):
@@ -451,7 +488,7 @@ def train_pls(X, y, tol=0.8, amax=None):
     full = _un_drop({"coefs": coefs, "means": means, "stds": stds, "stdCoef": std_coef}, drop, len(X[0]))
     return {"type": "pls", "intercept": intercept, "coefs": full["coefs"], "means": full["means"],
             "stds": full["stds"], "stdCoef": full["stdCoef"], "A": best_a, "yhat": yhat,
-            "metrics": m, "n": n, "k": k, "drop": drop}
+            "metrics": m, "n": n, "k": k, "drop": drop, "imputeMeans": impute}
 
 
 # ---------------- walk-forward 时间序列 CV（镜像 _timeCvQ2） ----------------
@@ -526,7 +563,7 @@ def _orchestrate(records, range_, tol, mlr_trainer, pls_trainer):
     pls["imputeMeans"] = d["means"]
 
     mlr_q2t = _time_cv_q2(d["X"], d["y"], "mlr", None, tol)
-    pls_q2t = _time_cv_q2(d["X"], d["y"], "pls", pls["A"], tol)
+    pls_q2t = _time_cv_q2(d["X"], d["y"], "pls", len(MLR_FEATURES), tol)
     mlr["metrics"]["q2Time"] = None if mlr_q2t is None else _js_round(mlr_q2t, 4)
     pls["metrics"]["q2Time"] = None if pls_q2t is None else _js_round(pls_q2t, 4)
 

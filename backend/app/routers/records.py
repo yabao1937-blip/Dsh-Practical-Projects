@@ -32,13 +32,16 @@ def list_records(
 
 @router.post("", response_model=CoalRecordOut, dependencies=[Depends(require_write)])
 def upsert_record(body: CoalRecordIn, db: Session = Depends(get_db)):
-    # 按 (category, ts, system) 唯一键 upsert，从根上防重复导入
+    # 灰分密度记录按皮带区分；同一时刻的 501/502 不互相覆盖。
     rec = (db.query(CoalRecord)
            .filter(CoalRecord.category == body.category,
                    CoalRecord.ts == body.ts,
-                   CoalRecord.system == body.system)
+                   CoalRecord.system == body.system,
+                   CoalRecord.belt == (body.belt if body.category == 'ash_density' else None))
            .first())
     data = body.model_dump()
+    if body.category != 'ash_density':
+        data['belt'] = None
     if rec:
         for k, v in data.items():
             setattr(rec, k, v)

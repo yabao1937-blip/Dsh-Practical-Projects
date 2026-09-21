@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from .density import DENSITY_GUIDE, calc_total_ash, expert_adjust
 from .modeling import predict_coarse_ash
-from .resolvers import get_heavy_ash
+from .resolvers import measurement_number
 
 BRIEF_HEADERS = ['时间',
                  '501皮带秤(t/h)', '502皮带秤(t/h)', '粗精煤泥量(t/h)', '重介精煤灰分(%)', '总精煤量(t/h)',
@@ -63,7 +63,6 @@ def build_hourly_brief(store: dict) -> dict:
     tol = store.get("ashTargetTol", 0.1)
     target = store.get("ashTarget", 8.50)
     scheme = "heavy" if store.get("guideScheme") == "heavy" else "total"
-    heavy_ash = get_heavy_ash(store)
 
     # 表1/表2/表3 记录按时间字符串排序（== 时间序）
     coarse_recs = sorted((r for r in (store.get("coarseCoal") or []) if r.get("timestamp")),
@@ -72,7 +71,7 @@ def build_hourly_brief(store: dict) -> dict:
                         key=lambda r: r["timestamp"])
     ad_recs = []
     for l in store.get("calcLogs") or []:
-        if l.get("calc_type") != "ash_density":
+        if l.get("calc_type") not in ("ash_density", "ash_meter", "density_meter"):
             continue
         t = l.get("timestamp")
         if not t:
@@ -82,11 +81,17 @@ def build_hourly_brief(store: dict) -> dict:
             v = json.loads(l.get("input_json") or "{}")
         except Exception:
             continue
-        d = v.get("density")
-        density = d if (isinstance(d, (int, float)) and 1.3 <= d <= 1.6) else None
-        a = v.get("ash_content")
-        ash = a if (isinstance(a, (int, float))) else None
+        d = measurement_number(v.get("value") if l["calc_type"] == "density_meter" else v.get("density"))
+        density = d if d is not None and 1.3 <= d <= 1.65 else None
+        ash = measurement_number(v.get("value") if l["calc_type"] == "ash_meter" else v.get("ash_content"))
+        if ash is not None and not 0 <= ash <= 100:
+            ash = None
         ad_recs.append({"ts": t, "belt": str(v.get("belt") or ""), "ash": ash, "density": density})
+    for sample in store.get("heavySamples") or []:
+        ash = measurement_number(sample.get("ash_content"))
+        t = sample.get("timestamp") or sample.get("ts")
+        if t and math.isfinite(_epoch(t)) and ash is not None and 0 <= ash <= 100:
+            ad_recs.append({"ts": t, "belt": "sample", "ash": ash, "density": None})
     ad_recs.sort(key=lambda r: r["ts"])
 
     if not coarse_recs and not float_recs and not ad_recs:
@@ -111,6 +116,8 @@ def build_hourly_brief(store: dict) -> dict:
     est_coarse = None
     prev_forecast = None
     cur_ash501 = cur_ash502 = cur_density = None
+    heavy_ash = None
+    ash501_e = ash502_e = density_e = heavy_e = float("-inf")
 
     # 模型：生产模型
     cm = store.get("coarseModel") or {}
@@ -134,10 +141,16 @@ def build_hourly_brief(store: dict) -> dict:
             a = ad_recs[i_ad]
             if a["belt"] == "501" and a["ash"] is not None:
                 cur_ash501 = a["ash"]
+                ash501_e = _epoch(a["ts"])
             if a["belt"] == "502" and a["ash"] is not None:
                 cur_ash502 = a["ash"]
+                ash502_e = _epoch(a["ts"])
+            if a["belt"] in ("502", "sample") and a["ash"] is not None:
+                heavy_ash = a["ash"]
+                heavy_e = _epoch(a["ts"])
             if a["density"] is not None:
                 cur_density = a["density"]
+                density_e = _epoch(a["ts"])
             cur_ad_e = _epoch(a["ts"])
             i_ad += 1
 
@@ -148,16 +161,18 @@ def build_hourly_brief(store: dict) -> dict:
                     and h_end_e - cur_ad_e <= FRESH_SECONDS)
         if not three_ok:
             continue
-        density_measured = cur_density if (cur_density is not None and cur_density != density_before) else None
+        density_measured = cur_density if h_end_e - 3600 <= density_e < h_end_e else None
 
         level = _num(cur_coarse.get("level")) if cur_coarse else None
         level = level if level is not None else DEF["level"]
         float_ash = _num(cur_float.get("ash_content")) if cur_float else None
         float_ash = float_ash if float_ash is not None else DEF["floatAsh"]
         float_amt = _num(cur_float.get("coal_amount")) if cur_float else None
-        ash501 = cur_ash501   # 无该小时的 501 记录 → None → 该列留空（不打印常量冒充实测）
-        ash502 = cur_ash502 if cur_ash502 is not None else DEF["ash502"]
-        density = cur_density if cur_density is not None else DEF["density"]
+        ash501 = cur_ash501 if h_end_e - ash501_e <= FRESH_SECONDS else None
+        ash502 = cur_ash502 if h_end_e - ash502_e <= FRESH_SECONDS else None
+        density = cur_density if h_end_e - density_e <= FRESH_SECONDS else None
+        if h_end_e - heavy_e > FRESH_SECONDS:
+            heavy_ash = None
 
         is_new_sample = cur_coarse is not None and cur_coarse is not prev_coarse
         coarse_measured = None
@@ -180,7 +195,7 @@ def build_hourly_brief(store: dict) -> dict:
 
         heavy_amt = round(TOTAL_AMT - float_amt - COARSE_AMT, 1) if float_amt is not None else None
         formula_ok = (heavy_amt is not None and heavy_amt > 0 and float_amt is not None
-                      and float_ash is not None and coarse_model is not None)
+                      and float_ash is not None and coarse_model is not None and heavy_ash is not None)
 
         if formula_ok:
             total_ash = round(calc_total_ash(heavy_ash, heavy_amt, float_ash, float_amt, coarse_model, COARSE_AMT), 2)
@@ -192,7 +207,7 @@ def build_hourly_brief(store: dict) -> dict:
             total_ash = None
 
         rho_new = None
-        if formula_ok:
+        if formula_ok and density is not None:
             if scheme == "heavy":
                 total_amt = heavy_amt + float_amt + COARSE_AMT
                 target_heavy = round((target * total_amt - float_ash * float_amt - coarse_model * COARSE_AMT) / heavy_amt, 3)

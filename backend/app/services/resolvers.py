@@ -5,6 +5,7 @@ state 为 store 字典（来自 seed_store.json 或 DB 快照）。
 """
 import json
 import math
+import re
 
 from .density import calc_total_ash
 from .modeling import predict_coarse_ash
@@ -41,6 +42,16 @@ def _num(v):
     return v if _is_num(v) and not (isinstance(v, float) and math.isnan(v)) else None
 
 
+def measurement_number(value):
+    """兼容旧补录数字文本，拒绝空值、布尔及非有限值。"""
+    if isinstance(value, str):
+        value = value.strip()
+        if not re.fullmatch(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?", value, flags=re.ASCII):
+            return None
+        value = float(value)
+    return value if _is_num(value) else None
+
+
 def _latest_by_time(items):
     """时间戳最新的一条（字符串序 == 时间序，>= 使数组靠后者在同时刻胜出，与 JS 一致）"""
     best = None
@@ -56,14 +67,14 @@ def _latest_by_time(items):
 
 
 def _latest_calc_value(store, calc_type, belt):
-    for l in reversed(store.get("calcLogs") or []):
+    for l in reversed(sorted(store.get("calcLogs") or [], key=lambda r: r.get("timestamp") or "")):
         if l.get("calc_type") != calc_type:
             continue
         try:
             v = json.loads(l.get("input_json") or "{}")
         except Exception:
             continue
-        if (belt is None or str(v.get("belt") or "") == str(belt)) and _is_num(v.get("value")):
+        if (belt is None or str(v.get("belt") or "") == str(belt)) and measurement_number(v.get("value")) is not None:
             return float(v["value"])
     return None
 
@@ -79,17 +90,17 @@ def resolve_instrument(store, inst_id):
             entry = _latest_belt_ash(store, "501" if inst_id == "ash_501" else "502")
     elif inst_id == "density":
         measured = _latest_calc_value(store, "density_meter", None)
-        if measured is not None and 1.3 <= measured <= 1.6:
+        if measured is not None and 1.3 <= measured <= 1.65:
             entry = measured
-        for l in reversed(store.get("calcLogs") or []):
+        for l in reversed(sorted(store.get("calcLogs") or [], key=lambda r: r.get("timestamp") or "")):
             if entry is not None:
                 break
             if l.get("calc_type") != "ash_density":
                 continue
             try:
                 v = json.loads(l.get("input_json") or "{}")
-                d = v.get("density")
-                if _is_num(d) and 1.3 <= d <= 1.6:
+                d = measurement_number(v.get("density"))
+                if d is not None and 1.3 <= d <= 1.65:
                     entry = float(d)
                     break
             except Exception:
@@ -108,12 +119,12 @@ def resolve_instrument(store, inst_id):
 
 
 def _latest_belt_ash(store, belt):
-    for l in reversed(store.get("calcLogs") or []):
+    for l in reversed(sorted(store.get("calcLogs") or [], key=lambda r: r.get("timestamp") or "")):
         if l.get("calc_type") != "ash_density":
             continue
         try:
             v = json.loads(l.get("input_json") or "{}")
-            if str(v.get("belt") or "") == str(belt) and _is_num(v.get("ash_content")):
+            if str(v.get("belt") or "") == str(belt) and measurement_number(v.get("ash_content")) is not None:
                 return float(v["ash_content"])
         except Exception:
             continue
@@ -237,6 +248,23 @@ def formula_total_ash(store):
     return round(calc_total_ash(get_heavy_ash(store), heavy_amt, float_ash, float_amt, coarse_ash, coarse_amt), 4)
 
 
+def back_calc_heavy_ash(store, total_ash):
+    """质量平衡反推展示值，与 App.backCalcHeavyAsh 一致；不拟造调密响应。"""
+    if not _is_num(total_ash) or total_ash < 0:
+        return None
+    heavy_amt = resolve_amount(store, "denseAmount")
+    float_amt = resolve_amount(store, "floatAmount")
+    coarse_amt = resolve_amount(store, "coarseAmount")
+    float_ash = resolve_float_ash(store)
+    coarse_ash = resolve_coarse_ash(store)
+    if not all(_is_num(v) and v >= 0 for v in
+               (heavy_amt, float_amt, coarse_amt, float_ash, coarse_ash)) or heavy_amt <= 0:
+        return None
+    ash = (total_ash * (heavy_amt + float_amt + coarse_amt)
+           - float_ash * float_amt - coarse_ash * coarse_amt) / heavy_amt
+    return round(ash, 6) if math.isfinite(ash) else None
+
+
 def ash501_layer(store) -> str:
     """501 灰分的来源层级：'manual' | 'online' | 'none'。
 
@@ -263,7 +291,9 @@ def resolve_total_ash_ex(store) -> dict:
     """
     cfg = (store.get("ashInputs") or {}).get("totalAsh") or {}
     manual = cfg.get("manual")
-    if manual_valid(store, cfg, "totalAsh"):
+    manual_on = store.get("totalAshManualOn")
+    if manual_on is not False and _is_num(manual) and manual >= 0 and (
+            manual_on is True or manual_valid(store, cfg, "totalAsh")):
         return {"value": manual, "source": "manual"}
     formula = formula_total_ash(store)
     if formula is not None:

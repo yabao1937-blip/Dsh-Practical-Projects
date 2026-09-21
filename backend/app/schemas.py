@@ -104,9 +104,10 @@ class CoalRecordList(BaseModel):
 
 class HeavySampleIn(BaseModel):
     ts: str
-    rho: float
-    ash_content: float
+    rho: float = Field(ge=1.3, le=1.65, allow_inf_nan=False)
+    ash_content: float = Field(ge=0, le=100, allow_inf_nan=False)
     source: str = "采样"
+    client_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 # ---------- 手工补录 ----------

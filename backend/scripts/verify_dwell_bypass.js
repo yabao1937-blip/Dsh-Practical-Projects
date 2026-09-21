@@ -320,7 +320,7 @@ const api = async (p) => {
             st.totalAshManualOn = S.totalOn;
             st.densityActionLatch = S.latch;
             st.densityLastMoveAt = S.lastMove;
-            await Api.putStateBody(JSON.stringify(st), {});
+            await App.flushMirrorNow();
             const now = {
                 inst: st.instrumentInputs || {}, heavy: st.heavyAshInput || {},
                 heavyOn: (st.heavyAshManualOn === undefined) ? null : st.heavyAshManualOn,

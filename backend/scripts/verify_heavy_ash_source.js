@@ -1,13 +1,13 @@
-// 验证「重介精煤灰分 手动/计算」与用户要的闭环：
-//   总灰分不达标 → 给出建议密度 → 把密度计调到建议值 → 重介灰分随密度变化 → 总灰分回到目标。
+// 验证「重介精煤灰分 手动/计算」与采样核对：
+//   总灰分不达标 → 建议密度 → 人工调密 → 等待新灰分测量 → 重新计算建议。
 //
 // 关键断言：
 //   SOURCE_SELECT_EXISTS   在线仪表行里有 手动/计算 下拉
 //   MANUAL_MODE_PINS       手动档：调密度计**不改变**重介灰分与总灰分（这是原来的行为）
-//   CALC_MODE_FOLLOWS      计算档：调密度计**改变**重介灰分与总灰分
-//   LOOP_REACHES_TARGET    计算档：按建议密度调整后，总灰分偏差显著变小 / 达标
+//   CALC_MODE_PINS         计算档：调密度计不改写灰分读数
+//   LOOP_REQUIRES_MEASUREMENT  按建议密度调整后保持，下一份灰分测量到来再给建议
 //   TYPING_SWITCHES_MODE   双击填值会自动切到手动档（避免"填了却不生效"）
-//   FREEZE_WITH_TOTAL_ASH  「总灰分修改」开启时该下拉不可用（公式因素冻结）
+//   FEEDBACK_WITH_TOTAL_ASH  人工总灰分开启时仍可选择/录入重介灰分，用于后续采样核对
 //   CTX_RECORDS_SOURCE     决策日志 ctx 带 heavyAshSource
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -237,20 +237,20 @@ const api = async (p) => {
         check('TYPING_SWITCHES_MODE', typing.mode === 'manual' && typing.value === 8.72,
             `填入 8.72 后 mode=${typing.mode} 取值=${typing.value}`);
 
-        // ---------- 6) 总灰分=手动 时冻结 ----------
-        const frozen = JSON.parse(await evalJs(`(() => {
+        // ---------- 6) 总灰分=手动 时仍能录入重介采样 ----------
+        const feedback = JSON.parse(await evalJs(`(() => {
             App.store.totalAshManualOn = true;
             CollectPage.renderTable();
             const sel = document.getElementById('heavyash-source');
             const tr = [...document.querySelectorAll('#collect-tbody tr')]
                 .find(r => r.children[0].textContent.includes('重介精煤灰分'));
-            const out = { selectGone: !sel, sourceCell: tr ? tr.children[5].textContent.trim() : null };
+            const out = { hasSelect: !!sel, sourceCell: tr ? tr.children[5].textContent.trim() : null };
             App.store.totalAshManualOn = false;
             CollectPage.renderTable();
             return JSON.stringify(out);
         })()`));
-        check('FREEZE_WITH_TOTAL_ASH', frozen.selectGone && /冻结/.test(String(frozen.sourceCell)),
-            `下拉消失=${frozen.selectGone} 来源列="${frozen.sourceCell}"`);
+        check('FEEDBACK_WITH_TOTAL_ASH', feedback.hasSelect && !/冻结/.test(String(feedback.sourceCell)),
+            `下拉可用=${feedback.hasSelect} 来源列="${feedback.sourceCell}"`);
 
         // ---------- 7) 决策日志 ctx 记录来源 ----------
         const ctx = JSON.parse(await evalJs(`(() => {
@@ -416,7 +416,7 @@ const api = async (p) => {
             st.totalAshManualOn = S.totalOn;
             st.densityActionLatch = S.latch;
             st.densityLastMoveAt = S.lastMove;
-            await Api.putStateBody(JSON.stringify(st), {});
+            await App.flushMirrorNow();
             const now = {
                 inst: st.instrumentInputs || {}, heavy: st.heavyAshInput || {},
                 heavyOn: (st.heavyAshManualOn === undefined) ? null : st.heavyAshManualOn,

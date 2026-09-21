@@ -12,7 +12,7 @@ window.Api = {
     base: '/api/v1',
 
     async getState() {
-        const r = await fetch(this.base + '/state');
+        const r = await fetch(this.base + '/state', {signal: AbortSignal.timeout(20000)});
         if (!r.ok) throw new Error('state ' + r.status);
         return await r.json();
     },
@@ -61,12 +61,13 @@ window.Api = {
                       reason: (j && j.detail && j.detail.error) || j.error || ('HTTP ' + r.status),
                   })).catch(() => ({ ok: false, denied: true, reason: 'HTTP ' + r.status }));
               }
+              if (r.status === 409 || r.status === 428) return r.json().then(j => ({ok: false, conflict: true, reason: j.error || '服务器版本已变化'}));
               if (!r.ok) return Promise.reject(new Error('state ' + r.status));
               return r.json();
           })
           .then(j => {
               // 上一层已区分权限拒绝，不能在业务错误归一化时丢掉 denied/reason。
-              if (j && j.denied) return j;
+              if (j && (j.denied || j.conflict)) return j;
               if (j && j.ok === false) {
                   // **只有守卫明确的 stale 拒绝**才算"永久拒绝"（重试结果必然相同）。
                   // 后端 migrate.replace 的 except 分支同样返回 ok:false 但没有 stale
@@ -76,7 +77,7 @@ window.Api = {
                   return { ok: false, rejected: j.stale === true,
                            reason: j.error || '服务器拒绝了整库写' };
               }
-              return { ok: true };
+              return { ok: true, revision: j && j.revision };
           })
           .catch(e => ({ ok: false, error: String((e && e.message) || e) }));
     },
@@ -84,6 +85,18 @@ window.Api = {
     putState(store, force) {
         // 异步镜像，不阻塞主流程（结果由 App._flushMirror 统一处置）
         return this.putStateBody(JSON.stringify(store), { force: force });
+    },
+
+    async syncHeavySample(sample) {
+        const token = this.writeToken();
+        const r = await fetch(this.base + '/samples/heavy-ash', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? {'X-DMCS-Token': token} : {}) },
+            body: JSON.stringify({ts: sample.timestamp, rho: sample.rho, ash_content: sample.ash_content,
+                source: sample.source || '采样', client_id: sample.client_id}),
+            signal: AbortSignal.timeout(20000),
+        });
+        if (!r.ok) throw new Error('采样保存失败 HTTP ' + r.status);
+        return (await r.json()).sample;
     },
 
     async retrainCoarseModel(range) {

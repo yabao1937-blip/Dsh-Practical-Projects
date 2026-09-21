@@ -253,6 +253,8 @@ const ImportPage = {
                     }
                     if (tsKey) {
                         key = tsKey + '|' + (sysIdx >= 0 ? String(row[sysIdx]) : '');
+                        const beltIdx = headers.findIndex(h => h && h.includes('皮带'));
+                        if (beltIdx >= 0) key += '|' + String(row[beltIdx]).trim();
                     } else if (tsIdx >= 0) {
                         key = String(row[tsIdx]);            // 无法归一化 → 退回原文（避免全部撞成同键）
                     } else {
@@ -760,7 +762,7 @@ const ImportPage = {
                         ? App.store.floatCoal.some(f => f.timestamp === ts)
                         : App.store.calcLogs.some(l => {
                             if (!(l.calc_type === 'ash_density' && l.timestamp === ts)) return false;
-                            try { return (JSON.parse(l.input_json || '{}').system || '') === system; }
+                            try { const v = JSON.parse(l.input_json || '{}'); return (v.system || '') === system && String(v.belt || '') === String(row[col.belt >= 0 ? col.belt : 2]).trim(); }
                             catch (e) { return false; }
                         });
                 if (willReplace) replaced++;
@@ -778,6 +780,7 @@ const ImportPage = {
                         let sys = '', oldDensity = null;
                         try {
                             const v = JSON.parse(l.input_json || '{}');
+                            if (String(v.belt || '') !== String(row[col.belt >= 0 ? col.belt : 2]).trim()) return true;
                             sys = v.system || '';
                             oldDensity = v.density;
                         } catch (e) { return true; }

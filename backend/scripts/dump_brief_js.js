@@ -1,18 +1,7 @@
-// 导出前端 App.buildHourlyBrief() 全量结果到 JSON，供后端逐行 diff。
-// 2026-09 起:向页面注入与 tests/test_brief.py fixture_store() 完全一致的合成 store
-// (种子数据三表时间窗不重叠,新规则下产出 0 行,无法作为对拍载体)。
-// 改 FIXTURE 必须同步 tests/test_brief.py 的 fixture_store()。
-const { spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-
-const URL = 'file:///D:/dense-medium-density-control-system/frontend/index.html';
-const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const PORT = 9376;
-const UD = path.join(process.env.TEMP, 'dmcs-cdp-brief-dump');
-const OUT = process.argv[2];
-if (fs.existsSync(UD)) fs.rmSync(UD, { recursive: true, force: true });
-
+// 独立 Node 夹具导出，供历史简报前后端对拍。
+const fs = require('node:fs');
+const path = require('node:path');
+const {App} = require('./app_vm')();
 const ZERO_MODEL_NODE = {
     type: 'pls', intercept: 10.0,
     coefs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], means: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -46,34 +35,8 @@ const FIXTURE = {
     },
 };
 
-const edge = spawn(EDGE, ['--headless=new', '--disable-gpu', '--no-first-run', '--allow-file-access-from-files', `--user-data-dir=${UD}`, `--remote-debugging-port=${PORT}`, '--window-size=1680,1200', URL], { stdio: 'ignore' });
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-(async () => {
-    try {
-        let page;
-        for (let i = 0; i < 30; i++) {
-            try { const l = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json(); page = l.find(t => t.type === 'page' && t.url.includes('index.html')); if (page) break; } catch (e) {}
-            await sleep(500);
-        }
-        const ws = new WebSocket(page.webSocketDebuggerUrl);
-        await new Promise((ok, fail) => { ws.onopen = ok; ws.onerror = fail; });
-        await sleep(2000);
-        let idc = 0; const pending = new Map();
-        ws.onmessage = (ev) => { const m = JSON.parse(ev.data); if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } };
-        const send = (method, params) => new Promise((ok) => { const id = ++idc; pending.set(id, ok); ws.send(JSON.stringify({ id, method, params })); });
-        const evalJs = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true })).result.result.value;
-        // 注入合成 store(仅内存,不落盘),再导出简报
-        await evalJs(`App.store = ${JSON.stringify(FIXTURE)}; true`);
-        const brief = JSON.parse(await evalJs(`JSON.stringify(App.buildHourlyBrief())`));
-        fs.writeFileSync(OUT, JSON.stringify(brief));
-        console.log('rows:', brief.rows.length, 'first:', JSON.stringify(brief.rows[0]), 'last:', JSON.stringify(brief.rows[brief.rows.length - 1]));
-        ws.close();
-    } catch (e) {
-        console.error('ERROR:', e.message);
-        process.exitCode = 1;
-    } finally {
-        try { edge.kill(); } catch (e) {}
-        setTimeout(() => process.exit(), 300);
-    }
-})();
+App.store = FIXTURE;
+const result = App.buildHourlyBrief();
+fs.writeFileSync(process.argv[2] || path.resolve(__dirname, '../data/brief_js.json'), JSON.stringify(result));
+console.log('Brief oracle rows:', result.rows.length);

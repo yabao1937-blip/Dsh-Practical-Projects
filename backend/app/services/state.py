@@ -4,9 +4,11 @@
 services.density 等纯函数能直接消费。
 """
 import json
+import hashlib
+from sqlalchemy import select
 
 from ..models import (
-    AutoState, CalcLog, CoalRecord, CoarseModel, Setting,
+    AutoState, CalcLog, CoalRecord, CoarseModel, Setting, HeavySample,
 )
 
 # settings 表 key → store 字段
@@ -51,6 +53,15 @@ def _float_record_to_store(r: CoalRecord) -> dict:
         "filter_press_running": r.filter_press_running,
         "influence_value": r.influence_value, "annotation": r.annotation,
     }
+
+
+def state_revision(db):
+    """覆盖型表的内容版本；独立追加的采样与审计日志不阻塞镜像。"""
+    payload = {}
+    for cls in (CoalRecord, CalcLog, CoarseModel, Setting, AutoState):
+        table = cls.__table__
+        payload[table.name] = [dict(r) for r in db.execute(select(table).order_by(*table.primary_key.columns)).mappings()]
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
 
 def load_store(db) -> dict:
@@ -114,4 +125,8 @@ def load_store(db) -> dict:
             cm["range"] = m.train_range
         cm["production"] = prod or "pls"
         store["coarseModel"] = cm
+    store['heavySamples'] = [{"id": s.id, "client_id": s.client_id, "timestamp": s.ts,
+                              "rho": s.rho, "ash_content": s.ash_content, "source": s.source, "synced": True}
+                             for s in db.query(HeavySample).order_by(HeavySample.ts, HeavySample.id)]
+    store['_revision'] = state_revision(db)
     return store
