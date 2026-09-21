@@ -1,36 +1,249 @@
-"""使用 Codex 随附的 artifact-tool 生成本轮改动和后续计划。
+# -*- coding: utf-8 -*-
+"""生成 Excel：项目优化与后续计划（2026-09-21 阶段快照）。
+
+**自洽生成器**：只用仓库依赖（openpyxl）与标准库，不依赖任何外部运行时。
+（原实现是「.py 包装 Codex 私有运行时去跑 .mjs」，换机器/CI 无法复现 —— 见待办表 L-1/L-6。）
+
+维护约定（L-7）：
+  · 本表是 2026-09-21 那次优化的阶段快照，保留不改；
+  · 持续维护入口是 docs/待办-后续优化计划.xlsx，新需求/新遗留一律进那边；
+  · 两份文档靠任务编号关联（见「编号对照与维护约定」Sheet）。
 
 运行：python backend/scripts/generate_optimization_plan_xlsx.py
-可用 --runtime-root 指定 Codex dependencies 目录。生成器仅使用临时目录，
-不安装仓库 npm 依赖；最终工作簿写入 docs，预览写入临时目录。
 """
-import argparse
 from pathlib import Path
-import shutil
-import subprocess
-import tempfile
+
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+DOCS = Path(__file__).resolve().parent.parent.parent / "docs"
+OUT = DOCS / "项目优化与后续计划-20260921.xlsx"
+
+HEAD_FILL = PatternFill("solid", fgColor="2F5597")
+HEAD_FONT = Font(name="微软雅黑", size=11, bold=True, color="FFFFFF")
+TITLE_FONT = Font(name="微软雅黑", size=13, bold=True, color="2F5597")
+NOTE_FONT = Font(name="微软雅黑", size=10, color="595959")
+BODY_FONT = Font(name="微软雅黑", size=10)
+LINK_FILL = PatternFill("solid", fgColor="DDEBF7")
+THIN = Side(style="thin", color="B0B0B0")
+BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+WRAP = Alignment(wrap_text=True, vertical="top")
+CENTER = Alignment(horizontal="center", vertical="top", wrap_text=True)
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runtime-root", type=Path, default=Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies")
-    args = parser.parse_args()
-    runtime = args.runtime_root.resolve()
-    node = runtime / "node/bin/node.exe"
-    modules = runtime / "node/node_modules"
-    if not node.exists() or not (modules / "@oai/artifact-tool").exists():
-        raise SystemExit("找不到 Codex Node/artifact-tool，请通过 --runtime-root 指定依赖目录")
-    scripts = Path(__file__).resolve().parent
-    work = Path(tempfile.mkdtemp(prefix="dmcs_plan_20260921_"))
-    builder = work / "generate_optimization_plan_xlsx.mjs"
-    shutil.copyfile(scripts / builder.name, builder)
-    subprocess.run([str(node), "-e", "require('node:fs').symlinkSync(process.argv[1], process.argv[2], 'junction')",
-                    str(modules), str(work / "node_modules")], check=True)
-    out = scripts.parent.parent / "docs/项目优化与后续计划-20260921.xlsx"
-    subprocess.run([str(node), str(builder), str(out), str(work)], check=True)
-    print(f"Workbook: {out}")
-    print(f"Previews: {work}")
+def sheet(wb, name, title, headers, widths, rows, subtitle=None, fill_col=None, fill_map=None):
+    ws = wb.create_sheet(name)
+    ws["A1"] = title
+    ws["A1"].font = TITLE_FONT
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+    if subtitle:
+        ws["A2"] = subtitle
+        ws["A2"].font = NOTE_FONT
+        ws["A2"].alignment = WRAP
+        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(headers))
+    for c, (h, w) in enumerate(zip(headers, widths), start=1):
+        cell = ws.cell(row=3, column=c, value=h)
+        cell.fill = HEAD_FILL
+        cell.font = HEAD_FONT
+        cell.alignment = CENTER
+        cell.border = BORDER
+        ws.column_dimensions[cell.column_letter].width = w
+    for i, row in enumerate(rows, start=4):
+        for c, v in enumerate(row, start=1):
+            cell = ws.cell(row=i, column=c, value=v)
+            cell.font = BODY_FONT
+            cell.alignment = CENTER if c <= 2 else WRAP
+            cell.border = BORDER
+        if fill_col and fill_map:
+            f = fill_map.get(str(row[fill_col - 1]))
+            if f:
+                for c in range(1, len(headers) + 1):
+                    ws.cell(row=i, column=c).fill = f
+    ws.freeze_panes = "A4"
+    return ws
 
 
-if __name__ == "__main__":
-    main()
+wb = Workbook()
+wb.remove(wb.active)
+
+# ------------------------------------------------------------ 本轮改动
+sheet(
+    wb, '本轮改动',
+    '本轮优化内容',
+    ['编号', '优先级', '模块', '完成内容', '验证内容', '当前阶段'],
+    [8.8, 8.8, 20.6, 45.0, 46.2, 18.1],
+    [
+        ['C01', 'P0', '灰分测量取值', '移除501/502与总灰分录入链中的密度仿真增量；缺失读数不转换为0。', '改变密度后原始灰分不变；前后端对拍包含缺测和在线读数。', '已实现，待审阅'],
+        ['C02', 'P0', '统一服务端决策', '总览与AI助手复用取值、常量守卫、重介换算、动作保护和maxStep。', '相同状态下两接口给出相同有效性、方向、原因和建议密度。', '已实现，待审阅'],
+        ['C03', 'P0', '动作与来源持久化', '保存动作闩锁、最后调密时间及重介来源开关；新日志标记测量口径。', '数据库往返不丢保护状态；重复动作保持；旧日志保留原值并区分。', '已实现，待审阅'],
+        ['C04', 'P0', '删除接口鉴权', '记录与补录DELETE接口接入写权限依赖。', '远端无token或错误token返回401；有效token进入记录查询。', '已实现，待审阅'],
+        ['C05', 'P1', '同步失败分类', '保留401/403的denied标记与原因，避免误报为网络故障。', '权限、过期快照、数据库异常和断网共5个场景分类正确。', '已实现，待审阅'],
+        ['C06', 'P1', '回归与说明', '增加真实前端函数对拍、决策入口一致性及持久化测试；更新工艺说明。', '11个前后端场景按1e-6容差比较；后端回归与JS语法检查通过。', '已实现，待审阅'],
+    ],
+    subtitle='2026-09-21。代码依据：取值链、总览、助手、鉴权、同步与回归测试。',
+)
+
+# ------------------------------------------------------------ 后续任务
+sheet(
+    wb, '后续任务',
+    '后续优化任务',
+    ['编号', '优先级', '工作项', '交付内容与原因', '验收标准', '前置依赖', '估算人日', '批次', '状态'],
+    [8.1, 8.8, 22.5, 41.9, 43.8, 20.6, 10.6, 8.1, 11.9],
+    [
+        ['T01',
+ 'P0',
+ '快照版本冲突检测',
+ '整库写入携带基础版本；版本校验与写入必须原子执行，防止同条数旧数据覆盖新数据。',
+ '两个浏览器修改同一快照，后提交者收到409；修改、删除和重训练都推进版本。',
+ '本轮修复',
+ '3',
+ 'B1',
+ '待实施'],
+        ['T02',
+ 'P0',
+ '服务端权威与增量同步',
+ '记录、配置、采样改用增量接口；离线操作携带幂等键，冲突保留双方内容。',
+ '并发、离线重试、重复提交不丢记录；整库接口仅用于明确的恢复流程。',
+ 'T01',
+ '5',
+ 'B1',
+ '待实施'],
+        ['T03',
+ 'P0',
+ '测量来源和有效期',
+ '统一value/source/sampledAt/receivedAt/quality/unit；区分实测、预测、默认及过期值。',
+ '缺测、过期、未来时间、非法数值均有明确状态；默认值不能冒充实测驱动建议。',
+ '现场确认采样周期',
+ '3',
+ 'B1',
+ '待实施'],
+        ['T04',
+ 'P1',
+ '测点唯一键与迁移',
+ '核实501/502同一时间采样规则，加入测点身份；先备份、排查冲突，再迁移。',
+ '同系统同时刻两条皮带均保留；重复导入幂等；迁移与回滚演练通过。',
+ '现场确认测点字典',
+ '2',
+ 'B2',
+ '待确认'],
+        ['T05',
+ 'P1',
+ '质量平衡与单位口径',
+ '核实501与502秤的位置，检查总量相加是否重复计量；确认干湿基、流量和时间窗。',
+ '工艺人员确认秤点图和公式；人工算例与系统一致；不自动修改未确认公式。',
+ '工艺与仪表人员访谈',
+ '2',
+ 'B2',
+ '待确认'],
+        ['T06',
+ 'P1',
+ '无泄漏时序验证',
+ '缺失填补、标准化、特征筛选与调参均在训练折内完成；引入按日或班次切分。',
+ '未来数据不影响早期折预处理；输出时序RMSE/MAE及最近实测值基线；前后端迁移口径明确。',
+ 'T03；确认样本分组',
+ '5',
+ 'B2',
+ '待实施'],
+        ['T07',
+ 'P1',
+ '模型发布与回滚',
+ '候选模型达到时序性能门槛后才发布；保存数据版本、特征版本、参数与模型版本。',
+ '两个候选均不合格时保留旧模型；发布可回滚；历史预测可追溯到模型版本。',
+ 'T06',
+ '3',
+ 'B2',
+ '待实施'],
+        ['T08',
+ 'P1',
+ '账号权限与审计',
+ '替换公开页面token模式，按查看、操作、管理授权；AI调用增加权限与限流。',
+ '查看者不能写入或删除；操作可查人员与时间；恢复和管理功能单独授权。',
+ '确认部署网络与人员角色',
+ '4',
+ 'B3',
+ '待确认'],
+        ['T09',
+ 'P1',
+ '备份恢复与发布流程',
+ '强制覆盖前备份失败则阻断；定期备份；统一Alembic迁移、生产启动和依赖锁。',
+ '恢复演练核对数据量与关键字段；新库和旧库升级通过；生产关闭reload。',
+ 'T01；明确备份保留周期',
+ '3',
+ 'B3',
+ '待实施'],
+        ['T10',
+ 'P2',
+ '前端拆分与计算收敛',
+ '拆分store、同步、取值、决策和训练；在线模式逐步采用服务端计算结果。',
+ '关键业务对拍与浏览器回归通过；文件离线模式明确边界；页面无重复计算副作用。',
+ 'T02、T03',
+ '4',
+ 'B3',
+ '待实施'],
+        ['T11',
+ 'P2',
+ '查询与训练性能',
+ '按日期分页与聚合；训练任务异步化，记录任务状态，避免整库读取和长时间占用。',
+ '以实际数据量测量响应时间；训练期间可查看页面；超时、取消、失败可恢复。',
+ 'T02；确定数据增长预期',
+ '3',
+ 'B3',
+ '待实施'],
+        ['T12',
+ 'P2',
+ 'PLC只读接入与密度标定',
+ '先接入带质量码的只读测量，再用现场批准的阶跃实验识别时延与增益。',
+ '先影子运行核对仪表值；记录工况、执行时刻与化验响应；未验收前保持人工执行。',
+ 'T03、T05；现场实验窗口',
+ '5',
+ 'B4',
+ '待确认'],
+    ],
+    subtitle='估算为开发与测试人日，未包含现场等待。黄色列可更新；待确认项需先落实现场条件。',
+)
+
+# ------------------------------------------------------------ 实施批次
+sheet(
+    wb, '实施批次',
+    '建议实施顺序',
+    ['批次', '目标', '进入条件', '完成条件', '估算人日', '任务范围'],
+    [10.0, 22.5, 31.2, 61.2, 11.9, 15.0],
+    [
+        ['B1', '数据与建议可信', '本轮改动通过审阅', '并发冲突可检测，离线数据不丢失，数据来源和有效期可辨识。', '11', 'T01–T03'],
+        ['B2', '工艺口径与模型验收', '测点、秤点及样本分组确认', '双皮带不互相覆盖；计算口径经现场确认；模型验证无泄漏且可回滚。', '12', 'T04–T07'],
+        ['B3', '部署与可维护性', '增量同步接口稳定', '权限隔离与审计可用，备份恢复可演练，生产部署和查询性能可复现。', '14', 'T08–T11'],
+        ['B4', '现场接入与标定', '工艺、仪表人员提供窗口', '只读接入和影子运行通过；密度时延与增益完成实验验收。', '5', 'T12'],
+        [None, None, None, '总工作量（人日）', '42', None],
+        ['说明', '估算假设', '1名开发者，工艺和仪表人员配合', '不含传感器采购、现场实验等待、生产发布审批与样本积累。', None, None],
+        [None, '评估依据', '2026-09-21 项目代码与测试', '取值与密度决策、整库迁移、训练交叉验证、数据唯一键、权限与部署脚本。未做现场工艺验收。', None, None],
+    ],
+    subtitle='工作量是假设单名开发者参与的初步估算，不是上线日期承诺。',
+)
+
+# ------------------------------------------------------------ 编号对照与维护约定
+sheet(
+    wb, '编号对照与维护约定',
+    '本表是阶段快照；持续维护入口是 docs/待办-后续优化计划.xlsx（现场 2026-09-21 决定）',
+    ['编号', '本表条目', '对应维护入口', '约定'],
+    [10, 46, 40, 52],
+    [
+        ['C01',
+ '移除 501/502 记录中的密度仿真增量（删仿真）',
+ '待办表 ·「遗留问题与建议(删仿真后)」L-4 / L-3 / L-8',
+ '语义变更已落地（提交 9e88b64）；后续风险与收尾项在待办表跟踪，本表不再复制 Sheet。'],
+        ['C02',
+ '统一服务端密度决策入口（guidance.py）',
+ '待办表 · 守卫对拍（test_guidance_regression.py）+ CI 7 用例',
+ '新代码的守卫由 pytest 对拍与 CI E2E 覆盖。'],
+        ['——', '其它条目（后续计划 / 实施建议）', '待办表 ·「待办清单(含原因)」', '新需求一律进待办表；本表作为 2026-09-21 阶段快照保留，不再新增 Sheet。'],
+    ],
+    subtitle='按任务编号关联，不再复制出重复 Sheet；新需求与新遗留一律进待办表。',
+    fill_col=1,
+    fill_map={"C01": LINK_FILL, "C02": LINK_FILL},
+)
+
+DOCS.mkdir(parents=True, exist_ok=True)
+wb.save(OUT)
+print("已生成:", OUT)
+for ws in wb.worksheets:
+    print("  - %-24s %d 行" % (ws.title, ws.max_row - 3))

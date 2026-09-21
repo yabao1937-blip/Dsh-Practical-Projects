@@ -50,6 +50,17 @@ jobs:
           pip install ruff
           ruff check app tests --statistics || true
 
+      # 文档生成器自检（L-1 的「并在 CI 验证」）：docs 下的 Excel 必须能用**普通 Python 环境**
+      # （仅仓库依赖 openpyxl + 标准库）重新生成。2026-09-21 之前那份报告的生成器包装的是
+      # Codex 私有运行时，换机器就 SystemExit —— 这一步就是防它再退回去。
+      # 只验「能跑出来且产物非空」，不做字节级 diff：xlsx 每次生成的二进制都可能微差，
+      # 按字节比会变成假红（内容一致性由迁移时的逐项文本比对保证：35/82/41 项零丢失）。
+      - name: 文档生成器自检（openpyxl 自洽、可复现）
+        run: |
+          python scripts/generate_optimization_plan_xlsx.py
+          python scripts/generate_todo_plan_xlsx.py
+          python -c "import pathlib,sys; names=['项目优化与后续计划-20260921.xlsx','待办-后续优化计划.xlsx']; bad=[n for n in names if not (pathlib.Path('../docs')/n).exists() or (pathlib.Path('../docs')/n).stat().st_size < 5000]; [print('%-40s %7d' % (n, (pathlib.Path('../docs')/n).stat().st_size)) for n in names if (pathlib.Path('../docs')/n).exists()]; sys.exit(1 if bad else 0)"
+
   # 端到端（真浏览器 + 真后端 + 真 SQLite）：
   #   用例0  冷启动空配置的整库写必须不被 stale 守卫拒绝（缺陷1 的复现路径）
   #   用例1  写失败不得静默：待发副本 + 提示 + online 重试后服务器真实收到

@@ -176,6 +176,7 @@ const api = async (p) => {
                 dirVis: dEl ? dEl.style.visibility : null,
                 dirText: dEl ? (dEl.textContent || '').trim() : null,
                 effectTxt: eEl ? (eEl.textContent || '').trim() : null,
+                measTxt: (document.getElementById('density-meas-total') || {}).textContent || null,
             });
         })()`));
         console.log('  新化验 8.3:', JSON.stringify({ total: newLab.total, deltaA: newLab.deltaA, rhoNew: newLab.rhoNew, dir: newLab.dir }));
@@ -208,6 +209,7 @@ const api = async (p) => {
             out.dwellHold = gDwell.hold; out.dwellReason = gDwell.reason || ''; out.dwellRho = gDwell.rhoNew;
             OverviewPage.refresh();
             out.subsHold = [...document.querySelectorAll('[id^="density-sub-"]')].map(e => e.textContent);
+            out.measHoldTxt = (document.getElementById('density-meas-total') || {}).textContent || null;
             const dn = document.getElementById('density-total');
             out.mainHold = dn ? dn.textContent : null;
             OverviewPage.showCardDetail('total');
@@ -253,6 +255,17 @@ const api = async (p) => {
             !newLab.dirVis && newLab.dirText.includes('建议下调')
             && !newLab.effectTxt.includes('保持中：等新化验'),
             `方向指示 visibility="${newLab.dirVis || ''}" 文本="${newLab.dirText}" 底部效果="${newLab.effectTxt}"`);
+        // 现场 2026-09-21 要求：卡片要讲全「来源 / 测量时间 / 距上次调密 / 为何保持」
+        check('MEASUREMENT_FACTS_ON_CARD',
+            String(latch.measHoldTxt || '').includes('来源')
+            && String(latch.measHoldTxt || '').includes('测量')
+            && String(latch.measHoldTxt || '').includes('距上次调密')
+            && String(latch.measHoldTxt || '').includes('保持：'),
+            `保持态卡片事实行="${latch.measHoldTxt}"`);
+        check('MEASUREMENT_FACTS_WHEN_ADVISING',
+            String(newLab.measTxt || '').includes('来源') && String(newLab.measTxt || '').includes('测量')
+            && !String(newLab.measTxt || '').includes('保持：'),
+            `有建议时事实行="${newLab.measTxt}"`);
 
         // ---------- 5) 调密之后来了新化验 → 放行（本次修复的核心）----------
         const afterMove = JSON.parse(await evalJs(`(() => {

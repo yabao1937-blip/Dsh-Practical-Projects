@@ -1,3 +1,10 @@
+// ⚠ 本文件不是生成入口（2026-09-21，L-6 处置）。
+// 入口是 generate_optimization_plan_xlsx.py —— 纯 openpyxl 自洽版，普通 Python 环境即可运行：
+//     python backend/scripts/generate_optimization_plan_xlsx.py
+// 本文件是由 Codex 的 artifact-tool 构建器演化来的历史参考实现，依赖 Codex 私有运行时
+// （~/.cache/codex-runtimes/... 的 node 与 @oai/artifact-tool），换机器/CI 跑不起来；
+// 内容已 1:1 迁移进上面的 .py（迁移时做过非空文本逐项比对：35/82/41 项零丢失）。
+// 保留它只为追溯构建细节，不要用它生成文档。
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {Workbook, SpreadsheetFile} from '@oai/artifact-tool';

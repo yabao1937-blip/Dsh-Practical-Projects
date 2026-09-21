@@ -186,6 +186,14 @@ const OverviewPage = {
                         : `密度计 ${guide.rhoCur.toFixed(3)} · 目标密度 ${guide.rhoNew.toFixed(3)} · ${holdTxt}`)
                     : `密度计 ${guide.rhoCur.toFixed(3)}`;
             }
+            // 测量事实（现场 2026-09-21 要求）：把「凭什么给/不给建议」讲全 ——
+            //   灰分来源 · 测量时间 · 距上次调密多久 · 当前为何保持
+            // 只加一句提示不够：删仿真后操作员看不到灰分随密度变化，必须能看出
+            // "这条建议基于哪一次测量、这份测量多旧、离上次调密多久、为什么现在保持"。
+            const measEl = document.getElementById(`density-meas-${sys.id}`);
+            if (measEl) {
+                measEl.textContent = this._measurementFacts(guide, sys.id);
+            }
 
             // 置信度与详情弹窗共用同一计算口径
             const conf = this.computeConfidence(target, actual);
@@ -309,6 +317,51 @@ const OverviewPage = {
 
         document.getElementById('status-manual-count').textContent = App.store.manualEntries.length + '条';
         App._renderStorageHealth();   // 本地存储体积/写入健康(容量防线,见 app.js saveStore)
+    },
+
+    // 灰分测量的"时间事实"：返回毫秒时间戳（找不到返回 null）。
+    // 手动档用 heavyAshInput.manualAt；自动档依次找 502 手动录入时刻、表3 灰分记录时间。
+    _heavyAshMeasuredAt(scheme) {
+        const cfg = App.store.heavyAshInput || {};
+        if (scheme === 'heavy' && App.heavyAshSource() === 'manual' && cfg.manualAt) return cfg.manualAt;
+        const ic = (App.store.instrumentInputs || {}).ash_502 || {};
+        if (ic.manualAt) return ic.manualAt;
+        const logs = App.store.calcLogs || [];
+        for (let i = logs.length - 1; i >= 0; i--) {
+            const l = logs[i];
+            if (!l || (l.calc_type !== 'ash_meter' && l.calc_type !== 'belt_ash')) continue;
+            try {
+                const v = JSON.parse(l.input_json || '{}');
+                if (String(v.belt || '') === '502' && typeof v.ash_content === 'number') {
+                    const t = new Date(String(l.ts || '').replace(' ', 'T')).getTime();
+                    return isFinite(t) ? t : null;
+                }
+            } catch (e) { /* 忽略坏记录 */ }
+        }
+        return null;
+    },
+
+    // 卡片「测量事实」一行：来源 · 测量时间 · 距上次调密 · 为何保持（现场 2026-09-21 要求）
+    _measurementFacts(guide, sysId) {
+        const pad = n => String(n).padStart(2, '0');
+        const fmt = ms => {
+            const d = new Date(ms);
+            return isFinite(d.getTime()) ? `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}` : null;
+        };
+        const scheme = (guide && guide.scheme === 'heavy') ? 'heavy' : 'total';
+        const src = scheme === 'heavy' ? App.heavyAshLayer() : App.instrumentLayer('ash_501');
+        const at = this._heavyAshMeasuredAt(scheme);
+        const parts = [`来源 ${src}`];
+        parts.push(at ? `测量 ${fmt(at)}` : '测量时间未知');
+        const sinceMin = (guide && guide.sinceMoveMin != null) ? guide.sinceMoveMin : null;
+        parts.push(sinceMin != null ? `距上次调密 ${sinceMin} 分钟` : '本班未调过密度');
+        if (guide && guide.hold) {
+            const why = String(guide.holdReason || '');
+            parts.push(why.includes('同一份化验') ? '保持：这份化验已动作过' : '保持：等新化验/新仪表数据');
+        } else if (guide && guide.valid && guide.deltaA != null && Math.abs(guide.deltaA) <= guide.deadband) {
+            parts.push('无需调整');
+        }
+        return parts.join(' · ');
     },
 
     initTrendChart() {
@@ -485,6 +538,7 @@ const OverviewPage = {
                 <table class="data-table" style="margin:4px 0 12px">
                     <tr><td>控制版本</td><td>${g.scheme === 'heavy' ? '<span style="color:var(--accent-blue)">重介精煤灰分版</span>（总览页按钮切换）' : '总灰分版（总览页按钮切换）'}</td></tr>
                     <tr><td>密度计当前值</td><td>${g.rhoCur.toFixed(3)} g/cm³</td></tr>
+                    <tr><td>灰分来源 / 测量时间 / 距上次调密</td><td>${this._measurementFacts(g, sysId)}</td></tr>
                     ${g.scheme === 'heavy' ? `
                     <tr><td>实测重介精煤灰分</td><td>${g.heavyAsh.toFixed(2)}%</td></tr>
                     <tr><td>目标重介精煤灰分</td><td>${g.targetHeavy != null ? g.targetHeavy.toFixed(2) + '%' : '—'}</td></tr>

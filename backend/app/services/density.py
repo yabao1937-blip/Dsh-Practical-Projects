@@ -30,8 +30,11 @@ K_PREDICT = 0.075
 DENSITY_GUIDE = {
     # maxStep：单次建议步长上限（2026-09-12 现场确认：最多 0.03，默认取 0.02）
     "deadband": 0.05, "maxStep": 0.02, "rhoMin": 1.35, "rhoMax": 1.60,
-    # simK：密度→灰分仿真增益倒数（2026-09-12 按现场确认增益 15%/单位反推：0.867/15 ≈ 0.0578）
-    "kFallback": 0.03, "simBaseRho": 1.49, "simK": 0.0578, "stepwise": True,
+    # 2026-09-21：kFallback / simBaseRho / simK 已删除 —— 现场确认
+    # 「仪表值只来自录入/测量，密度变化不得改写灰分读数」后密度→灰分仿真整段移除，
+    # 这三个常数随之失效（删除前已确认无读取方：K 的回退值走 K_PREDICT 0.075）。
+    # 历史见 docs/项目优化与后续计划-20260921.xlsx。
+    "stepwise": True,
 }
 
 

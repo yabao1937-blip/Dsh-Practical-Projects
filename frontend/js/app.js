@@ -1668,12 +1668,13 @@ const App = {
     //  ρ建议 = ρ当前 + K×(A目标 − A实际)；灰分偏高(A实际>A目标)→降密度
     //  K：表3历史『灰分~密度』线性回归斜率；死区±0.05%；单次限幅±0.01；范围1.35~1.60
     // ============================================================
-    DENSITY_GUIDE: { deadband: 0.05, maxStep: 0.02, rhoMin: 1.35, rhoMax: 1.60, kFallback: 0.03,
-                     // simK：密度→灰分仿真的增益倒数。2026-09-12 按**现场确认的增益 15%/单位密度**反推：
-        //   总灰分增益 = 配煤权重(0.867) / simK ⇒ simK = 0.867/15 ≈ 0.0578
-        // （旧值 0.03 对应 28.9%/单位 = 现场值的 1.93 倍，会让按现场口径定的步长越过目标。）
-        // P3 阶跃实验测出真实增益后，用实测值替换这里。
-        simBaseRho: 1.49, simK: 0.0578 },   // 灰分测量响应仿真：密度↑0.01 → 总灰分↑≈0.15%
+    DENSITY_GUIDE: { deadband: 0.05, maxStep: 0.02, rhoMin: 1.35, rhoMax: 1.60 },
+    // 历史（2026-09-21 之前 DENSITY_GUIDE 还带三个常数，现已删除）：
+    //   · simBaseRho 1.49 / simK 0.0578 属于「密度→灰分测量仿真」。2026-09-21 现场确认
+    //     「仪表值只来自录入/测量，密度变化不得改写灰分读数」后仿真整段移除，两个常数随之删除；
+    //     删除前已确认无调用方（只剩 getDensityGuide() 的透传与 getSimBaseRho() 自身）。
+    //   · kFallback 0.03 从来没有人读过（真正的回退值是 K_PREDICT 0.075），同批删除。
+    //   历史细节见 docs/项目优化与后续计划-20260921.xlsx 与 docs/待办-后续优化计划.xlsx。
 
     // 专家经验调整表（总灰分偏差 → 密度修正量）——**2026-09-12 现场访谈确认后的口径**：
     //   偏差 0.15% → 调 0.01；0.30% → 0.02；更大时**最多 0.03**（不再线性外推）；
@@ -1752,18 +1753,6 @@ const App = {
         return { valid: false, k: null, n: pts.length, source: 'none', systems, totalPoints: pts.length };
     },
 
-    // 仿真基准密度：取表3最新有效密度（灰分测量所在工况点），缺省1.49
-    getSimBaseRho() {
-        const logs = (this.store.calcLogs || []).filter(l => l.calc_type === 'ash_density');
-        for (let i = logs.length - 1; i >= 0; i--) {
-            try {
-                const v = JSON.parse(logs[i].input_json || '{}');
-                if (typeof v.density === 'number' && v.density >= 1.3 && v.density <= 1.6) return v.density;
-            } catch (e) { /* 忽略坏记录 */ }
-        }
-        return this.DENSITY_GUIDE.simBaseRho;
-    },
-
     // 密度指导参数（页面可调，持久化）：钳制幅度 maxStep、死区 deadband
     getDensityGuide() {
         const s = this.store.densityGuide || {};
@@ -1771,8 +1760,6 @@ const App = {
             deadband: (typeof s.deadband === 'number' && s.deadband > 0) ? s.deadband : this.DENSITY_GUIDE.deadband,
             maxStep: (typeof s.maxStep === 'number' && s.maxStep > 0) ? s.maxStep : this.DENSITY_GUIDE.maxStep,
             rhoMin: this.DENSITY_GUIDE.rhoMin, rhoMax: this.DENSITY_GUIDE.rhoMax,
-            kFallback: this.DENSITY_GUIDE.kFallback,
-            simBaseRho: this.DENSITY_GUIDE.simBaseRho, simK: this.DENSITY_GUIDE.simK,
         };
     },
 
@@ -1886,6 +1873,12 @@ const App = {
         r.hold = p0guard.hold;
         r.holdReason = p0guard.holdReason;
         r.driveKey = p0guard.driveKey;
+        // 距上次调密多少分钟 / 数据是否比调密更新：**无条件**挂到返回值上。
+        // 2026-09-21 修：这两个字段原先只在"驻留被新化验放行"那条分支里才赋值，
+        // 于是卡片上出现自相矛盾 —— 保持原因写"刚调整过密度（0 分钟前）"，
+        // 而"测量事实"里因为读不到 sinceMoveMin 而显示"本班未调过密度"。
+        r.sinceMoveMin = p0guard.sinceMoveMin;
+        r.dataIsNewer = p0guard.dataIsNewer;
         // 常量灰分不得驱动控制建议（与后端 compute_density_guidance 同序同文案）：
         // 501 未接入时总灰分是默认常量，照它算 deltaA（如 8.8−8.5=0.3 超容差）会推出"下调密度"。
         // 必须排在「数据不完整」通用判定之前，否则与后端给出的 reason 不一致。
