@@ -15,6 +15,7 @@ SETTING_TO_STORE = {
     "ash_target_tol": "ashTargetTol",
     "guide_scheme": "guideScheme",
     "total_ash_manual_on": "totalAshManualOn",
+    "heavy_ash_manual_on": "heavyAshManualOn",
     "density_guide": "densityGuide",
     "density_auto_on": "densityAutoOn",
     "coarse_tolerance": "coarseTolerance",
@@ -27,6 +28,7 @@ AUTO_STATE_KEYS = [
     "heavyAshInput", "coarseAshInput", "floatAshInput",
     "coarseCalc", "coarseAshEma", "autoState", "heavyAshBackcalc",
     "densityDecisionLog",   # 密度决策日志(工况条件化 Stage 0)
+    "densityActionLatch", "densityLastMoveAt",
 ]
 
 

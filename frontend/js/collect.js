@@ -138,7 +138,7 @@ const CollectPage = {
                 const cv = App.heavyAshComputed();
                 if (cv != null) {
                     devHtml += ` <span style="font-size:11px;color:var(--text-muted)"`
-                        + ` title="若切到「计算」，本行将取该值（502在线值 + 密度仿真；密度计因此在起作用）">`
+                        + ` title="若切到「计算」，本行将取 502 测量值；调密后的灰分需等待新测量">`
                         + `计算 ${(+cv).toFixed(2)}</span>`;
                 }
             }
@@ -159,7 +159,7 @@ const CollectPage = {
                 ? sourceSelect('heavyash-source', App.heavyAshSource() === 'manual',
                     'CollectPage.onHeavyAshSourceChange()',
                     '重介精煤灰分来源：手动=用你填的化验值（优先，且不随密度计变化）；'
-                    + '计算=502在线值 + 密度仿真（密度计调整会直接改变它，从而影响总灰分与建议密度）')
+                    + '计算=502测量值（调密后等待新化验或仪表数据，不模拟灰分变化）')
                 : isTotal
                     ? (lockedFactor
                         ? `<span style="color:var(--accent-red);font-size:12px" title="${chain}">冻结</span>`
@@ -184,7 +184,7 @@ const CollectPage = {
         }).join('');
     },
 
-    // 重介精煤灰分来源切换：手动=用填写的化验值；计算=502在线+密度仿真（密度计因此在起作用）
+    // 重介精煤灰分来源切换：手动=化验值；计算=502测量值。
     onHeavyAshSourceChange() {
         const el = document.getElementById('heavyash-source');
         const wantManual = el ? el.value === 'manual' : false;
@@ -207,8 +207,8 @@ const CollectPage = {
                 ? `重介精煤灰分已切为「手动」：使用你填写的 ${hv}%（不随密度计变化）`
                 : '重介精煤灰分已切为「手动」，但还没有手动值：双击本行数值即可填写化验值', 'info');
         } else {
-            App.showToast('重介精煤灰分已切为「计算」：取 502在线值 + 密度仿真，'
-                + '调整密度计会直接改变它，进而影响总灰分与建议密度', 'success');
+            App.showToast('重介精煤灰分已切为「计算」：取 502 测量值，'
+                + '调密后的效果需等待新化验或仪表数据', 'success');
         }
     },
 

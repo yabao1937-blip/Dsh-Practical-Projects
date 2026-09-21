@@ -65,6 +65,8 @@ window.Api = {
               return r.json();
           })
           .then(j => {
+              // 上一层已区分权限拒绝，不能在业务错误归一化时丢掉 denied/reason。
+              if (j && j.denied) return j;
               if (j && j.ok === false) {
                   // **只有守卫明确的 stale 拒绝**才算"永久拒绝"（重试结果必然相同）。
                   // 后端 migrate.replace 的 except 分支同样返回 ok:false 但没有 stale

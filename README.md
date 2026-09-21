@@ -15,7 +15,7 @@ dense-medium-density-control-system/
 │   ├── migrations/             # 迁移（0001 init + 0002 训练列）
 │   ├── data/                   # seed_store.json + dense_medium.db(SQLite)
 │   ├── scripts/                # golden dump(4) + 前端回归 verify(5) + Excel 生成器(generate_*.py)
-│   ├── tests/                  # pytest（以收集为准，当前 76 用例）
+│   ├── tests/                  # pytest（用例数量以收集为准）
 │   └── app/
 │       ├── main.py             # FastAPI 应用（建表 + 路由 + 前端静态托管）
 │       ├── config.py           # DATABASE_URL、FRONTEND_DIR（相对定位）
@@ -59,7 +59,8 @@ python -m venv .venv
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m pytest -q          # 以收集为准（当前 76 用例，临时库隔离,不触真实数据）
+.\.venv\Scripts\python.exe -m pytest -q          # 临时库隔离，不触真实数据
+node scripts\verify_api_errors.js                # 无网络：同步失败分类回归
 node scripts\dump_train_js.js                     # 重生成训练 oracle（需 Edge）
 node scripts\import_xlsx_via_ui.js [目录]         # 通过真实 UI 路径批量导入三表 xlsx（需后端+Edge）
 node scripts\verify_pull_from_server.js           # 双向同步/防回退端到端验证
@@ -124,3 +125,7 @@ node scripts\verify_pull_from_server.js           # 双向同步/防回退端到
 ## 文档（docs/）
 
 按板块的 Excel：`前后端分离-差异清单.xlsx`、`MLR-PLS训练后移-难点与建议.xlsx`、`前后端分离-难点与建议.xlsx` 等。
+
+2026-09-21 优化：测量灰分不再叠加密度仿真，总览与助手共用服务端决策入口，动作保护和重介来源开关持久化，补齐删除鉴权与权限错误分类。测试包含 11 个真实前端函数与后端的逐值对拍场景。
+
+本轮改动及后续 12 项任务见 `docs/项目优化与后续计划-20260921.xlsx`，通过 `backend/scripts/generate_optimization_plan_xlsx.py` 复现。整库同步仍处于过渡阶段，版本冲突检测与增量同步列为下一批 P0 工作。

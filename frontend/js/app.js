@@ -38,9 +38,8 @@ const App = {
         },
         heavyAshBackcalc: null,   // 反推的重介精煤灰分（任务三公式），null=未反推
         heavyAshInput: { manual: null },   // 重介精煤灰分手动覆盖（采样值，双击修改）
-        // 重介精煤灰分来源：true=手动值优先；false=计算（502在线 + 密度仿真）。
-        // 2026-09-12 新增：此前只要填过手动值就**永久**压住计算值 ——
-        // 于是"把密度计调到建议密度 → 重介灰分随之变化 → 总灰分达标"这条链走不通。
+        // 重介精煤灰分来源：true=手动值优先；false=自动（502测量值）。
+        // 操作员可切换来源；密度调整后的灰分变化必须由新测量确认。
         heavyAshManualOn: false,
         heavySamples: [],          // 重介精煤灰分采样记录 [{id, timestamp, rho, ash_content}]（训练数据积累）
         ashTargetTol: 0.1,         // 总灰分达标容差（±%），页面可配置（专家经验版默认±0.1）
@@ -1518,19 +1517,8 @@ const App = {
         } else if (id === 'ash_501' || id === 'ash_502') {
             // 录入：补录灰分仪 或 表3导入的该皮带灰分
             const base = this.latestBeltAsh(id === 'ash_501' ? '501' : '502');
-            // 仿真：密度变化→灰分测量变化（基准点线性化）
-            // P0 门控（2026-09-12）：只在密度**有真实来源**时才叠加仿真增量。
-            // 否则默认密度 1.45（距基准 1.49 有 0.04）会凭空把 502 的 7.9% 变成 6.57% ——
-            // 那不是测量，是编造出来的偏差，会直接进总灰分与建议密度。
-            // 同时限幅 |Δ灰分| ≤ 1.0，避免远离工作点时仿真线性外推给出荒唐值。
-            const rho = this.resolveInstrument('density');
-            const rhoIsReal = this.instrumentLayer('density') !== '默认(仪表)';
-            let d = rhoIsReal ? (rho - this.getSimBaseRho()) / this.DENSITY_GUIDE.simK : 0;
-            // 限幅 ±1.0（≈±0.03 g/cm³）：既挡住远离工作点的线性外推（ρ=1.60 时未限幅是 +3.67），
-            // 又留出足够宽的"响应带"，否则密度稍远就饱和、灰分不再随密度变化、闭环会卡住。
-            if (d > 1.0) d = 1.0; else if (d < -1.0) d = -1.0;
-            entry = +((base != null ? base : this.INSTRUMENT_DEFAULT[id]) + d).toFixed(4);
-            // 打点只用数据部分：密度仿真变化不算自动动作（只有新数据才接管更早的手工灰分）
+            // 测量值保持原样；调整密度必须等新化验/仪表数据，不能模拟出反馈。
+            entry = base;
             this._autoBump(id, base != null ? base : this.INSTRUMENT_DEFAULT[id]);
             dataBumped = true;
         } else if (id === 'density') {
@@ -2218,8 +2206,9 @@ const App = {
             // 实测密度计（2026-09）：只记录、不参与决策。有了它，以后可以拿决策日志
             // 标定"在线密度计 vs 实测"的偏差随时间/工况的变化。
             densityActual: (() => { try { return this.resolveInstrument('density_actual'); } catch (e) { return null; } })(),
-            // 重介灰分这一笔是"人工值"还是"502在线+密度仿真"算出来的 —— 影响日后标定时对数据的信任判断
+            // 区分人工化验与 502 测量来源，供后续工况标定使用。
             heavyAshSource: this.heavyAshSource(),
+            measurementPolicy: 'measured_only',
         };
     },
 
@@ -2276,7 +2265,8 @@ const App = {
             return [
                 e.ts, e.trigger, e.scheme === 'heavy' ? '重介版' : '总灰分版', e.target, e.tol,
                 e.rhoCur, e.rhoNew, e.deltaRho, e.deltaA, e.kUsed, e.kSource, e.heavyAsh,
-                (c.heavyAshSource === 'manual' ? '手动(采样)' : '计算(502在线+密度)'), e.totalAsh,
+                (c.heavyAshSource === 'manual' ? '手动(采样)'
+                    : c.measurementPolicy === 'measured_only' ? '自动(502测量)' : '旧版自动(可能含仿真)'), e.totalAsh,
                 c.coalAmount ?? '', c.rawAsh ?? '', c.desl473 ?? '', c.desl474 ?? '',
                 c.sysA ?? '', c.sysB ?? '', c.sys401 ?? '', c.sys402 ?? '', c.miningFace ?? '', c.levelTail ?? '',
                 c.densityActual ?? '',
@@ -2298,8 +2288,8 @@ const App = {
             ['响应状态', '待补记=决策后尚未出现人工化验；作废=窗口内又发生了新的密度决策，累积量无法归属'],
             ['响应来源', '只取人工化验（采样记录 / 在线仪表手动录入）；不用在线仪表自动值——那是被控量，闭环下 ΔA≈0'],
             ['滞后(分)', '从决策到取样化验的分钟数，用于判断过程是否已到位'],
-            ['重介灰分来源', '手动(采样)=操作员填的化验值优先；计算(502在线+密度)=由 502 在线值加密度仿真得出。'
-                          + '后者随密度计变化，因此"调密度→灰分变化→总灰分达标"这条链只在计算档下成立'],
+            ['重介灰分来源', '手动(采样)=操作员填的化验值优先；自动(502测量)=采用502读数。'
+                          + '旧版自动记录可能含仿真增量，标定前需核查；新记录不模拟调密后的灰分响应。'],
             ['实测密度', '决策时的实测密度计读数（人工录入）。**仅记录、不参与建议密度的计算**；'
                        + '与 ρ旧(在线密度计) 相减即为两台密度计的偏差，可用于标定在线密度计'],
         ];
@@ -2508,7 +2498,8 @@ const App = {
         for (let i = logs.length - 1; i >= 0; i--) {
             try {
                 const v = JSON.parse(logs[i].input_json || '{}');
-                if ((belt == null || String(v.belt || '') === String(belt)) && isFinite(+v.value)) return +v.value;
+                if ((belt == null || String(v.belt || '') === String(belt))
+                    && typeof v.value === 'number' && isFinite(v.value)) return v.value;
             } catch (e) { /* 忽略坏记录 */ }
         }
         return null;
@@ -2522,7 +2513,8 @@ const App = {
         for (let i = logs.length - 1; i >= 0; i--) {
             try {
                 const d = JSON.parse(logs[i].input_json || '{}');
-                if (String(d.belt || '') === String(belt) && isFinite(+d.ash_content)) return +d.ash_content;
+                if (String(d.belt || '') === String(belt)
+                    && typeof d.ash_content === 'number' && isFinite(d.ash_content)) return d.ash_content;
             } catch (e) { /* 忽略坏记录 */ }
         }
         return null;
@@ -2568,8 +2560,7 @@ const App = {
     // 实测依据：真实库 360 条 ash_density 记录全部 belt=502、零条 501（PLC 未接入）。
     ash501Layer() {
         const cfg = (this.store.instrumentInputs && this.store.instrumentInputs.ash_501) || {};
-        const m = cfg.manual;
-        if (typeof m === 'number' && isFinite(m) && m >= 0) return 'manual';
+        if (this._manualValid(cfg, 'ash_501')) return 'manual';
         if (this.latestCalcValue('ash_meter', '501') != null) return 'online';
         if (this.latestBeltAsh('501') != null) return 'online';
         return 'none';
@@ -2606,12 +2597,9 @@ const App = {
         const cfg = (this.store.ashInputs && this.store.ashInputs.totalAsh) || {};
         if (typeof cfg.entry === 'number' && isFinite(cfg.entry) && cfg.entry >= 0) return cfg.entry;
         // 2026-09 工艺确认:501=总混配皮带,其灰分即总灰分;502(重介组分)不混入平均。
-        // 仿真:密度变化→灰分测量响应(simK)仍作用于 501 读数上。
         const a501 = this.latestBeltAsh('501');
         if (a501 == null) return null;
-        const rho = this.resolveInstrument('density');
-        const d = (rho - this.getSimBaseRho()) / this.DENSITY_GUIDE.simK;
-        return +(a501 + d).toFixed(4);
+        return a501;
     },
 
     // 当前生效层级（在线仪表表来源列显示：手动/公式计算/录入/默认(仪表)）
@@ -2857,7 +2845,7 @@ const App = {
     getHeavyAsh() {
         const cfg = (this.store.heavyAshInput && this.store.heavyAshInput) || {};
         const m = cfg.manual;
-        // 来源=手动 且 有有效值 → 用手动；否则走计算（502在线，已含密度仿真增量）
+        // 来源=手动且有有效值 → 用手动；否则取 502 测量值。
         if (this.store.heavyAshManualOn !== false
             && typeof m === 'number' && isFinite(m) && m >= 0
             && this._manualValid(cfg, 'heavyAsh')) {
@@ -2878,11 +2866,8 @@ const App = {
     resolveHeavyAsh() { return this.getHeavyAsh(); },
 
     heavyAshLayer() {
-        const cfg = (this.store.heavyAshInput && this.store.heavyAshInput) || {};
-        const m = cfg.manual;
         if (this.heavyAshSource() === 'manual') return '手动(采样)';
-        // 计算档：说明它由 502 在线值 + 密度仿真算出（密度计因此在起作用）
-        return '计算(' + this._heavyAutoLayer() + '+密度)';
+        return '自动(' + this._heavyAutoLayer() + ')';
     },
 
     // 重介灰分自动层文案:502 在线值 > 默认

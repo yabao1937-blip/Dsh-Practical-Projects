@@ -145,56 +145,73 @@ const api = async (p) => {
             `重介灰分 ${manualPinned.before.h}→${manualPinned.after.h}，总灰分 ${manualPinned.before.t}→${manualPinned.after.t}`
             + `（手动档应当不变）`);
 
-        // ---------- 3) 计算档：调密度计会改变重介灰分与总灰分 ----------
-        const calcFollows = JSON.parse(await evalJs(`(() => {
+        // ---------- 3) 计算档：调密度计**不得**改变重介灰分与总灰分（2026-09-21 新语义） ----------
+        // 旧行为是"计算档 = 502在线 + 密度仿真"，调密立刻改灰分；现场确认后改为
+        // 「仪表值只来自录入/测量，密度变化不得改写灰分测量值」——调密的效果必须等新化验/新数据。
+        const calcPins = JSON.parse(await evalJs(`(() => {
             App.store.heavyAshManualOn = false;                 // 相当于把下拉切到「计算」
             App.setInstrumentInput('density', { manual: 1.490 });
             CollectPage.renderTable();
             const before = { h: App.getHeavyAsh(), t: App.resolveTotalAsh() };
-            App.setInstrumentInput('density', { manual: 1.510 });
+            App.setInstrumentInput('density', { manual: 1.510 });   // +0.02
             CollectPage.renderTable();
-            const after = { h: App.getHeavyAsh(), t: App.resolveTotalAsh() };
+            const after2 = { h: App.getHeavyAsh(), t: App.resolveTotalAsh() };
+            App.setInstrumentInput('density', { manual: 1.600 });   // 再推到远离工作点
+            const after60 = { h: App.getHeavyAsh(), t: App.resolveTotalAsh() };
             const tr = [...document.querySelectorAll('#collect-tbody tr')]
                 .find(r => r.children[0].textContent.includes('重介精煤灰分'));
-            return JSON.stringify({ before, after, mode: App.heavyAshSource(),
-                layer: tr ? tr.children[5].textContent.trim() : null,
-                gh: 1 / App.DENSITY_GUIDE.simK });
+            return JSON.stringify({ before, after2, after60, mode: App.heavyAshSource(),
+                layer: tr ? tr.children[5].textContent.trim() : null });
         })()`));
-        const dH = +(calcFollows.after.h - calcFollows.before.h).toFixed(3);
-        const dT = +(calcFollows.after.t - calcFollows.before.t).toFixed(3);
-        check('CALC_MODE_FOLLOWS', dH > 0.3 && dT > 0.1,
-            `密度 +0.02 → 重介灰分 ${calcFollows.before.h}→${calcFollows.after.h}（Δ${dH}），`
-            + `总灰分 ${calcFollows.before.t}→${calcFollows.after.t}（Δ${dT}）`);
+        const dH2 = +(calcPins.after2.h - calcPins.before.h).toFixed(3);
+        const dT2 = +(calcPins.after2.t - calcPins.before.t).toFixed(3);
+        const dH6 = +(calcPins.after60.h - calcPins.before.h).toFixed(3);
+        check('DENSITY_MOVE_KEEPS_MEASUREMENT', dH2 === 0 && dT2 === 0 && dH6 === 0,
+            `密度 1.490→1.510→1.600：重介灰分 ${calcPins.before.h}→${calcPins.after2.h}→${calcPins.after60.h}`
+            + `（Δ${dH2}/${dH6}），总灰分 ${calcPins.before.t}→${calcPins.after2.t}→${calcPins.after60.t}（Δ${dT2}）`
+            + `；档位=${calcPins.mode}`);
+        check('LAYER_TEXT_NO_SIM', !String(calcPins.layer || '').includes('密度'),
+            `来源列文案="${calcPins.layer}"（不应再声称含"密度仿真"）`);
 
-        // ---------- 4) 闭环：按建议密度调整后，总灰分偏差变小/达标 ----------
-        // 注意：P0 之后"同一份数据只动作一次 + 30 分钟驻留"会生效；脚本要连续试算必须先清守卫
-        // （相当于"模拟新的化验/在线数据到达"）。
+        // ---------- 4) 闭环：调完密度后必须"等新测量"，不能凭空收敛 ----------
+        // 新语义下：把密度调到建议值**不会**让偏差变小（不伪造反馈），而是进入"刚调过密度"的保持态；
+        // 只有新的化验/在线数据到达（这里用 heavyAshInput.manualAt 更新模拟）才会给出下一步。
         const loop = JSON.parse(await evalJs(`(() => {
-            App.store.heavyAshManualOn = false;
-            // 造一个"总灰分不达标"的起点：密度偏高 → 灰分偏高
+            App.store.heavyAshManualOn = true;
+            App.setHeavyAshInput({ manual: 8.60 });                 // 一份化验：总灰分不达标
             App.setInstrumentInput('density', { manual: 1.520 });
-            // 设密度本身会登记"刚调整过" → 触发 P0 的 30 分钟驻留；脚本要立刻试算，故在此清守卫
             App.store.densityActionLatch = null; App.store.densityLastMoveAt = 0;
             const g0 = App.computeDensityGuidance(App.store.ashTarget);
             const before = { rho: App.resolveDensity(), dev: g0.valid ? +g0.deltaA.toFixed(3) : null,
-                             total: App.resolveTotalAsh() };
-            // 把密度计调到建议值
-            App.setInstrumentInput('density', { manual: +g0.rhoNew.toFixed(3) });
-            const g1 = App.computeDensityGuidance(App.store.ashTarget);
-            const after = { rho: App.resolveDensity(), dev: g1.valid ? +g1.deltaA.toFixed(3) : null,
-                            total: App.resolveTotalAsh(), rhoNew: g1.rhoNew, dir: g1.direction };
-            return JSON.stringify({ before, after, tol: (App.store.ashTargetTol != null ? App.store.ashTargetTol : 0.1) });
+                             total: App.resolveTotalAsh(), step: +(g0.rhoNew - g0.rhoCur).toFixed(3) };
+            App.setInstrumentInput('density', { manual: +g0.rhoNew.toFixed(3) });   // 操作员照做（真改密度）
+            const gHold = App.computeDensityGuidance(App.store.ashTarget);
+            const after = { rho: App.resolveDensity(), dev: gHold.valid ? +gHold.deltaA.toFixed(3) : null,
+                            total: App.resolveTotalAsh(), hold: !!gHold.hold, rhoNew: gHold.rhoNew,
+                            reason: String(gHold.reason || '').slice(0, 50) };
+            App.setHeavyAshInput({ manual: 8.62 });                 // 新一份化验（数值也变了）
+            // 同一个同步块里 Date.now() 不会前进 → 必须显式把化验时刻推后，
+            // 否则驱动键与上一条完全相同，闩锁会（正确地）判为"同一份化验"。
+            App.store.heavyAshInput.manualAt = Date.now() + 60000;
+            const gNew = App.computeDensityGuidance(App.store.ashTarget);
+            const reopened = { hold: !!gNew.hold, step: +(gNew.rhoNew - gNew.rhoCur).toFixed(3),
+                               rhoNew: +gNew.rhoNew.toFixed(3) };
+            return JSON.stringify({ before, after, reopened,
+                tol: (App.store.ashTargetTol != null ? App.store.ashTargetTol : 0.1) });
         })()`));
-        const devBefore = Math.abs(loop.before.dev), devAfter = Math.abs(loop.after.dev);
-        // 方向性：调整后灰分必须**朝目标方向**移动（起点高于目标 → 调完应低于或接近目标）
-        const crossed = Math.sign(loop.after.dev) !== Math.sign(loop.before.dev);
-        check('LOOP_DIRECTION_OK', crossed || devAfter < devBefore,
-            `起点 ρ=${loop.before.rho} 偏差 ${loop.before.dev}% → 按建议 ρ=${loop.after.rho} 后偏差 ${loop.after.dev}%`
-            + `（总灰分 ${loop.before.total}→${loop.after.total}）`);
+        check('LOOP_REQUIRES_MEASUREMENT',
+            loop.after.total === loop.before.total && loop.after.dev === loop.before.dev
+            && loop.after.hold === true && Math.abs(loop.after.rhoNew - loop.after.rho) < 1e-9
+            && Math.abs(loop.before.step) > 0 && Math.abs(loop.before.step) <= 0.02001,
+            `调到建议 ρ=${loop.after.rho}（本步 ${loop.before.step}）后：总灰分 ${loop.before.total}→${loop.after.total}`
+            + `（未变）、偏差 ${loop.before.dev}%→${loop.after.dev}%、保持态=${loop.after.hold}`
+            + `｜${loop.after.reason}`);
+        check('NEW_MEASUREMENT_REOPENS_ADVICE',
+            loop.reopened.hold === false && Math.abs(loop.reopened.step) > 0
+            && Math.abs(loop.reopened.step) <= 0.02001,
+            `录入新化验后：保持=${loop.reopened.hold}，建议 ρ=${loop.reopened.rhoNew}（本步 ${loop.reopened.step}）`);
 
-        // 过冲与增益测算（信息项）：说清"专家表假设的增益"与"仿真+配煤公式的实际增益"差多少
-        const step = +(loop.after.rho - loop.before.rho).toFixed(4);
-        const simGain = +(dT / Math.abs(calcFollows.after.rho || 0.02) * 1).toFixed(0);   // 占位，下面重算
+        // 信息项：新语义下"密度→灰分"的实测增益恒为 0（不再有仿真增益可测）
         const measured = JSON.parse(await evalJs(`(() => {
             App.store.densityActionLatch = null; App.store.densityLastMoveAt = 0;
             App.store.heavyAshManualOn = false;
@@ -202,16 +219,13 @@ const api = async (p) => {
             const a = App.resolveTotalAsh();
             App.setInstrumentInput('density', { manual: 1.510 });
             const b = App.resolveTotalAsh();
-            const c = App.computeDensityGuidance(App.store.ashTarget);
-            return JSON.stringify({ dRho: 0.01, dTotal: +(b - a).toFixed(4), guide: c });
+            return JSON.stringify({ dRho: 0.01, dTotal: +((b == null || a == null) ? 0 : (b - a)).toFixed(4) });
         })()`));
         const gainPerUnit = +(measured.dTotal / 0.01).toFixed(2);       // %总灰分 / (g/cm³)
-        const tableGain = +((await evalJs("App.EXPERT_ADJUST.gain")) || 15);   // 从页面读专家表隐含增益（现场确认 15%/单位、封顶 0.03）
-        console.log(`LOOP_OVERSHOOT_INFO: 建议步长 Δρ=${step}；应用后偏差 ${loop.before.dev}% → ${loop.after.dev}%`
-            + `（过冲 ${(devAfter / Math.max(devBefore, 1e-9)).toFixed(2)} 倍）`);
-        console.log(`LOOP_GAIN_INFO: 仿真+配煤公式实测增益 ${gainPerUnit}%/单位密度`
-            + `（0.01 密度 → ${measured.dTotal}% 总灰分）；专家表第一档隐含 ${tableGain}%/单位密度`
-            + ` → 步长偏大约 ${(gainPerUnit / tableGain).toFixed(2)} 倍`);
+        const tableGain = +((await evalJs("App.EXPERT_ADJUST.gain")) || 15);   // 现场确认 15%/单位、封顶 0.03
+        console.log(`LOOP_MEASUREMENT_POLICY_INFO: 密度 +0.01 → 总灰分变化 ${measured.dTotal}%`
+            + `（实测增益 ${gainPerUnit}%/单位密度）；专家表隐含 ${tableGain}%/单位密度。`
+            + `新语义下密度不再直接改写灰分读数，增益只能由真实调密+新化验配对数据估计。`);
 
         // ---------- 5) 双击填值自动切到手动 ----------
         const typing = JSON.parse(await evalJs(`(() => {
@@ -270,71 +284,82 @@ const api = async (p) => {
             + `共 ${ratchet.first.steps} 步）；照做后再算 → ${ratchet.second.direction}／${ratchet.second.advice}`
             + `｜${ratchet.second.reason}`);
 
-        // ---------- 9) P0 守卫：计算档逐步收敛且不越界（每步之间模拟"来了新化验"清闩锁） ----------
+        // ---------- 9) P0 守卫：法则与逐步限幅（新语义下"同一份测量 → 同一条建议"） ----------
+        // 旧版这里靠仿真让偏差逐步收敛；新语义下密度不再改写灰分，所以正确的断言是：
+        //   ① 一次发布的步长 ≤ maxStep(0.02)、且等于 min(|ΔA|/15, 0.03) 被限幅后的值；
+        //   ② 完整修正量与"共几步"仍照实给出（供操作员判断要走多远）；
+        //   ③ 移动密度后重复计算，同一条测量给出的建议不变（不因密度的改变而"自我感觉好转"）。
         const conv = JSON.parse(await evalJs(`(() => {
-            App.store.heavyAshManualOn = false;
+            App.store.heavyAshManualOn = true;
+            App.setHeavyAshInput({ manual: 8.60 });
             App.setInstrumentInput('density', { manual: 1.520 });
-            const steps = [];
-            for (let i = 0; i < 8; i++) {
-                App.store.densityActionLatch = null;   // 模拟"又来了新的化验/在线数据"
-                App.store.densityLastMoveAt = 0;
-                const g = App.computeDensityGuidance(App.store.ashTarget);
-                steps.push({ rho: +App.resolveDensity().toFixed(3), dA: g.valid ? +g.deltaA.toFixed(3) : null,
-                             advice: +(g.rhoNew - g.rhoCur).toFixed(3) });
-                if (!g.valid || Math.abs(g.deltaA) <= App.store.ashTargetTol) break;
-                App.setInstrumentInput('density', { manual: +g.rhoNew.toFixed(3) });
-            }
-            return JSON.stringify({ steps, tol: App.store.ashTargetTol });
+            App.store.densityActionLatch = null; App.store.densityLastMoveAt = 0;
+            const g1 = App.computeDensityGuidance(App.store.ashTarget);
+            const s1 = { rho: +App.resolveDensity().toFixed(3), dA: +g1.deltaA.toFixed(3),
+                         advice: +(g1.rhoNew - g1.rhoCur).toFixed(3), full: g1.deltaRhoFull,
+                         target: g1.rhoTargetFull, steps: g1.steps, stepwise: !!g1.stepwise,
+                         total: App.resolveTotalAsh() };
+            App.setInstrumentInput('density', { manual: +g1.rhoNew.toFixed(3) });   // 照做一步
+            App.store.densityActionLatch = null; App.store.densityLastMoveAt = 0;   // 模拟"新数据到达"
+            const g2 = App.computeDensityGuidance(App.store.ashTarget);
+            const s2 = { rho: +App.resolveDensity().toFixed(3), dA: +g2.deltaA.toFixed(3),
+                         advice: +(g2.rhoNew - g2.rhoCur).toFixed(3), total: App.resolveTotalAsh() };
+            return JSON.stringify({ s1, s2, tol: App.store.ashTargetTol, maxStep: App.DENSITY_GUIDE.maxStep,
+                                    gain: App.EXPERT_ADJUST.gain, cap: App.EXPERT_ADJUST.cap });
         })()`));
-        const lastStep = conv.steps[conv.steps.length - 1];
-        // 收敛判据：不越过目标（同号）且 ≤6 步进入容差。
-        // 仿真增益已按现场确认的 15%/单位密度标定（simK = 0.867/15），所以这里的收敛速度
-        // 与实机应当一致；若哪天又不一致，多半是 simK 或专家表被改动。
-        const amps = conv.steps.map(s => Math.abs(s.dA == null ? 0 : s.dA));
-        const shrinking = amps.every((v, i) => i === 0 || v <= amps[i - 1] + 1e-9);
-        const crossedZero = conv.steps.some(s => s.dA != null && Math.sign(s.dA) !== Math.sign(conv.steps[0].dA));
-        check('STEPWISE_CONVERGES',
-            Math.abs(lastStep.dA) <= conv.tol && shrinking && !crossedZero && conv.steps.length <= 6,
-            `${conv.steps.length - 1} 步后偏差 ${lastStep.dA}%（容差 ±${conv.tol}）；`
-            + `轨迹 ${conv.steps.map(s => s.rho + ':' + s.dA).join(' → ')}；不越零=${!crossedZero} 幅值收敛=${shrinking}`);
+        const expectStep = -Math.sign(conv.s1.dA) * Math.min(Math.abs(conv.s1.dA) / conv.gain, conv.cap, conv.maxStep);
+        check('STEPWISE_LAW',
+            Math.abs(conv.s1.advice - (+expectStep.toFixed(3))) < 5e-4
+            && conv.s1.target != null && conv.s1.steps >= 1,
+            `ΔA=${conv.s1.dA}% → 本步 ${conv.s1.advice}（期望 ${(+expectStep.toFixed(3))}＝min(|ΔA|/${conv.gain}, ${conv.cap}, `
+            + `maxStep ${conv.maxStep})）；完整修正 ${conv.s1.full} → 目标 ${conv.s1.target}，共 ${conv.s1.steps} 步`);
+        check('SAME_MEASUREMENT_SAME_ADVICE',
+            conv.s2.total === conv.s1.total && conv.s2.dA === conv.s1.dA
+            && Math.abs(conv.s2.advice - conv.s1.advice) < 1e-9,
+            `移动密度 ${conv.s1.rho}→${conv.s2.rho} 后（测量未变）：ΔA ${conv.s1.dA}→${conv.s2.dA}，`
+            + `建议 ${conv.s1.advice}→${conv.s2.advice}（不因密度改变而"自我好转"）`);
 
-        // ---------- 10) P0 守卫：默认密度下不再有"凭空"的仿真灰分偏移 ----------
-        // 门控 + 限幅（直接验证逻辑本身，不依赖该 store 恰好处于哪一层）
+        // ---------- 10) P0 守卫：任何密度下都不得凭空生成灰分偏移（新语义） ----------
+        // 旧版验证"门控 + 限幅"；现在没有仿真，正确断言是：无论密度层是什么、密度多远，
+        // 502 读数都必须等于测量基准本身。
         const gated = JSON.parse(await evalJs(`(() => {
             const realLayer = App.instrumentLayer;
             const base = App.latestBeltAsh('502') != null ? App.latestBeltAsh('502') : App.INSTRUMENT_DEFAULT.ash_502;
             App.instrumentLayer = () => '默认(仪表)';
             const heavyDefaultLayer = App.resolveInstrument('ash_502');
             App.instrumentLayer = () => '手动';
-            App.setInstrumentInput('density', { manual: 1.60 });       // 远离基准点 → 触发限幅
+            App.setInstrumentInput('density', { manual: 1.60 });       // 远离工作点
             const heavyFar = App.resolveInstrument('ash_502');
             App.instrumentLayer = realLayer;
             return JSON.stringify({ base, heavyDefaultLayer, heavyFar, rho: 1.60,
                                     delta: +(heavyFar - base).toFixed(4) });
         })()`));
-        check('SIM_GATED_ON_DEFAULT', Math.abs(gated.heavyDefaultLayer - gated.base) < 1e-6,
-            `基准=${gated.base}｜层=默认(仪表) 时 502 在线值=${gated.heavyDefaultLayer}`
-            + `（应等于基准：不得叠加仿真增量，否则默认密度会把 7.9 变成 6.57）`);
-        check('SIM_CLAMPED', Math.abs(gated.delta) <= 1.0 + 1e-9 && Math.abs(gated.delta) > 0,
-            `ρ=1.60 时仿真增量 ${gated.delta}（限幅 ±1.0；未限幅会是 +3.67）`);
+        check('NO_SIM_ON_DEFAULT_LAYER', Math.abs(gated.heavyDefaultLayer - gated.base) < 1e-6,
+            `基准=${gated.base}｜层=默认(仪表) 时 502 读数=${gated.heavyDefaultLayer}（应等于基准）`);
+        check('NO_SIM_AT_ANY_DENSITY', Math.abs(gated.delta) < 1e-9,
+            `ρ=1.60（远离工作点）时 502 读数与基准之差 ${gated.delta}（必须为 0：不得线性外推）`);
 
         // ---------- 12) 建议密度（推测值）：详情弹窗里显示一步到位的终点 ----------
+        // 注意：删掉仿真后，计算档的总灰分是 502/501 实测（本库 8.5488）→ 落在容差内会走"达标早退"，
+        // rhoPredict 为 null。所以这里必须自己造一个**真实的**偏差（手动化验值），不能靠仿真。
         const pred = JSON.parse(await evalJs(`(() => {
-            App.store.heavyAshManualOn = false;
+            App.store.heavyAshManualOn = true;
+            App.setHeavyAshInput({ manual: 8.55 });                  // 造一个 ≈+0.44% 的真实偏差
             App.setInstrumentInput('density', { manual: 1.520 });
             App.store.densityActionLatch = null; App.store.densityLastMoveAt = 0;
             const g = App.computeDensityGuidance(App.store.ashTarget);
             OverviewPage.showCardDetail('total');
             const html = document.getElementById('modal-body') ? document.getElementById('modal-body').innerHTML : '';
-            const shown = html.includes('建议密度(推测值)') && html.includes(g.rhoPredict.toFixed(3));
+            const shown = html.includes('建议密度(推测值)') && g.rhoPredict != null
+                && html.includes(g.rhoPredict.toFixed(3));
             App.closeModal();
             return JSON.stringify({ dA: g.deltaA, rhoCur: g.rhoCur, rhoNew: g.rhoNew,
                 rhoTargetFull: g.rhoTargetFull, rhoPredict: g.rhoPredict,
                 deltaRhoPredict: g.deltaRhoPredict, maxStep: g.maxStep, shown,
-                expect: +(g.rhoCur - g.deltaA / 15).toFixed(3) });
+                expect: (g.rhoPredict == null) ? null : +(g.rhoCur - g.deltaA / 15).toFixed(3) });
         })()`));
         check('PREDICT_TARGET_SHOWN',
-            pred.shown === true && Math.abs(pred.rhoPredict - pred.expect) < 1e-9,
+            pred.shown === true && pred.rhoPredict != null && Math.abs(pred.rhoPredict - pred.expect) < 1e-9,
             `推测值=${pred.rhoPredict}（= ρ当前 ${pred.rhoCur} − ΔA ${pred.dA} / 15，期望 ${pred.expect}）`
             + `；法则封顶的完整修正=${pred.rhoTargetFull}；本次一步=${pred.rhoNew}（≤${pred.maxStep}）；`
             + `弹窗已显示=${pred.shown}`);

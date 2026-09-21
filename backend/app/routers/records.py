@@ -50,7 +50,7 @@ def upsert_record(body: CoalRecordIn, db: Session = Depends(get_db)):
     return rec
 
 
-@router.delete("/{rid}")
+@router.delete("/{rid}", dependencies=[Depends(require_write)])
 def delete_record(rid: int, db: Session = Depends(get_db)):
     rec = db.get(CoalRecord, rid)
     if not rec:

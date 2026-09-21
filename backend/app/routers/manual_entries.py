@@ -24,7 +24,7 @@ def add_entry(body: ManualEntryIn, db: Session = Depends(get_db)):
     return e
 
 
-@router.delete("/{eid}")
+@router.delete("/{eid}", dependencies=[Depends(require_write)])
 def delete_entry(eid: int, db: Session = Depends(get_db)):
     e = db.get(ManualEntry, eid)
     if not e:

@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import CoarseModel
-from ..services import resolvers
+from ..services.guidance import build_density_guidance
 from ..services.state import load_store
 
 router = APIRouter(prefix="/assistant", tags=["AI解读助手(只读)"])
@@ -113,13 +113,7 @@ def assistant_status():
 # ---------------- 实时快照(只读查询) ----------------
 def build_snapshot(db: Session) -> dict:
     store = load_store(db)
-    g_state = {"rho_cur": resolvers.resolve_density(store),
-               "heavy_ash": resolvers.get_heavy_ash(store),
-               "actual_total": resolvers.resolve_total_ash(store),
-               "scheme": "heavy" if store.get("guideScheme") == "heavy" else "total",
-               "tol": store.get("ashTargetTol", 0.1)}
-    from ..services.density import compute_density_guidance
-    guide = compute_density_guidance(g_state, store.get("ashTarget", 8.50))
+    guide, k = build_density_guidance(store)
 
     model_info = None
     m = db.query(CoarseModel).filter(CoarseModel.is_current.is_(True)).first()
@@ -129,9 +123,6 @@ def build_snapshot(db: Session) -> dict:
                       "trained_at": m.trained_at,
                       "r2": met.get("r2"), "q2": met.get("q2"), "q2Time": met.get("q2Time"),
                       "passRate": met.get("passRate")}
-
-    from ..services.density_model import fit_density_gain
-    k = fit_density_gain(store)
 
     snap = {
         "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -143,7 +134,8 @@ def build_snapshot(db: Session) -> dict:
         "heavy_ash": guide.get("heavyAsh"),
         "total_ash_actual": guide.get("actualTotal"),
         "target_total": store.get("ashTarget", 8.50),
-        "guidance": {"scheme": guide.get("scheme"), "deltaA": guide.get("deltaA"),
+        "guidance": {"valid": guide["valid"], "hold": guide["hold"],
+                     "scheme": guide.get("scheme"), "deltaA": guide.get("deltaA"),
                      "suggested_density": guide.get("rhoNew"), "direction": guide.get("direction"),
                      "reason": guide.get("reason")},
         "coarse_model": model_info,

@@ -93,6 +93,13 @@ def test_other_write_endpoints_require_token(token_on, remote_client):
         assert r.status_code == 401, f"{method.upper()} {url} 未受保护: {r.status_code}"
 
 
+@pytest.mark.parametrize("url", ["/api/v1/records/999999999", "/api/v1/manual-entries/999999999"])
+def test_delete_requires_token_before_record_lookup(token_on, remote_client, url):
+    assert remote_client.delete(url).status_code == 401
+    assert remote_client.delete(url, headers={"X-DMCS-Token": "wrong"}).status_code == 401
+    assert remote_client.delete(url, headers={"X-DMCS-Token": token_on}).status_code == 404
+
+
 def test_force_only_from_loopback(token_on, remote_client):
     """force=true（整库覆盖）即便带对 token 也不能从远端发起 —— 这条与 token 独立。"""
     r = remote_client.put("/api/v1/state?force=true", json=SEED,

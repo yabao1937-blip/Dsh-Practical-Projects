@@ -67,14 +67,13 @@ def compute_density_guidance(state: dict, target_total_ash: float) -> dict:
     tol = state.get("tol", 0.1)
     k_gain = state.get("k")
     k_used = k_gain if (isinstance(k_gain, (int, float)) and k_gain > 0) else K_PREDICT
-    # maxStep 仅回显给前端做“逐步走向目标密度”动画（页面可调钳制幅度），
-    # 后端纯函数不参与计算，保留以与前端 computeDensityGuidance 输出结构逐值一致。
+    # maxStep 同时限制本次发布的建议步长，与前端页面设置一致。
     max_step = state.get("max_step", DENSITY_GUIDE["maxStep"])
 
     r = {
         "valid": actual_total is not None,
         "rhoCur": rho_cur, "K": k_used, "heavyAsh": heavy_ash,
-        "kSource": "data" if k_used is not K_PREDICT else "default",
+        "kSource": "data" if k_used != K_PREDICT else "default",
         "targetTotal": target_total_ash, "actualTotal": actual_total, "scheme": scheme,
         "targetHeavy": None, "deltaAHeavy": None,
         "deltaA": None, "deltaRho": 0.0, "rhoNew": rho_cur, "direction": "stable",

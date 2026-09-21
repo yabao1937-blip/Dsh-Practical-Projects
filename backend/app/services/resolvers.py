@@ -1,9 +1,8 @@
 """在线仪表/量/灰分的取值链解析（逐值对齐前端 App.resolve* 系列）。
 
-state 为 store 字典（来自 seed_store.json 或 DB 快照）。本模块覆盖 seed 无手动覆盖的
-主路径；手动有效期(manual_at>=auto_at)的完整判定在 validity.py 中单独实现。
+state 为 store 字典（来自 seed_store.json 或 DB 快照）。
+仪表值只来自录入/测量；密度变化不得改写灰分测量值。
 """
-from .density import DENSITY_GUIDE
 import json
 import math
 
@@ -20,7 +19,22 @@ INSTRUMENT_DEFAULT = {
 
 def _is_num(v):
     """数值判定（排除 bool，因 isinstance(True, int) 为 True，否则 True 会被当作 1 穿透）。"""
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def manual_valid(store, cfg, key):
+    """与前端 _manualValid 一致：自动层接管后，旧手动值不再生效。"""
+    value = cfg.get("manual")
+    if not _is_num(value) or value < 0:
+        return False
+    auto = (store.get("autoState") or {}).get(key)
+    return not auto or (cfg.get("manualAt") or 0) >= (auto.get("t") or 0)
+
+
+def heavy_ash_source(store):
+    cfg = store.get("heavyAshInput") or {}
+    usable = store.get("heavyAshManualOn") is not False and manual_valid(store, cfg, "heavyAsh")
+    return "manual" if usable else "calc"
 
 
 def _num(v):
@@ -63,33 +77,13 @@ def resolve_instrument(store, inst_id):
         entry = _latest_calc_value(store, "ash_meter", "501" if inst_id == "ash_501" else "502")
         if entry is None:
             entry = _latest_belt_ash(store, "501" if inst_id == "ash_501" else "502")
-        # 密度→灰分仿真（与前端 resolveInstrument 同口径；2026-09-12 补上以消除前后端不一致：
-        # 此前只有前端有这一项，同一份 store 两侧取值不同 → 简报与卡片会对不上）：
-        #   ① 只在密度**有真实来源**（手动值或 ash_density 录入）时叠加——默认密度是死数据，
-        #      叠加会凭空把 502 的 7.9% 变成 6.57%，那是编造出来的偏差；
-        #   ② 限幅 ±1.0（远离工作点时不做线性外推）；
-        #   ③ 基准点取最新 ash_density 记录的密度，取不到用 simBaseRho。
-        density_cfg = (store.get("instrumentInputs") or {}).get("density") or {}
-        manual_rho = density_cfg.get("manual")
-        has_manual = _is_num(manual_rho) and manual_rho >= 0
-        base_rho = None
-        for l in reversed(store.get("calcLogs") or []):
-            if l.get("calc_type") != "ash_density":
-                continue
-            try:
-                dv = json.loads(l.get("input_json") or "{}").get("density")
-                if _is_num(dv) and 1.3 <= dv <= 1.6:
-                    base_rho = float(dv)
-                    break
-            except Exception:
-                continue
-        if entry is not None and (has_manual or base_rho is not None):
-            rho = float(manual_rho) if has_manual else float(base_rho)
-            anchor = float(base_rho) if base_rho is not None else float(DENSITY_GUIDE["simBaseRho"])
-            delta = (rho - anchor) / DENSITY_GUIDE["simK"]
-            entry = round(float(entry) + max(-1.0, min(1.0, delta)), 4)
     elif inst_id == "density":
+        measured = _latest_calc_value(store, "density_meter", None)
+        if measured is not None and 1.3 <= measured <= 1.6:
+            entry = measured
         for l in reversed(store.get("calcLogs") or []):
+            if entry is not None:
+                break
             if l.get("calc_type") != "ash_density":
                 continue
             try:
@@ -106,7 +100,7 @@ def resolve_instrument(store, inst_id):
                 entry = float(l["level"])
                 break
     manual = cfg.get("manual")
-    if _is_num(manual) and manual >= 0:
+    if manual_valid(store, cfg, inst_id):
         return manual
     if entry is not None:
         return entry
@@ -226,7 +220,7 @@ def get_heavy_ash(store):
     """
     cfg = store.get("heavyAshInput") or {}
     m = cfg.get("manual")
-    if _is_num(m) and math.isfinite(m) and m >= 0:
+    if heavy_ash_source(store) == "manual":
         return m
     return resolve_instrument(store, "ash_502")
 
@@ -252,8 +246,7 @@ def ash501_layer(store) -> str:
     即 501 尚无在线数据（PLC 未接入），ash_501 一直是常量。
     """
     cfg = (store.get("instrumentInputs") or {}).get("ash_501") or {}
-    manual = cfg.get("manual")
-    if _is_num(manual) and manual >= 0:
+    if manual_valid(store, cfg, "ash_501"):
         return "manual"
     if _latest_calc_value(store, "ash_meter", "501") is not None:
         return "online"
@@ -270,13 +263,18 @@ def resolve_total_ash_ex(store) -> dict:
     """
     cfg = (store.get("ashInputs") or {}).get("totalAsh") or {}
     manual = cfg.get("manual")
-    if _is_num(manual) and manual >= 0:
+    if manual_valid(store, cfg, "totalAsh"):
         return {"value": manual, "source": "manual"}
     formula = formula_total_ash(store)
     if formula is not None:
         return {"value": formula, "source": "formula"}
     entry = cfg.get("entry")
     if _is_num(entry) and entry >= 0:
+        return {"value": entry, "source": "entry"}
+    entry = _latest_calc_value(store, "ash_meter", "501")
+    if entry is None:
+        entry = _latest_belt_ash(store, "501")
+    if entry is not None:
         return {"value": entry, "source": "entry"}
     # 2026-09 工艺确认:501 皮带承载的就是总精煤混配(重介+浮精+粗),
     # 其灰分仪读数即在线总灰分直读;502(重介组分)不再混入平均(否则重介被重复计入)。

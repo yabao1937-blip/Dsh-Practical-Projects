@@ -53,12 +53,29 @@ cd backend
 
 1. 前端导出 localStorage（备份 CSV）或在 http 访问时 `saveStore` 自动镜像。
 2. `POST /api/v1/migrate/localstorage`（body 为前端 `App.store` JSON）或 `PUT /api/v1/state` 整库快照。
-3. `GET /api/v1/migrate/preview` 可先 dry-run 查看各表条数与未识别键。
+3. `POST /api/v1/migrate/preview` 可先 dry-run 查看各表条数与未识别键。
 
 ## 关键口径（迁移/维护时不得偏离）
 
 - 总灰分 = (重介灰分×重介量 + 浮灰×浮量 + 粗灰×粗量) / 总煤量
-- 专家表：|ΔA|≤0.05 不调；0.15→0.01；0.25→0.02；>0.25 斜率 0.1 外推；密度钳制 1.35~1.60
-- 重介灰分 = 静态值（默认 8.50），不实时反推
+- 专家表：|ΔA|≤0.05 不调，否则修正量为 min(|ΔA|/15, 0.03)；发布时再受 maxStep 限制（默认 0.02），密度钳制 1.35~1.60。建议首先判断配置的灰分容差（默认 ±0.1）。
+- 重介灰分 = 有效人工化验值 > 502 测量值 > 默认 7.9；来源切为自动时不使用重介手动值。501/502 测量值不叠加密度仿真增量。
 - 粗灰 = 315灰分（人工采样稀疏），MLR/PLS 预测 + 递归软测量
-- 密度计纯手动录入，系统只建议不执行
+- 系统不向 PLC 下发控制指令；浏览器内密度变化不代表现场设备已动作。
+
+## 本轮优化与验证（2026-09-21）
+
+- 总览和 AI 助手共用 `services/guidance.py`，统一常量灰分守卫、重介换算、动作闩锁、驻留和 maxStep 设置。
+- `densityActionLatch`、`densityLastMoveAt`、`heavyAshManualOn` 通过现有键值表持久化，无需改表结构。多浏览器并发冲突仍需后续版本控制解决。
+- 删除记录/补录必须经过写权限校验。前端保留 401/403 的权限分类和原因。
+- 旧决策日志不重算；新日志标记 `measurementPolicy=measured_only`，导出时区分旧版自动值。
+- 后续计划见 `docs/项目优化与后续计划-20260921.xlsx`（仓库根目录下）。
+
+测试环境必须隔离数据库。推荐重新创建 Python 3.11/3.12 虚拟环境并安装 `requirements.lock.txt`，不要搬用失效的旧 `.venv`。
+
+```powershell
+python -m pytest -q
+node scripts/verify_api_errors.js
+```
+
+`test_guidance_regression.py` 使用 Node 执行真实前端函数，与后端逐值对拍（容差 1e-6）；缺少 Node 时该部分跳过。Excel 通过 `scripts/generate_optimization_plan_xlsx.py` 调用随附的 JS 生成器复现。
