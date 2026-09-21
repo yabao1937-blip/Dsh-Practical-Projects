@@ -839,7 +839,7 @@ const CoarsePage = {
                 <h4 style="margin:0 0 12px;color:var(--accent-blue)">模型拟合度</h4>
                 <p>R² = <strong>${m ? m.r2.toFixed(3) : '--'}</strong>（决定系数，越接近1越好）</p>
                 <p>±${tol}% 合格率 = <strong>${m ? m.passRate.toFixed(0) + '%' : '--'}</strong>　MAE = ${m ? m.mae.toFixed(2) + '%' : '--'}　RMSE = ${m ? m.rmse.toFixed(2) + '%' : '--'}</p>
-                <p style="color:var(--accent-orange);font-size:12px">这是历史对照结果，可能包含训练样本。请结合页面注明的验证口径判断预测能力；补充数据后需要重新验证，不保证误差自动降低。</p></div>`;
+                <p style="color:var(--accent-orange);font-size:12px">说明：±${tol}% 是目标容差带。当前历史数据噪声地板较高（瞬时点样 vs 班级原煤灰分），合格率为真实值，随数据累积与时间对齐改善而上升，可在“重训练历史”中追踪。</p></div>`;
         }
         App.openModal('计算详情', html, '<button class="btn" onclick="App.closeModal()">关闭</button>');
     }
