@@ -26,6 +26,7 @@ SETTING_TO_STORE = {
 
 # auto_state 表 key → store 顶层字段（原样）
 AUTO_STATE_KEYS = [
+    "coarseModelVariants",
     "amountInputs", "ashInputs", "instrumentInputs",
     "heavyAshInput", "coarseAshInput", "floatAshInput",
     "coarseCalc", "coarseAshEma", "autoState", "heavyAshBackcalc",
@@ -70,6 +71,7 @@ def load_store(db) -> dict:
         "amountInputs": {}, "ashInputs": {}, "instrumentInputs": {},
         "heavyAshInput": {}, "coarseAshInput": {}, "floatAshInput": {},
         "coarseCalc": {}, "coarseAshEma": None, "autoState": {}, "coarseModel": None,
+        "coarseModelVariants": {},
     }
     # settings → 单值
     for s in db.query(Setting).all():

@@ -1,4 +1,4 @@
-"""粗精煤泥灰分 MLR/PLS 训练 —— sklearn 内层求解器版（对拍 training.py 的逐值移植）。
+"""DS 原版 MLR/PLS 的 sklearn 对拍求解器（DS/GPT 入口由 routers/training.py 选择）。
 
 职责划分（对应评审建议）：
 - 预处理（_constCols / z-score ddof=1 / 缺失均值补全）、折内预处理 LOOCV 选 λ、

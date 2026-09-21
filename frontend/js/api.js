@@ -99,11 +99,11 @@ window.Api = {
         return (await r.json()).sample;
     },
 
-    async retrainCoarseModel(range) {
+    async retrainCoarseModel(range, revision, engine = 'ds') {
         // 后端训练 MLR+PLS 粗灰模型；返回 { coarseModel(全量), history, production, ... }
         const tk = this.writeToken();
-        const r = await fetch(this.base + '/training/coarse-model?range=' + encodeURIComponent(range || 'jun_jul'), {
-            headers: tk ? { 'X-DMCS-Token': tk } : undefined,
+        const r = await fetch(this.base + '/training/coarse-model?range=' + encodeURIComponent(range || 'jun_jul') + '&engine=' + encodeURIComponent(engine), {
+            headers: {...(tk ? { 'X-DMCS-Token': tk } : {}), ...(revision ? {'X-DMCS-Revision': revision} : {})},
             method: 'POST',
         });
         if (!r.ok) throw new Error('train ' + r.status);

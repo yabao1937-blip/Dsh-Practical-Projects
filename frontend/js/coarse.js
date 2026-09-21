@@ -43,16 +43,9 @@ const CoarsePage = {
         return mt ? mt.level : 0;
     },
 
-    // 同一批化验数据按不同生产系统重复导入时，会在同一采样时间产生多条内容相同的记录，
-    // 生产系统对煤泥灰分影响很小，因此同一时刻只保留一条（首次导入的那条）用于展示/统计。
+    // 同时间重复导入保留最后一条，与训练及重新导入覆盖口径一致。
     _uniqueByTime(data) {
-        const seen = new Set();
-        return data.filter(d => {
-            const key = String(d.timestamp);
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
+        return [...new Map(data.map(d => [String(d.timestamp), d])).values()];
     },
 
     // 取时间上最新的一条记录（数据并非总按时间排序存储，不能用数组末尾代替“最新”）
@@ -65,77 +58,52 @@ const CoarsePage = {
         return latest || (data && data.length ? data[data.length - 1] : null);
     },
 
-    // ============================================================
-    //  日级聚合视图(2026-09-12):按天合并采样点,日均值消除小时内噪声
-    //  实验:日级10因子 R²=0.66 合格率62% vs 小时级 R²=0.54 合格率29%
-    //  模型用现有 MLR/PLS 训练函数,数据改为日均值;懒加载缓存
-    // ============================================================
-
+    // DS 保留原版多数开关，GPT 使用采样点开启比例。
     _dailyAggregate(data) {
-        const byDay = {};
-        (data || []).forEach(d => {
-            if (!d || !d.timestamp) return;
-            const day = String(d.timestamp).slice(0, 10);
-            if (!byDay[day]) byDay[day] = [];
-            byDay[day].push(d);
-        });
-        const days = [];
-        Object.keys(byDay).sort().forEach(day => {
-            const recs = byDay[day];
-            const valid = recs.filter(r => typeof r.ash_content === 'number' && r.ash_content > 0);
-            if (!valid.length) return;
-            const mean = arr => {
-                const v = (arr || []).filter(x => typeof x === 'number' && isFinite(x));
-                return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
-            };
-            const majority = fn => recs.filter(fn).length > recs.length / 2 ? 1 : 0;
-            days.push({
-                day: day, n: valid.length,
-                ash_content: mean(valid.map(r => r.ash_content)),
-                raw_ash: mean(recs.map(r => r.raw_ash)),
-                coal_amount: mean(recs.map(r => r.coal_amount)),
-                level: mean(recs.map(r => r.level)),
-                moisture: mean(recs.map(r => r.moisture)),
-                sysA: majority(r => r.sysA === 1), sysB: majority(r => r.sysB === 1),
-                sys401: majority(r => r.sys401 === 1), sys402: majority(r => r.sys402 === 1),
-                desliming473: majority(r => r.desliming473 === 1),
-                desliming474: majority(r => r.desliming474 === 1),
-                is_stoppage: majority(r => r.is_stoppage === 1),
-                mining_face: (recs[0] && recs[0].mining_face) || '',
-                records: recs,
-            });
-        });
+        const days = App._coarseDaily(data);
+        if (App.coarseEngine() === 'ds') {
+            for (const day of days) for (const f of App.MLR_FEATURES.slice(2, 9)) {
+                day[f] = day.records.filter(r => r[f] === 1).length > day.records.length / 2 ? 1 : 0;
+            }
+        }
         return days;
     },
 
-    _ensureDailyModel() {
-        if (this._dailyModel) return this._dailyModel;
-        const data = this._uniqueByTime(App.store.coarseCoal);
-        const days = this._dailyAggregate(data);
+    _trainDailyDs(days) {
         const feats = App.MLR_FEATURES;
         if (days.length < feats.length + 2) return null;
         const means = feats.map(f => {
-            const vals = days.map(d => d[f]).filter(v => typeof v === 'number' && isFinite(v));
+            const vals = days.map(d => d[f]).filter(Number.isFinite);
             return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
         });
-        const X = days.map(d => feats.map((f, j) => {
-            const v = d[f];
-            return (typeof v === 'number' && isFinite(v)) ? v : means[j];
-        }));
+        const X = days.map(d => feats.map((f, j) => Number.isFinite(d[f]) ? d[f] : means[j]));
         const y = days.map(d => d.ash_content);
-        const mlr = App.trainMlr(X, y);
-        const pls = App.trainPls(X, y, feats.length);
-        if (!mlr && !pls) return null;
-        let production = 'pls';
-        if (mlr && pls) production = (pls.metrics.q2 >= mlr.metrics.q2) ? 'pls' : 'mlr';
-        else if (mlr) production = 'mlr';
-        this._dailyModel = { mlr, pls, production, days, feats, n: days.length };
+        const mlr = App.trainMlr(X, y), pls = App.trainPls(X, y, feats.length);
+        if (!mlr || !pls) return null;
+        mlr.imputeMeans = means; pls.imputeMeans = means;
+        return {mlr, pls, production: pls.metrics.q2 >= mlr.metrics.q2 ? 'pls' : 'mlr', n: days.length};
+    },
+
+    _ensureDailyModel() {
+        const range = App.store.coarseTrainRange || 'jun_jul';
+        const data = App._coarseRows(App.store.coarseCoal);
+        const engine = App.coarseEngine();
+        const key = JSON.stringify([engine, range, App.store.coarseTolerance,
+            data.map(r => [r.timestamp, r.ash_content, ...App.MLR_FEATURES.map(f => r[f])])]);
+        if (key === this._dailyKey) return this._dailyModel;
+        this._dailyKey = key;
+        const trainingDays = this._dailyAggregate(App.filterTrainRows(range));
+        const model = engine === 'gpt' ? App._trainCoarseRows(trainingDays) : this._trainDailyDs(trainingDays);
+        this._dailyModel = model ? {...model, days: this._dailyAggregate(data),
+            feats: App.MLR_FEATURES, range, engine, trainingDays} : null;
         return this._dailyModel;
     },
 
+    _dailyWhich(dm) { return this.viewModel === 'production' ? dm.production : this.viewModel; },
+
     _dailyPred(dayRec, dm) {
         if (!dm) return null;
-        const model = dm[dm.production];
+        const model = dm[this._dailyWhich(dm)];
         if (!model) return null;
         const feats = dm.feats;
         let v = model.intercept;
@@ -207,6 +175,7 @@ const CoarsePage = {
     },
 
     refresh() {
+        this.syncControls();
         this.updateCards();
         this.updateAmountCard();
         this.updateCharts();
@@ -243,19 +212,23 @@ const CoarsePage = {
     updateCards() {
         const data = this._uniqueByTime(App.store.coarseCoal);
         // 当前值应取“时间上最新”的一条，而不是数组最后一条（存储顺序不一定按时间）
-        const latest = this._latestByTime(data);
-        const which = this._which();
+        const dm = this._isDailyView() ? this._ensureDailyModel() : null;
+        const latest = this._isDailyView() ? (dm && dm.days[dm.days.length - 1]) : this._latestByTime(data);
+        const which = dm ? this._dailyWhich(dm) : this._which();
+        const ashLabel = document.getElementById('coarse-current-ash-label');
+        if (ashLabel) ashLabel.textContent = this._isDailyView() ? '最近日期采样均值' : '当前实测灰分';
 
         // 卡片1：当前实测灰分
         document.getElementById('coarse-current-ash').innerHTML = latest
             ? `${latest.ash_content.toFixed(2)}<span class="stat-unit">%</span>` : '--';
         // 当前液位：在线仪表精磁尾液位计为权威值（手动>录入>默认）
-        const curLevel = App.resolveInstrument('level_tail');
+        const curLevel = this._isDailyView() ? (latest && latest.level) : App.resolveInstrument('level_tail');
         document.getElementById('coarse-level').textContent = curLevel != null ? curLevel.toFixed(2) : '--';
 
         // 卡片2：多因素预测灰分（在线仪表液位为手动值时覆盖最新记录的液位特征）
         const lvlOverride = App.instrumentLayer('level_tail') === '手动' ? App.resolveInstrument('level_tail') : null;
-        const pred = latest ? (lvlOverride != null ? App.predictCoarseAsh({ ...latest, level: lvlOverride }, this._which()) : this._pred(latest)) : null;
+        const pred = latest ? (dm ? this._dailyPred(latest, dm)
+            : (lvlOverride != null ? App.predictCoarseAsh({ ...latest, level: lvlOverride }, which) : this._pred(latest))) : null;
         document.getElementById('coarse-predicted-ash').innerHTML = (pred !== null && !isNaN(pred))
             ? `${pred.toFixed(2)}<span class="stat-unit">%</span>` : '--';
         const devEl = document.getElementById('coarse-predicted-dev');
@@ -334,7 +307,7 @@ const CoarsePage = {
         const ctx2 = document.getElementById('chart-coarse-factors').getContext('2d');
         this.factorChart = new Chart(ctx2, {
             type: 'bar',
-            data: { labels: [], datasets: [{ label: '影响权重(|标准化系数|)', data: [], backgroundColor: [] }] },
+            data: { labels: [], datasets: [{ label: '模型关联强度(|标准化系数|)', data: [], backgroundColor: [] }] },
             options: {
                 responsive: true, maintainAspectRatio: false,
                 plugins: { legend: { labels: { color: '#b0bdd0', font: { size: 11 } } },
@@ -388,7 +361,13 @@ const CoarsePage = {
     // 日级趋势图:一天一点(日均值),日级模型预测
     _updateDailyChart() {
         const dm = this._ensureDailyModel();
-        if (!dm || !dm.days.length) return;
+        if (!dm || !dm.days.length) {
+            this.trendChart.data.labels = [];
+            this.trendChart.xTickLabels = [];
+            this.trendChart.data.datasets.forEach(d => { d.data = []; });
+            this.trendChart.update('none');
+            return;
+        }
         const labels = dm.days.map(d => d.day.slice(5));   // MM-DD
         this.trendChart.xTickLabels = labels;               // 每天都标注
 
@@ -429,7 +408,7 @@ const CoarsePage = {
                 valid = dm.days.filter(d => d.ash_content != null && d.level != null && d.level > 0);
                 pts = valid.map(d => ({ lv: d.level, act: d.ash_content,
                                         pred: this._dailyPred(d, dm) }));
-            }
+            } else pts = [];
         }
         if (!pts) {
             valid = this._uniqueByTime(App.store.coarseCoal)
@@ -488,10 +467,11 @@ const CoarsePage = {
         this._levelPts = pts.map(p => ({ x: toX(p.lv), y: toY(p.act), lv: p.lv, act: p.act, pred: p.pred }));
 
         // 角标
-        const m = this._liveMetrics(this._uniqueByTime(App.store.coarseCoal));
+        const dm = this._isDailyView() ? this._ensureDailyModel() : null;
+        const m = this._isDailyView() ? this._dailyMetrics(dm) : this._liveMetrics(this._uniqueByTime(App.store.coarseCoal));
         const tol = (App.store.coarseTolerance !== undefined) ? App.store.coarseTolerance : 0.8;
         const cap = document.getElementById('regression-r2-text');
-        const which = this._which().toUpperCase();
+        const which = (dm ? this._dailyWhich(dm) : this._which()).toUpperCase();
         if (cap) cap.textContent = m
             ? `R²=${m.r2.toFixed(3)} | RMSE=${m.rmse.toFixed(2)} | MAE=${m.mae.toFixed(2)} | ±${tol}%合格=${m.passRate.toFixed(0)}% | ${which} | ${pts.length}点(每点=1条记录)`
             : (pts.length + '个数据点');
@@ -538,12 +518,12 @@ const CoarsePage = {
         if (this._isDailyView()) {
             const dm = this._ensureDailyModel();
             if (dm) {
-                const prodModel = dm[dm.production];
+                const prodModel = dm[this._dailyWhich(dm)];
                 stdCoef = (prodModel && prodModel.stdCoef) || [];
                 feats = dm.feats;
-            }
+            } else { stdCoef = []; feats = []; }
         }
-        if (!stdCoef || !stdCoef.length) {
+        if (!this._isDailyView() && (!stdCoef || !stdCoef.length)) {
             const model = App.getCoarseModel(this._which());
             stdCoef = model.stdCoef || [];
             feats = App.MLR_FEATURES;
@@ -565,7 +545,7 @@ const CoarsePage = {
         if (this._isDailyView()) {
             const dm = this._ensureDailyModel();
             if (!dm || !dm.days.length) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">暂无数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">当前训练范围不足12个有效日期，无法建立日级模型</td></tr>';
                 return;
             }
             const rows = dm.days.slice(-20).reverse();
@@ -609,17 +589,22 @@ const CoarsePage = {
     // 校验面板摘要 + 重训练历史
     updateModelSummary() {
         const tol = (App.store.coarseTolerance !== undefined) ? App.store.coarseTolerance : 0.8;
-        const recent = this._recentRecords(App.store.coarseCoal, 10);
-        const m = this._liveMetrics(recent);
-        const recent30 = this._recentRecords(App.store.coarseCoal, 30);
-        const m30 = this._liveMetrics(recent30);
+        const daily = this._isDailyView();
+        const dm = daily ? this._ensureDailyModel() : null;
+        const cm = daily ? dm : App.store.coarseModel;
+        const data = daily ? (dm ? dm.days : []) : App.store.coarseCoal;
+        const recent = this._recentRecords(data, 10);
+        const recent30 = this._recentRecords(data, 30);
+        const metrics = recs => recs.length ? App._metrics(recs.map(r => r.ash_content),
+            recs.map(r => daily ? this._dailyPred(r, dm) : this._pred(r)), App.MLR_FEATURES.length) : null;
+        const m = metrics(recent), m30 = metrics(recent30);
         const el = document.getElementById('coarse-model-summary');
-        const cm = App.store.coarseModel;
         const prod = cm ? cm[cm.production] : null;
-        const selBasis = (prod && prod.metrics && prod.metrics.q2Time != null) ? '时间Q²选优' : 'Q²选优';
-        const prodTxt = cm ? `${cm.production.toUpperCase()} (${selBasis})` : '出厂默认 PLS';
+        const engine = App.coarseEngine();
+        const selBasis = engine === 'gpt' ? 'GPT · 按日分组时间调参' : `DS · ${daily ? '留一验证选型' : '原版时间验证选型'}`;
+        const prodTxt = cm ? `${cm.production.toUpperCase()} (${selBasis})` : (daily ? '日期不足，日级模型不可用' : '出厂默认 PLS');
         const rangeLabel = r => (r === 'jun_jul' ? '6-7月' : r === '30d' ? '近30天' : r === 'all' ? '全部' : (r || '6-7月'));
-        const trainedTxt = cm ? `${cm.trainedAt}（${rangeLabel(cm.range)}，n=${cm.n}）` : '未训练（使用出厂模型）';
+        const trainedTxt = cm ? `${daily ? '随数据更新重算' : cm.trainedAt}（${rangeLabel(cm.range)}，n=${cm.n}${daily ? '天' : '条'}）` : '未训练';
         let html = `<div class="summary-item"><span class="summary-label">近10天样本：</span><span class="summary-val">${recent.length}</span></div>`;
         // 日常参考：近30天窗口样本量与合格率（口径策略：默认出厂6-7月，日常对照近30天）
         html += `<div class="summary-item"><span class="summary-label">近30天样本：</span><span class="summary-val">${recent30.length}</span></div>`;
@@ -627,7 +612,7 @@ const CoarsePage = {
             html += `<div class="summary-item"><span class="summary-label">近30天合格率：</span><span class="summary-val" style="color:${m30.passRate >= 60 ? 'var(--accent-green)' : m30.passRate >= 30 ? 'var(--accent-orange)' : 'var(--accent-red)'}">${m30.passRate.toFixed(0)}%</span></div>`;
         }
         if (m) {
-            html += `<div class="summary-item"><span class="summary-label">R²：</span><span class="summary-val">${m.r2.toFixed(3)}</span></div>`;
+            html += `<div class="summary-item"><span class="summary-label">近10天历史对照R²：</span><span class="summary-val">${m.r2.toFixed(3)}</span></div>`;
             // 三档容差合格率（±0.8/±1.0/±1.5%），供工艺确认可接受偏差口径
             const p1 = (m.passRate1 !== undefined) ? m.passRate1 : m.passRate;
             const p15 = (m.passRate15 !== undefined) ? m.passRate15 : m.passRate;
@@ -638,21 +623,31 @@ const CoarsePage = {
         html += `<div class="summary-item"><span class="summary-label">生产算法：</span><span class="summary-val">${prodTxt}</span></div>`;
         html += `<div class="summary-item"><span class="summary-label">最近训练：</span><span class="summary-val" style="font-size:12px">${trainedTxt}</span></div>`;
 
-        // 日级模型摘要(按日视图时额外展示)
-        if (this._isDailyView()) {
-            const dm = this._ensureDailyModel();
-            if (dm) {
-                const dMetrics = this._dailyMetrics(dm);
-                const dProd = dm[dm.production];
-                html += `<div class="summary-item"><span class="summary-label">日级模型：</span><span class="summary-val" style="color:var(--accent-green)">${dm.production.toUpperCase()} (n=${dm.n}天)</span></div>`;
-                if (dMetrics) {
-                    html += `<div class="summary-item"><span class="summary-label">日级R²：</span><span class="summary-val" style="color:${dMetrics.r2 >= 0.6 ? 'var(--accent-green)' : 'var(--accent-orange)'}">${dMetrics.r2.toFixed(3)}</span></div>`;
-                    html += `<div class="summary-item"><span class="summary-label">日级合格率：</span><span class="summary-val" style="color:${dMetrics.passRate >= 50 ? 'var(--accent-green)' : 'var(--accent-orange)'}">${dMetrics.passRate.toFixed(0)}%</span></div>`;
-                    html += `<div class="summary-item"><span class="summary-label">日级RMSE：</span><span class="summary-val">${dMetrics.rmse.toFixed(2)}%</span></div>`;
-                }
-                html += `<div class="summary-item" style="font-size:11px;color:var(--text-muted)"><span class="summary-label">说明：</span>按天聚合均值训练,消除小时内采样噪声</div>`;
-            }
+        if (daily) {
+            html += '<div class="summary-item">按采样点均值聚合；不是煤量加权日灰分，不能提前使用当日尚未获得的化验值。</div>';
         }
+
+        const activeDaily = dm;
+        const active = this._isDailyView()
+            ? (activeDaily && activeDaily[this._dailyWhich(activeDaily)]) : App.getCoarseModel(this._which());
+        if (active && active.metrics) {
+            const am = active.metrics;
+            html += `<div class="summary-item"><span class="summary-label">${daily ? '日级' : '采样'}模型训练R² / Q²：</span><span class="summary-val">${am.r2.toFixed(3)} / ${am.q2.toFixed(3)}</span></div>`;
+        }
+        html += `<div class="summary-item">${engine === 'ds'
+            ? 'DS：原版模型，Q²为留一交叉验证；开关按每日多数状态聚合。'
+            : 'GPT：优化版模型，Q²为按日分组时间调参得分；开关按每日采样开启比例聚合。'} 两版Q²口径不同，不能直接用分数高低判断未来预测能力。</div>`;
+        const vm = active && active.metrics && (this.viewModel === 'production'
+            ? active.metrics.pipelineValidation : active.metrics.validation);
+        if (vm) {
+            html += `<div class="summary-item"><span class="summary-label">嵌套时间验证：</span><span class="summary-val">n=${vm.n}，MAE ${vm.mae.toFixed(2)}，RMSE ${vm.rmse.toFixed(2)}，R² ${vm.r2.toFixed(3)}</span></div>`;
+            html += `<div class="summary-item"><span class="summary-label">历史均值基线RMSE：</span><span class="summary-val">${vm.baselineRmse.toFixed(2)}；${vm.beatsBaseline ? '模型误差更低' : '模型未超过基线，预测仅供参考'}</span></div>`;
+        } else if (engine === 'gpt') {
+            html += '<div class="summary-item">尚无独立时间验证结果，请导入足够日期的数据后重新训练。</div>';
+        } else if (!daily && active && active.metrics && active.metrics.q2Time != null) {
+            html += `<div class="summary-item">原版时间验证Q²：${active.metrics.q2Time.toFixed(3)}（与GPT的嵌套时间验证口径不同）。</div>`;
+        }
+        html += '<div class="summary-item">趋势、散点与校验表为历史对照，可能包含训练样本；关联系数不代表因果影响权重。</div>';
 
         if (el) el.innerHTML = html;
 
@@ -666,7 +661,7 @@ const CoarsePage = {
                 const rangeLabel = r => (r === 'jun_jul' ? '6-7月' : r === '30d' ? '近30天' : r === 'all' ? '全部' : (r || '6-7月'));
                 const q2t = v => (v != null) ? ` Q²时${(+v).toFixed(3)}` : '';
                 histEl.innerHTML = hist.map(h => `<tr>
-                    <td style="font-size:12px">${h.trainedAt}</td>
+                    <td style="font-size:12px">${h.engine === 'ds' ? 'DS' : h.engine === 'gpt' ? 'GPT' : '旧记录·版本未标记'}<br>${h.trainedAt}</td>
                     <td>${h.n}</td>
                     <td>${rangeLabel(h.range)}</td>
                     <td>MLR: R²${h.mlr.r2.toFixed(3)} 合格${h.mlr.passRate.toFixed(0)}% Q²${h.mlr.q2.toFixed(3)}${q2t(h.mlr.q2Time)}</td>
@@ -682,6 +677,22 @@ const CoarsePage = {
         // 容差、算法视图、重训练、5分钟滚动 由 index.html 直接 onclick/onchange 调用下方方法
     },
     syncControls() {
+        const engine = App.coarseEngine();
+        for (const id of ['ds', 'gpt']) {
+            const button = document.getElementById('coarse-engine-' + id);
+            if (button) {
+                button.classList.toggle('btn-primary', id === engine);
+                button.setAttribute('aria-pressed', String(id === engine));
+                button.disabled = !!this._training;
+            }
+        }
+        for (const id of ['coarse-retrain', 'coarse-train-range', 'coarse-tol']) {
+            const control = document.getElementById(id);
+            if (control) control.disabled = !!this._training;
+        }
+        const note = document.getElementById('coarse-engine-note');
+        if (note) note.textContent = this._training ? '正在准备模型，请稍候…'
+            : `当前：${engine.toUpperCase()}（${engine === 'ds' ? '原版' : '优化版'}）。切换同步更新粗灰预测；重训仅更新当前版本。首次切换或训练范围、容差改变时会训练所选版本。`;
         const tolEl = document.getElementById('coarse-tol');
         if (tolEl) tolEl.value = (App.store.coarseTolerance !== undefined) ? App.store.coarseTolerance : 0.8;
         const vmEl = document.getElementById('coarse-view-model');
@@ -711,17 +722,39 @@ const CoarsePage = {
         this.viewModel = document.getElementById('coarse-view-model').value;
         this.refresh();
     },
-    async retrain() {
-        const range = App.store.coarseTrainRange || 'jun_jul';
-        const ok = await App.retrainCoarseModelAsync(range);
-        if (ok) {
-            const cm = App.store.coarseModel;
-            const label = App.filterTrainRows(range).length;
-            App.showToast(`重训练完成（${range === 'jun_jul' ? '六月至七月' : range === '30d' ? '最近30天' : '全部数据'}，n=${label}）：${cm.production.toUpperCase()} R²=${cm[cm.production].metrics.r2.toFixed(3)} 合格率=${cm[cm.production].metrics.passRate.toFixed(0)}%`, 'success');
-        } else {
-            App.showToast('训练失败，数据不足', 'error');
+    async switchEngine(engine) {
+        if (this._training || engine === App.coarseEngine()) return;
+        this._training = true;
+        this.syncControls();
+        try {
+            // 先绘制忙碌状态，再运行 file:// 下的同步训练。
+            await new Promise(resolve => setTimeout(resolve, 0));
+            const ok = await App.switchCoarseEngine(engine);
+            App.showToast(ok ? `已切换到 ${engine.toUpperCase()} 模型` : '切换未完成，保留原模型；请检查训练数据及同步状态', ok ? 'success' : 'error');
+        } finally {
+            this._training = false;
+            this.refresh();
         }
-        this.refresh();
+    },
+    async retrain() {
+        if (this._training) return;
+        this._training = true;
+        this.syncControls();
+        try {
+            await new Promise(resolve => setTimeout(resolve, 0));
+            const range = App.store.coarseTrainRange || 'jun_jul';
+            const ok = await App.retrainCoarseModelAsync(range);
+            if (ok) {
+                const cm = App.store.coarseModel;
+                const label = cm.n;
+                App.showToast(`${App.coarseEngine().toUpperCase()} 重训练完成（${range === 'jun_jul' ? '六月至七月' : range === '30d' ? '最近30天' : '全部数据'}，n=${label}）：${cm.production.toUpperCase()} R²=${cm[cm.production].metrics.r2.toFixed(3)} 合格率=${cm[cm.production].metrics.passRate.toFixed(0)}%`, 'success');
+            } else {
+                App.showToast('训练未完成，请检查同步状态；DS需12条有效采样，GPT还需覆盖8个日期', 'error');
+            }
+        } finally {
+            this._training = false;
+            this.refresh();
+        }
     },
     toggleAutoRoll() {
         const rollEl = document.getElementById('coarse-auto-roll');
@@ -761,15 +794,16 @@ const CoarsePage = {
     // ---------- 卡片详情 ----------
     showCardDetail(type) {
         const data = this._uniqueByTime(App.store.coarseCoal);
-        const latest = this._latestByTime(data);
-        const cm = App.store.coarseModel;
-        const which = this._which();
-        const m = this._liveMetrics(data);
+        const daily = this._isDailyView(), dm = daily ? this._ensureDailyModel() : null;
+        const latest = daily ? (dm && dm.days[dm.days.length - 1]) : this._latestByTime(data);
+        const cm = daily ? dm : App.store.coarseModel;
+        const which = dm ? this._dailyWhich(dm) : this._which();
+        const m = daily ? this._dailyMetrics(dm) : this._liveMetrics(data);
         let html = '';
         if (type === 'ash') {
             html = `<div style="line-height:2;font-size:14px">
-                <h4 style="margin:0 0 12px;color:var(--accent-blue)">当前实测灰分</h4>
-                <p>取最新一条粗精煤泥化验数据（315灰分），直接读值。</p>
+                <h4 style="margin:0 0 12px;color:var(--accent-blue)">${daily ? '最近日期采样均值' : '当前实测灰分'}</h4>
+                <p>${daily ? '同一日期315灰分有效采样的算术均值；并非全天煤量加权灰分。' : '取最新一条粗精煤泥化验数据（315灰分），直接读值。'}</p>
                 <table class="data-table" style="margin:4px 0 12px">
                     <tr><td>实测灰分</td><td>${latest ? latest.ash_content.toFixed(2) + '%' : '暂无'}</td></tr>
                     <tr><td>煤量</td><td>${latest ? (latest.coal_amount||0).toFixed(1) + ' t/h' : '-'}</td></tr>
@@ -778,13 +812,13 @@ const CoarsePage = {
                     <tr><td>采样时间</td><td>${latest ? latest.timestamp : '-'}</td></tr>
                 </table></div>`;
         } else if (type === 'predict') {
-            const pred = latest ? this._pred(latest) : null;
+            const pred = latest ? (dm ? this._dailyPred(latest, dm) : this._pred(latest)) : null;
             const dev = (pred !== null && latest) ? pred - latest.ash_content : 0;
             html = `<div style="line-height:2;font-size:14px">
                 <h4 style="margin:0 0 12px;color:var(--accent-blue)">多因素预测灰分（${which.toUpperCase()}）</h4>
                 <p style="color:var(--text-secondary)">将原煤灰分、带煤量、系统组合、脱粉、停机、液位等扰动因子全部纳入前馈计算。</p>
                 <p>预测灰分 = ${pred !== null ? pred.toFixed(2) + '%' : '--'}　实测 = ${latest ? latest.ash_content.toFixed(2) + '%' : '--'}　偏差 = ${dev > 0 ? '+' : ''}${dev.toFixed(2)}%</p>
-                <p style="color:var(--text-secondary);font-size:12px">生产模型：${cm ? cm.production.toUpperCase() + '（按留一交叉验证 Q² 选优）' : '出厂默认 PLS（待训练）'}</p></div>`;
+                <p style="color:var(--text-secondary);font-size:12px">${App.coarseEngine().toUpperCase()} · 生产模型：${cm ? cm.production.toUpperCase() : '出厂默认 PLS（待训练）'}。${App.coarseEngine() === 'gpt' ? '按完整日期向前验证，专家因子作为候选参与选择。' : '保留原版十因素 MLR / PLS 训练与选型。'}</p></div>`;
         } else if (type === 'cumulative') {
             let shiftData = this._getShiftData(data);
             if (shiftData.length === 0 && data.length) shiftData = data;
@@ -805,7 +839,7 @@ const CoarsePage = {
                 <h4 style="margin:0 0 12px;color:var(--accent-blue)">模型拟合度</h4>
                 <p>R² = <strong>${m ? m.r2.toFixed(3) : '--'}</strong>（决定系数，越接近1越好）</p>
                 <p>±${tol}% 合格率 = <strong>${m ? m.passRate.toFixed(0) + '%' : '--'}</strong>　MAE = ${m ? m.mae.toFixed(2) + '%' : '--'}　RMSE = ${m ? m.rmse.toFixed(2) + '%' : '--'}</p>
-                <p style="color:var(--accent-orange);font-size:12px">说明：±${tol}% 是目标容差带。当前历史数据噪声地板较高（瞬时点样 vs 班级原煤灰分），合格率为真实值，随数据累积与时间对齐改善而上升，可在“重训练历史”中追踪。</p></div>`;
+                <p style="color:var(--accent-orange);font-size:12px">这是历史对照结果，可能包含训练样本。请结合页面注明的验证口径判断预测能力；补充数据后需要重新验证，不保证误差自动降低。</p></div>`;
         }
         App.openModal('计算详情', html, '<button class="btn" onclick="App.closeModal()">关闭</button>');
     }

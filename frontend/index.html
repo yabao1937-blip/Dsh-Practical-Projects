@@ -343,22 +343,29 @@
             <div class="page-header">
                 <h2>粗精煤泥灰分实时分析</h2>
                 <div class="page-header-actions">
+                    <div class="filter-group" role="group" aria-label="粗精煤泥模型版本">
+                        <label>模型版本：</label>
+                        <button id="coarse-engine-ds" class="btn" aria-pressed="false" title="DS：原版模型" onclick="CoarsePage.switchEngine('ds')">DS</button>
+                        <button id="coarse-engine-gpt" class="btn" aria-pressed="false" title="GPT：优化版模型" onclick="CoarsePage.switchEngine('gpt')">GPT</button>
+                    </div>
                     <div class="filter-group">
                         <label>视图：</label>
                         <select id="coarse-view-mode" onchange="CoarsePage.switchView()">
-                            <option value="shift">按班次</option>
+                            <option value="shift">按采样</option>
                             <option value="day">按日</option>
                         </select>
                     </div>
-                    <button class="btn" onclick="CoarsePage.retrain()">重新训练模型</button>
+                    <button id="coarse-retrain" class="btn" onclick="CoarsePage.retrain()">重新训练模型</button>
                     <button class="btn btn-primary" onclick="CoarsePage.refresh()">刷新</button>
                 </div>
             </div>
 
+            <p id="coarse-engine-note" style="color:var(--text-secondary);font-size:13px;margin:0 0 16px" aria-live="polite"></p>
+
             <!-- 数值卡片 -->
             <div class="card-grid-5">
                 <div class="stat-card" onclick="CoarsePage.showCardDetail('ash')">
-                    <div class="stat-card-label">当前实测灰分</div>
+                    <div class="stat-card-label" id="coarse-current-ash-label">当前实测灰分</div>
                     <div class="stat-card-value" id="coarse-current-ash">--<span class="stat-unit">%</span></div>
                     <div class="stat-card-sub">精磁尾液位: <span id="coarse-level">--</span>%</div>
                 </div>
@@ -381,7 +388,7 @@
                     <div class="stat-card-sub" id="coarse-cumulative-sub">按煤量加权</div>
                 </div>
                 <div class="stat-card accent-green" onclick="CoarsePage.showCardDetail('fit')">
-                    <div class="stat-card-label">模型拟合度 R²</div>
+                    <div class="stat-card-label">历史对照 R²</div>
                     <div class="stat-card-value" id="coarse-fit-r2">--</div>
                     <div class="stat-card-sub" id="coarse-fit-sub">需先导入数据</div>
                 </div>
@@ -401,7 +408,7 @@
             <div class="panel-row">
                 <div class="panel panel-narrow">
                     <div class="panel-header">
-                        <h3>多因素影响权重</h3>
+                        <h3>多因素模型关联强度</h3>
                     </div>
                     <div class="panel-body chart-container-small">
                         <canvas id="chart-coarse-factors"></canvas>
@@ -424,7 +431,7 @@
             <!-- 近10天公式校验 -->
             <div class="panel">
                 <div class="panel-header">
-                    <h3>近10天公式校验（新公式计算值 vs 实测值）</h3>
+                    <h3>历史公式对照（模型计算值 vs 实测值）</h3>
                     <div class="panel-header-info">
                         <span>合格判定：偏差在容差内为合格</span>
                         <span id="coarse-update-time">更新时间：--</span>
@@ -473,7 +480,7 @@
             <!-- 重训练历史（持续优化追踪） -->
             <div class="panel">
                 <div class="panel-header">
-                    <h3>模型重训练历史（公式不断完善记录）</h3>
+                    <h3>采样模型重训练历史</h3>
                     <div class="panel-header-info"><span>每次导入/重训练追加一条，追踪 R² 与合格率变化</span></div>
                 </div>
                 <div class="panel-body">

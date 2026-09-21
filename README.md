@@ -71,8 +71,8 @@ node scripts\verify_pull_from_server.js           # 双向同步/防回退端到
 | 维度 | file:// 打开 | http:// 打开（后端托管） |
 |---|---|---|
 | 数据存储 | localStorage | localStorage + 后端 SQLite 镜像（PUT /state） |
-| 模型训练 | 本地 JS | 后端 sklearn（POST /training/coarse-model） |
-| 后端不可用 | 无影响 | 训练/镜像自动回退本地 |
+| 模型训练 | 本地 JS | 后端同算法（POST /training/coarse-model） |
+| 后端不可用 | 无影响 | 保留待同步数据；训练明确提示失败 |
 
 前端保持原生 JS；`js/api.js` 做双轨：file:// 仅 localStorage，http:// 额外把整库镜像到后端。
 
@@ -102,9 +102,14 @@ node scripts\verify_pull_from_server.js           # 双向同步/防回退端到
 - **密度建议**：`calc_total_ash` + `expert_adjust` + `compute_density_guidance`（总灰分/重介灰分两版）。
 - **粗精煤泥灰分预测**：10 特征 MLR/PLS（`predict_coarse_ash`）。
 - **推测简报**：`build_hourly_brief`（16 列、1h 对齐、递归软测量）。
-- **模型训练**：`trainMlr`（岭回归 hat-LOOCV 选 λ）+ `trainPls`（PLS1 NIPALS + LOOCV 选 A），
-  纯 Python 逐位移植前端；`training_sklearn.py` 用 sklearn `Ridge`/`PLSRegression` 做内层求解器（差 ~1e-13）。
-  生产模型按 q2Time（优先）/ q2（回退）选 mlr|pls。
+- **粗灰模型 DS / GPT 切换**：分析页按钮同时切换采样模型、日级模型及粗灰预测取值链。DS 保留原版 MLR/PLS；GPT 为优化版（不是调用外部 AI 接口）。两套模型保存在 `coarseModelVariants`，重训只覆盖所选版本；新安装默认 DS，已有存档按实际模型识别版本。
+  首次切换或范围、容差不匹配时训练对应版本；已有匹配模型直接复用。新增数据后应重训需比较的各版本。
+  两版日级训练均遵循所选范围，修复原版日级忽略训练范围的问题。DS 日开关取多数状态，Q² 保留留一验证；GPT 日开关取采样开启比例，Q² 为时间调参得分，两者不可直接比较高低。
+- **GPT 粗灰模型训练**：`coarse_training.py` / `App._trainCoarseRows` 逐值对拍。
+  按完整日期向前验证；内层选择 MLR 正则化强度、PLS 成分数和专家候选，外层评估误差并对照历史均值。
+  按采样建模；日级按采样点均值聚合，开关保留开启比例。历史拟合与时间验证分别展示。
+  `training.py` / `App._trainCoarseDs` 为 DS 原版；`training_sklearn.py` 保留通用求解器验证。
+  数据审计、后期检验和限制见 [粗灰模型优化说明](docs/粗精煤泥灰分模型优化-20260921.md)。
 
 ## API 一览（前缀 /api/v1）
 
@@ -120,7 +125,7 @@ node scripts\verify_pull_from_server.js           # 双向同步/防回退端到
 | GET | /overview/dashboard | 总览（取值链+密度建议） |
 | POST | /migrate/preview · /migrate/localstorage | localStorage 迁移 |
 | POST | /import | Excel 导入 |
-| POST | /training/coarse-model?range=jun_jul\|30d\|all | MLR/PLS 训练（sklearn）+ 持久化 + 回填 |
+| POST | /training/coarse-model?range=jun_jul\|30d\|all&engine=ds\|gpt | 所选版本 MLR/PLS 训练 + 独立保存 + 回填（默认 ds）；支持 X-DMCS-Revision，返回新 revision |
 
 ## 文档（docs/）
 

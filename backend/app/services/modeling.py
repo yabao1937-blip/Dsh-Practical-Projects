@@ -18,7 +18,7 @@ def predict_coarse_ash(rec, model):
     y = model.get("intercept", 0.0)
     for j, f in enumerate(feats):
         v = rec.get(f)
-        if not isinstance(v, (int, float)) or isinstance(v, bool) or (isinstance(v, float) and math.isnan(v)):
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v):
             v = means[j] if j < len(means) else 0.0
         if j < len(coefs):
             y += coefs[j] * v

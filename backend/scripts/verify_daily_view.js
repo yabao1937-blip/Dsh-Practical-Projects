@@ -56,6 +56,20 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         }
         if (!ready) throw new Error('App 未就绪');
 
+        // 页面测试只改当前一次性浏览器的内存，不向现场或临时数据库播种。
+        // 默认使用版本管理夹具，允许指定只读记录文件复验现场数据。
+        const fixturePath = process.env.DMCS_COARSE_FIXTURE || path.join(__dirname, '../data/seed_store.json');
+        const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+        const fixtureRows = Array.isArray(fixture) ? fixture : fixture.coarseCoal;
+        await evalJs(`(() => {
+            App.saveStore = () => {};
+            App.store.coarseCoal = ${JSON.stringify(fixtureRows)};
+            App.store.coarseTrainRange = 'all';
+            App.trainCoarseModel('all', 'gpt');
+            App.trainCoarseModel('all', 'ds');
+            return true;
+        })()`);
+
         // 导航到粗精煤泥分析页(默认在总览页,CoarsePage 未初始化)
         await evalJs(`(() => {
             document.querySelector('[data-page="page-coarse"]').click();
@@ -69,12 +83,26 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         if (!ready) throw new Error('CoarsePage/trendChart 未就绪');
         console.log('粗精煤泥页就绪 ✓');
 
-        // 1. 小时级(默认)
+        let allOk = true;
+        const samplePredictions = {};
+        for (const engine of ['ds', 'gpt', 'ds']) {
+        await evalJs(`document.getElementById('coarse-engine-${engine}').click()`);
+        for (let i = 0; i < 30; i++) {
+            if (await evalJs(`!CoarsePage._training && App.coarseEngine() === '${engine}'`)) break;
+            await sleep(200);
+        }
+        const selected = await evalJs(`document.getElementById('coarse-engine-${engine}').getAttribute('aria-pressed')`);
+        if (selected !== 'true') throw new Error(engine + ' 按钮未选中');
+        const prediction = await evalJs('CoarsePage._pred(App.store.coarseCoal[0])');
+        if (samplePredictions[engine] !== undefined && samplePredictions[engine] !== prediction) throw new Error('来回切换改写了预测');
+        samplePredictions[engine] = prediction;
+        console.log('模型版本:', engine.toUpperCase());
+        // 1. 采样级(默认)
         const hourly = JSON.parse(await evalJs(`JSON.stringify({
             n: CoarsePage.trendChart.data.labels.length,
             actualN: CoarsePage.trendChart.data.datasets[0].data.filter(v => v != null).length
         })`));
-        console.log('小时级:', JSON.stringify(hourly));
+        console.log('采样级:', JSON.stringify(hourly));
 
         // 2. 切换到按日
         await evalJs(`(() => {
@@ -97,6 +125,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
                 modelN: dm ? dm.n : 0,
                 r2: m ? +m.r2.toFixed(3) : null,
                 passRate: m ? +m.passRate.toFixed(1) : null,
+                validationN: dm && dm[dm.production].metrics.pipelineValidation
+                    ? dm[dm.production].metrics.pipelineValidation.n : 0,
             });
         })()`));
         console.log('日级:', JSON.stringify(daily));
@@ -115,7 +145,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         const factorLabels = await evalJs(`JSON.stringify(CoarsePage.factorChart.data.labels.slice(0,3))`);
         console.log('因子前3:', factorLabels);
 
-        // 6. 切回按班次
+        // 6. 切回按采样
         await evalJs(`(() => {
             document.getElementById('coarse-view-mode').value = 'shift';
             CoarsePage.switchView();
@@ -124,10 +154,18 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         await sleep(1000);
         const backN = await evalJs('CoarsePage.trendChart.data.labels.length');
         const backSub = await evalJs(`document.getElementById('coarse-fit-sub').innerHTML`);
-        console.log('切回: n=' + backN, '(恢复小时级:', !backSub.includes('日级'), ')');
+        console.log('切回: n=' + backN, '(恢复采样级:', !backSub.includes('日级'), ')');
 
-        const allOk = daily.n > 0 && daily.n < hourly.n && daily.r2 && daily.r2 > 0.5
+        // 验证页面口径和独立验证存在，不把训练集 R² 越高当作正确性。
+        allOk = allOk && daily.n > 0 && daily.n < hourly.n && Number.isFinite(daily.r2) && (engine === 'ds' || daily.validationN > 0)
+                     && daily.actualN === daily.n && daily.predN === daily.n && backN === hourly.n
                      && fitSub.includes('日级') && tableRows > 0 && !backSub.includes('日级');
+        }
+        allOk = allOk && Math.abs(samplePredictions.ds - samplePredictions.gpt) > 1e-6;
+        if (process.env.DMCS_SCREENSHOT) {
+            const shot = await send('Page.captureScreenshot', {format: 'png'});
+            fs.writeFileSync(process.env.DMCS_SCREENSHOT, Buffer.from(shot.result.data, 'base64'));
+        }
         console.log(allOk ? '\nALL PASS' : '\nHAS FAILURES');
         ws.close();
         process.exitCode = allOk ? 0 : 1;

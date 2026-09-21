@@ -31,6 +31,7 @@ SETTING_KEYS = {
 
 # 对象键 → auto_state 表（完整 JSON 无损存储）
 AUTO_STATE_KEYS = [
+    "coarseModelVariants",
     "amountInputs", "ashInputs", "instrumentInputs",
     "heavyAshInput", "coarseAshInput", "floatAshInput",
     "coarseCalc", "coarseAshEma", "autoState", "heavyAshBackcalc",

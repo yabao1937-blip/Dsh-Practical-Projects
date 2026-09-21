@@ -1,4 +1,7 @@
-"""粗精煤泥灰分 MLR/PLS 训练引擎（逐值对齐前端 App.trainMlr/trainPls/trainCoarseModel）。
+"""通用 MLR/PLS 求解器及 DS 原版训练编排。
+
+DS 入口 train_coarse_model 镜像 App._trainCoarseDs；GPT 入口在 coarse_training.train_models。
+本模块的 train_mlr/train_pls 仍对齐 App.trainMlr/trainPls。
 
 实现策略：
 - 本模块用纯 Python 列表 + 显式循环逐操作镜像前端 JS（IEEE-754 double），保证

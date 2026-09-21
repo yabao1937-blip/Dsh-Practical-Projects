@@ -4,7 +4,7 @@
    - saveStore/loadStore：localStorage 持久化，http 下额外镜像 PUT /api/v1/state
    - 算法：取值链 resolve*、总灰分 calcTotalAsh、密度建议 computeDensityGuidance、
            粗灰预测 predictCoarseAsh、推测简报 buildHourlyBrief
-   - 训练：trainMlr/trainPls（本地回退）+ retrainCoarseModelAsync（走后端 sklearn）
+   - 训练：DS _trainCoarseDs / GPT _trainCoarseRows + retrainCoarseModelAsync（后端同算法）
    ======================================== */
 
 const App = {
@@ -21,6 +21,7 @@ const App = {
         alerts: [],
         // 多因素粗精煤泥灰分模型（MLR + PLS）
         coarseModel: null,            // {mlr, pls, production, trainedAt, n, tolerance}
+        coarseModelVariants: {},      // DS / GPT 各自最近一次训练的完整模型
         coarseModelHistory: [],       // 每次重训练的拟合度快照（持续优化追踪）
         coarseTolerance: 0.8,         // 合格判定容差（±%），可在粗精煤泥页调整
         coarseTrainRange: 'jun_jul',  // 训练数据范围：jun_jul=仅6-7月(出厂口径) | 30d=近30天 | all=全部
@@ -943,7 +944,7 @@ const App = {
             magneticTail: [], rawSlime: [], coarseCoal: [], floatCoal: [],
             regressionModels: [], calcLogs: [], manualEntries: [],
             importLogs: [], alerts: [],
-            coarseModel: null, coarseModelHistory: [], coarseTolerance: 0.8,
+            coarseModel: null, coarseModelVariants: {}, coarseModelHistory: [], coarseTolerance: 0.8,
             coarseTrainRange: 'jun_jul',
             coarseAshEma: null,
             autoState: {},
@@ -3027,7 +3028,40 @@ const App = {
         metrics: { r2: 0.534243, adjR2: 0.493545, rmse: 2.356507, mae: 1.759189, passRate: 31.858407, q2: 0.402075 }
     },
 
-    // 取当前生效的粗精煤泥模型（优先生产模型，缺则回退出厂默认）
+    // DS/GPT 版本由模型指标识别，兼容升级前的存档。
+    coarseEngine(model = this.store.coarseModel) {
+        // 兼容没有版本字段的旧存档：v2 属于 GPT，其余属于 DS。
+        return model && model.mlr && model.mlr.metrics && model.mlr.metrics.version === 2 ? 'gpt' : 'ds';
+    },
+
+    _rememberCoarseModel() {
+        if (!this.store.coarseModelVariants) this.store.coarseModelVariants = {};
+        if (this.store.coarseModel) {
+            const engine = this.coarseEngine(), current = this.store.coarseModel;
+            const saved = this.store.coarseModelVariants[engine];
+            // /state 的兼容模型表只返回部分字段。同一模型不覆盖完整快照，避免丢失 lambda/drop。
+            const identity = m => JSON.stringify([m.trainedAt, m.n, m.range, m.tolerance, m.production,
+                ...['mlr', 'pls'].map(k => [m[k].intercept, m[k].coefs, m[k].imputeMeans])]);
+            if (!saved || identity(saved) !== identity(current)) this.store.coarseModelVariants[engine] = current;
+        }
+    },
+
+    async switchCoarseEngine(engine) {
+        if (!['ds', 'gpt'].includes(engine)) return false;
+        this._rememberCoarseModel();
+        const saved = this.store.coarseModelVariants[engine];
+        const range = this.store.coarseTrainRange || 'jun_jul';
+        const tol = this.store.coarseTolerance ?? .8;
+        if (!saved || saved.range !== range || saved.tolerance !== tol) {
+            return this.retrainCoarseModelAsync(range, engine);
+        }
+        this.store.coarseModel = saved;
+        this.refreshCoarsePredictions();
+        this.saveStore();
+        return true;
+    },
+
+    // 取当前生效的粗精煤泥模型（优先生产模型，缺则回退出厂默认）。
     getCoarseModel(which) {
         which = which || (this.store.coarseModel ? this.store.coarseModel.production : 'pls');
         if (this.store.coarseModel && this.store.coarseModel[which]) return this.store.coarseModel[which];
@@ -3044,7 +3078,7 @@ const App = {
         let y = model.intercept;
         for (let j = 0; j < feats.length; j++) {
             let v = rec[feats[j]];
-            if (typeof v !== 'number' || isNaN(v)) v = means[j];
+            if (!Number.isFinite(v)) v = means[j];
             y += model.coefs[j] * v;
         }
         return y;
@@ -3092,32 +3126,169 @@ const App = {
         return { X, y, means, rows };
     },
 
-    // 训练 MLR + PLS，按时间序列交叉验证 Q² 选生产模型（回退留一 Q²），回填每条记录 predicted_ash
-    trainCoarseModel(range) {
-        const useRange = range || this.store.coarseTrainRange || 'jun_jul';
-        const d = this._buildCoarseXY(useRange);
-        if (!d) return false;
+    // 粗灰专用训练 v2：按完整日期验证，专家假设由时间验证选择。
+    _coarseRows(records) {
+        const unique = new Map();
+        records.forEach(r => {
+            const instant = new Date(String(r.timestamp || '').replace(' ', 'T') + 'Z');
+            if (Number.isFinite(r.ash_content) && r.ash_content > 0 && r.ash_content <= 40 &&
+                /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(r.timestamp || '') &&
+                Number.isFinite(instant.getTime()) &&
+                instant.toISOString().slice(0, 19).replace('T', ' ') === r.timestamp) unique.set(r.timestamp, r);
+        });
+        return [...unique.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    },
+    _coarseDaily(records) {
+        const groups = new Map();
+        this._coarseRows(records).forEach(r => {
+            const d = r.timestamp.slice(0, 10);
+            if (!groups.has(d)) groups.set(d, []);
+            groups.get(d).push(r);
+        });
+        return [...groups].map(([day, records]) => {
+            const row = {day, timestamp: day + ' 12:00:00', n: records.length, records};
+            [...this.MLR_FEATURES, 'ash_content', 'moisture'].forEach(f => {
+                const vals = records.map(r => r[f]).filter(Number.isFinite);
+                row[f] = vals.length ? this._mean(vals) : null;
+            });
+            return row;
+        });
+    },
+    _coarseFolds(rows, outer = false) {
+        const days = [...new Set(rows.map(r => r.timestamp.slice(0, 10)))].sort();
+        const cuts = (outer ? [.7, .85, 1] : [.5, .7, .85, 1]).map(f => Math.floor(days.length * f));
+        const blocks = [];
+        for (let i = 0; i < cuts.length - 1; i++) {
+            const a = cuts[i], b = cuts[i + 1];
+            if (a < 4 || a >= b) continue;
+            const s = rows.findIndex(r => r.timestamp.slice(0, 10) === days[a]);
+            const e = b === days.length ? rows.length : rows.findIndex(r => r.timestamp.slice(0, 10) === days[b]);
+            if (s >= 6) blocks.push([s, e]);
+        }
+        return blocks;
+    },
+    _coarseCandidates(kind) {
+        const out = [];
+        ['all', 'expert'].forEach(subset => {
+            if (kind === 'mlr') [.001, .01, .1, 1, 10].forEach(alpha => {
+                (subset === 'all' ? [1, 4] : [1]).forEach(penalty => out.push({subset, alpha, penalty}));
+            });
+            else for (let A = 1; A <= (subset === 'all' ? 4 : 3); A++) out.push({subset, A, penalty: 1});
+        });
+        return out;
+    },
+    _coarseFit(rows, kind, config) {
+        const {X, means: impute} = this._impute(rows.map(r => this.MLR_FEATURES.map(f => r[f])));
+        const {means, stds} = this._colMeansStd(X), Z = this._standardize(X, means, stds);
+        const y = rows.map(r => r.ash_content), ym = this._mean(y), expert = [0, 6, 7];
+        const active = this.MLR_FEATURES.map((_, j) => j).filter(j =>
+            (config.subset === 'all' || expert.includes(j)) && X.some(r => Math.abs(r[j] - X[0][j]) > 1e-9));
+        const beta = this.MLR_FEATURES.map(() => 0);
+        if (active.length) {
+            const z = Z.map(r => active.map(j => r[j]));
+            let solution;
+            if (kind === 'mlr') {
+                const A = active.map((_, p) => active.map((_, q) => z.reduce((s, r) => s + r[p] * r[q], 0)));
+                const b = active.map((_, p) => z.reduce((s, r, i) => s + r[p] * (y[i] - ym), 0));
+                active.forEach((j, p) => { A[p][p] += config.alpha * rows.length * (expert.includes(j) ? 1 : config.penalty); });
+                solution = this.solveLinearSystem(A, b);
+            } else solution = this._plsCore(z, y.map(v => v - ym), Math.min(config.A, active.length)).Bstd;
+            active.forEach((j, p) => { beta[j] = solution[p]; });
+        }
+        const coefs = beta.map((b, j) => b / stds[j]);
+        const intercept = ym - coefs.reduce((s, c, j) => s + c * means[j], 0);
+        const yhat = X.map(r => intercept + coefs.reduce((s, c, j) => s + c * r[j], 0)), sy = this._std(y);
+        return {type: kind, version: 2, feature_names: this.MLR_FEATURES, intercept, coefs, means, stds,
+            imputeMeans: impute, stdCoef: beta.map(v => sy ? v / sy : 0),
+            drop: beta.map((_, j) => j).filter(j => !active.includes(j)),
+            n: rows.length, k: active.length, config, lambda: (config.alpha || 0) * rows.length, A: config.A || null,
+            yhat, metrics: this._metrics(y, yhat, active.length)};
+    },
+    _coarsePredict(r, m) {
+        return this._predictFromModelVec(this.MLR_FEATURES.map(f => r[f]), m);
+    },
+    _coarseSelect(rows, kind) {
+        const blocks = this._coarseFolds(rows);
+        if (!blocks.length) return null;
+        let best = null;
+        this._coarseCandidates(kind).forEach(config => {
+            const actual = [], pred = [];
+            blocks.forEach(([s, e]) => {
+                const m = this._coarseFit(rows.slice(0, s), kind, config);
+                rows.slice(s, e).forEach(r => { actual.push(r.ash_content); pred.push(this._coarsePredict(r, m)); });
+            });
+            const score = this._metrics(actual, pred, 0);
+            if (!best || score.rmse < best.score.rmse - 1e-10) best = {config, score};
+        });
+        return best;
+    },
+    _trainCoarseRows(records) {
+        const rows = this._coarseRows(records), kinds = ['mlr', 'pls'];
+        if (rows.length < 12 || new Set(rows.map(r => r.timestamp.slice(0, 10))).size < 8) return null;
+        const selected = Object.fromEntries(kinds.map(k => [k, this._coarseSelect(rows, k)]));
+        const choose = s => s.mlr.score.rmse <= s.pls.score.rmse ? 'mlr' : 'pls';
+        const production = choose(selected);
+        const models = Object.fromEntries(kinds.map(k => [k, this._coarseFit(rows, k, selected[k].config)]));
+        const actual = [], baseline = [], blocks = [], predictions = {mlr: [], pls: [], production: []};
+        this._coarseFolds(rows, true).forEach(([s, e]) => {
+            const tr = rows.slice(0, s), te = rows.slice(s, e);
+            const inner = Object.fromEntries(kinds.map(k => [k, this._coarseSelect(tr, k)]));
+            if (kinds.some(k => !inner[k])) return;
+            const chosen = choose(inner), fp = {};
+            kinds.forEach(k => {
+                const m = this._coarseFit(tr, k, inner[k].config);
+                fp[k] = te.map(r => this._coarsePredict(r, m)); predictions[k].push(...fp[k]);
+            });
+            predictions.production.push(...fp[chosen]); actual.push(...te.map(r => r.ash_content));
+            baseline.push(...te.map(() => this._mean(tr.map(r => r.ash_content))));
+            blocks.push({trainEnd: tr[tr.length - 1].timestamp, testStart: te[0].timestamp,
+                testEnd: te[te.length - 1].timestamp, n: te.length, production: chosen});
+        });
+        const validate = pred => {
+            if (!actual.length) return null;
+            const m = this._metrics(actual, pred, 0), bm = this._metrics(actual, baseline, 0);
+            return {...m, n: actual.length, folds: blocks, baselineMae: bm.mae, baselineRmse: bm.rmse,
+                beatsBaseline: m.rmse < bm.rmse, method: 'nested-day-walk-forward'};
+        };
+        kinds.forEach(k => {
+            const m = models[k], v = validate(predictions[k]);
+            Object.assign(m.metrics, {q2: selected[k].score.r2, q2Time: v ? v.r2 : null,
+                validation: v, selectionCv: selected[k].score, config: m.config, version: 2,
+                pipelineValidation: validate(predictions.production)});
+        });
+        return {...models, production, n: rows.length};
+    },
+
+    // DS 原版编排：留一验证训练、原版时间验证选择采样生产算法。
+    _trainCoarseDs(range) {
+        const d = this._buildCoarseXY(range);
+        if (!d) return null;
         const mlr = this.trainMlr(d.X, d.y);
         const pls = this.trainPls(d.X, d.y, this.MLR_FEATURES.length);
-        if (!mlr || !pls) return false;
-
-        // 记录训练时的缺失因子填补均值，保证预测时与训练一致（否则会用标准化均值，引入偏差）
+        if (!mlr || !pls) return null;
         mlr.imputeMeans = d.means; pls.imputeMeans = d.means;
-
-        // 时间序列交叉验证 Q²：更贴近"预测下一小时"的真实能力，生产模型优先按它选
         const mlrQ2t = this._timeCvQ2(d.X, d.y, 'mlr');
         const plsQ2t = this._timeCvQ2(d.X, d.y, 'pls', this.MLR_FEATURES.length);
-        mlr.metrics.q2Time = (mlrQ2t == null) ? null : +mlrQ2t.toFixed(4);
-        pls.metrics.q2Time = (plsQ2t == null) ? null : +plsQ2t.toFixed(4);
-        let production;
-        if (mlrQ2t != null && plsQ2t != null) production = (plsQ2t >= mlrQ2t) ? 'pls' : 'mlr';
-        else production = (pls.metrics.q2 >= mlr.metrics.q2) ? 'pls' : 'mlr';
+        mlr.metrics.q2Time = mlrQ2t == null ? null : +mlrQ2t.toFixed(4);
+        pls.metrics.q2Time = plsQ2t == null ? null : +plsQ2t.toFixed(4);
+        const production = mlrQ2t != null && plsQ2t != null
+            ? (plsQ2t >= mlrQ2t ? 'pls' : 'mlr') : (pls.metrics.q2 >= mlr.metrics.q2 ? 'pls' : 'mlr');
+        return {mlr, pls, production, n: d.rows.length};
+    },
+
+    trainCoarseModel(range, engine = this.coarseEngine()) {
+        const useRange = range || this.store.coarseTrainRange || 'jun_jul';
+        if (!['ds', 'gpt'].includes(engine)) return false;
+        const result = engine === 'gpt' ? this._trainCoarseRows(this.filterTrainRows(useRange)) : this._trainCoarseDs(useRange);
+        if (!result) return false;
+        const {mlr, pls, production, n} = result;
+        const mlrQ2t = mlr.metrics.q2Time, plsQ2t = pls.metrics.q2Time;
 
         const tol = (this.store.coarseTolerance !== undefined) ? this.store.coarseTolerance : 0.8;
         if (!this.store.coarseModelHistory) this.store.coarseModelHistory = [];
         this.store.coarseModelHistory.push({
-            trainedAt: this.formatDate(new Date()), n: d.rows.length, tolerance: tol,
-            range: useRange, production,
+            trainedAt: this.formatDate(new Date()), n, tolerance: tol,
+            range: useRange, production, engine,
             mlr: { r2: +mlr.metrics.r2.toFixed(4), passRate: +mlr.metrics.passRate.toFixed(1),
                    q2: +mlr.metrics.q2.toFixed(4), q2Time: (mlrQ2t == null) ? null : +mlrQ2t.toFixed(4),
                    rmse: +mlr.metrics.rmse.toFixed(3), mae: +mlr.metrics.mae.toFixed(3) },
@@ -3129,10 +3300,12 @@ const App = {
         if (this.store.coarseModelHistory.length > 30) this.store.coarseModelHistory.shift();
 
         // 先写入 coarseModel，再用生产模型回填每条记录预测值（缺失因子自动均值补全）
+        this._rememberCoarseModel();
         this.store.coarseModel = {
             mlr, pls, production, trainedAt: this.formatDate(new Date()),
-            n: d.rows.length, tolerance: tol, range: useRange
+            n, tolerance: tol, range: useRange, engine
         };
+        this._rememberCoarseModel();
         this.store.coarseCoal.forEach(r => {
             r.predicted_ash = +this.predictCoarseAsh(r, production).toFixed(4);
         });
@@ -3148,29 +3321,47 @@ const App = {
         });
     },
 
-    // 训练 MLR+PLS 粗灰模型：http 下走后端 sklearn 训练接口；file:// 或后端不可用回退本地训练。
+    // http 先同步再训练；服务端已保存模型，不再以旧版本整库覆盖。file:// 本地训练。
     // 返回 Promise<boolean>；成功时已更新 store.coarseModel / coarseModelHistory / predicted_ash 并 saveStore。
-    async retrainCoarseModelAsync(range) {
+    async retrainCoarseModelAsync(range, engine = this.coarseEngine()) {
         range = range || this.store.coarseTrainRange || 'jun_jul';
+        if (!['ds', 'gpt'].includes(engine)) return false;
         if (window.Api && window.location.protocol.startsWith('http')) {
             try {
-                const resp = await window.Api.retrainCoarseModel(range);
+                const sync = await this.flushMirrorNow();
+                if (!sync.ok) throw new Error('本地数据尚未同步，请处理同步提示后再训练');
+                const snapshot = JSON.stringify(this.store);
+                const resp = await window.Api.retrainCoarseModel(range, sync.revision, engine);
+                if (snapshot !== JSON.stringify(this.store)) {
+                    this._mirrorConflict = true;
+                    throw new Error('训练期间本地数据发生变化，已保留本地改动，请核对同步状态');
+                }
                 if (resp && resp.ok && resp.coarseModel) {
+                    if (this.coarseEngine(resp.coarseModel) !== engine) {
+                        this._mirrorConflict = true;
+                        throw new Error('后端返回的模型版本不匹配，请重启后端并同步后再试');
+                    }
+                    this._rememberCoarseModel();
+                    if (resp.coarseModelVariants) this.store.coarseModelVariants = resp.coarseModelVariants;
                     this.store.coarseModel = resp.coarseModel;
+                    this._rememberCoarseModel();
                     if (!this.store.coarseModelHistory) this.store.coarseModelHistory = [];
                     if (resp.history) {
                         this.store.coarseModelHistory.push(resp.history);
                         if (this.store.coarseModelHistory.length > 30) this.store.coarseModelHistory.shift();
                     }
                     this.refreshCoarsePredictions();
-                    this.saveStore();
+                    if (resp.revision) this.store._revision = resp.revision;
+                    this.saveStore(true);
                     return true;
                 }
             } catch (e) {
-                console.warn('远程训练失败，回退本地训练:', e);
+                console.warn('远程训练未完成:', e);
+                this.showToast(e.message || '远程训练未完成', 'error');
             }
+            return false;
         }
-        return this.trainCoarseModel(range);
+        return this.trainCoarseModel(range, engine);
     },
 
     // ---------- 线性代数小工具 ----------
@@ -3388,7 +3579,7 @@ const App = {
         const nf = mdl.coefs.length;
         for (let j = 0; j < nf; j++) {
             let v = xrow[j];
-            if (typeof v !== 'number' || isNaN(v)) {
+            if (!Number.isFinite(v)) {
                 v = (mdl.imputeMeans && typeof mdl.imputeMeans[j] === 'number') ? mdl.imputeMeans[j] : (mdl.means[j] || 0);
             }
             s += mdl.coefs[j] * v;
