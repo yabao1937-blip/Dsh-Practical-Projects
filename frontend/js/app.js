@@ -4,7 +4,7 @@
    - saveStore/loadStore：localStorage 持久化，http 下额外镜像 PUT /api/v1/state
    - 算法：取值链 resolve*、总灰分 calcTotalAsh、密度建议 computeDensityGuidance、
            粗灰预测 predictCoarseAsh、推测简报 buildHourlyBrief
-   - 训练：trainMlr/trainPls（本地回退）+ retrainCoarseModelAsync（走后端 sklearn）
+   - 训练：DS _trainCoarseDs / GPT _trainCoarseRows + retrainCoarseModelAsync（后端同算法）
    ======================================== */
 
 const App = {
@@ -21,6 +21,7 @@ const App = {
         alerts: [],
         // 多因素粗精煤泥灰分模型（MLR + PLS）
         coarseModel: null,            // {mlr, pls, production, trainedAt, n, tolerance}
+        coarseModelVariants: {},      // DS / GPT 各自最近一次训练的完整模型
         coarseModelHistory: [],       // 每次重训练的拟合度快照（持续优化追踪）
         coarseTolerance: 0.8,         // 合格判定容差（±%），可在粗精煤泥页调整
         coarseTrainRange: 'jun_jul',  // 训练数据范围：jun_jul=仅6-7月(出厂口径) | 30d=近30天 | all=全部
@@ -44,7 +45,7 @@ const App = {
         heavySamples: [],          // 重介精煤灰分采样记录 [{id, timestamp, rho, ash_content}]（训练数据积累）
         ashTargetTol: 0.1,         // 总灰分达标容差（±%），页面可配置（专家经验版默认±0.1）
         guideScheme: 'total',      // 密度指导版本：total=总灰分版 | heavy=重介精煤灰分版（总览页可切换）
-        totalAshManualOn: false,   // 总灰分修改开关：默认关=总灰分公式计算级别（不可手动修改）；开=手动化验值优先，公式因素锁定
+        totalAshManualOn: false,   // 总灰分来源选择；人工值独立保存，因素变化只影响公式核算值
         ashTarget: 8.50,                   // 目标总精煤灰分（卡片箭头调整后持久化，密度自动执行读取）
         densityGuide: { maxStep: 0.02, deadband: 0.05 },   // 密度指导钳制幅度/死区（页面可调）
         // maxStep 默认 0.02：2026-09-12 现场确认「偏差 0.15%→0.01、0.30%→0.02、最多 0.03」，
@@ -74,8 +75,9 @@ const App = {
     pageInited: {},
 
     // 初始化
-    init() {
-        this.loadStore();
+    async init() {
+        this._syncReady = false;
+        this._hadLocalStore = this.loadStore();
         if (this.store.__merged !== 2) {
             this.applySeedStore();
         }
@@ -143,9 +145,8 @@ const App = {
         if (this.store.densityAutoOn == null) { this.store.densityAutoOn = false; this.saveStore(true); }
         if (!this.store.guideScheme) { this.store.guideScheme = 'total'; this.saveStore(true); }
         this._syncGuideSchemeBtn();
-        // 总灰分修改开关：默认关=公式计算级别；关闭状态下清掉遗留的手动总灰分
+        // 切换来源只决定当前使用哪个值，刷新页面不得删除已保存的人工总灰分。
         if (this.store.totalAshManualOn == null) { this.store.totalAshManualOn = false; this.saveStore(true); }
-        if (!this.store.totalAshManualOn) this.setAshInput('totalAsh', { manual: null });
         this._syncTotalAshBtn();
         if (!this.store.floatAshInput) { this.store.floatAshInput = { manual: null }; this.saveStore(true); }
         if (!this.store.coarseCalc) { this.store.coarseCalc = { screen315: null, waterUnder: null }; this.saveStore(true); }
@@ -177,11 +178,13 @@ const App = {
         window.addEventListener('online', () => this.retryMirrorIfPending());
 
         // http 模式:服务器数据更多时自动反向同步(旧浏览器自愈,防止镜像覆盖服务器新数据)
-        this.autoPullIfStale();
+        await this.autoPullIfStale();
+        this._syncReady = true;
         // 补发上次遗留的待发镜像（含"关页面时那次请求被中断"的情况——发送前就写了副本）。
         // 放在 autoPullIfStale **之后**：若刚刚做了反向同步，服务器数据已成为权威，
         // 旧快照已过时（_applyServerState 会清槽），不应再推回去。
         this.retryMirrorIfPending();
+        this.syncHeavySamples();
         // 初始化完成标志：给自动化脚本/其它页面一个**明确**的就绪信号。
         // 为什么需要：App.store 在脚本加载时就存在，而 init()（灌种子/补齐默认值）要等
         // DOMContentLoaded —— 只检查 App.store 的脚本可能在 init 之前就开跑，读到空 store。
@@ -201,14 +204,19 @@ const App = {
     // 被服务器数据清掉会导致种子重灌或历史清理重复执行。
     _applyServerState(st) {
         const localOnly = ['manualEntries', 'importLogs', 'alerts', 'regressionModels',
-                           'coarseModelHistory', 'heavySamples', 'rawSlime', '__merged', '__fixes'];
+                           'coarseModelHistory', 'rawSlime', '__merged', '__fixes'];
         const keep = {};
         localOnly.forEach(k => { if (this.store[k] !== undefined) keep[k] = this.store[k]; });
+        const pendingSamples = (this.store.heavySamples || []).filter(s => !s.synced);
         this.store = Object.assign({}, this.store, st, keep);
+        const ids = new Set((st.heavySamples || []).map(s => s.client_id).filter(Boolean));
+        this.store.heavySamples = (st.heavySamples || []).concat(pendingSamples.filter(s => !s.client_id || !ids.has(s.client_id)));
+        this._mirrorConflict = false;
+        this._mirrorPending = null;
         // 刚从服务器拉了权威数据 → 之前没送达的旧快照已过时（它的内容已被本次覆盖吸收），
         // 留着只会在下次启动被推回去、把刚同步下来的服务器数据洗回旧状态。
         this._clearPendingSlot(null);
-        this.saveStore();
+        this.saveStore(true);
         this._onExternalInput();
         this.refreshAllPages();
     },
@@ -236,6 +244,23 @@ const App = {
         try {
             const st = await window.Api.getState();
             if (!st || !Array.isArray(st.coarseCoal)) return;
+            if (st._revision) {
+                if (this._hadLocalStore && !this.store._revision) {
+                    this._mirrorConflict = true;
+                    this._mirrorPending = JSON.stringify(this.store);
+                    this._writePendingSlot(this._mirrorPending, Date.now(), Date.now() + '-legacy');
+                    this.showToast('检测到升级前的本地数据，已保留。请先导出备份并核对，再从服务器恢复数据以建立同步版本', 'warning');
+                    return;
+                }
+                const pending = this._mirrorPending || this._readPendingSlot();
+                if (pending && this.store._revision !== st._revision) {
+                    this._mirrorConflict = true;
+                    this.showToast('服务器版本已变化，本地待同步数据已保留。请先导出备份并核对，再使用“从服务器恢复数据”处理冲突', 'warning');
+                } else if (!pending) {
+                    this._applyServerState(st);
+                }
+                return;
+            }
             const sv = this._measureVector(st), lv = this._measureVector(this.store);
             const keys = Object.keys(lv);
             const serverWinsAll = keys.every(k => sv[k] >= lv[k]);
@@ -447,6 +472,7 @@ const App = {
 
     _scheduleMirror(body) {
         this._mirrorPending = body;
+        this._writePendingSlot(body, Date.now(), Date.now() + '-queued');
         this._mirrorStats.scheduled++;
         if (this._mirrorTimer) return;
         this._mirrorTimer = setTimeout(() => {
@@ -458,6 +484,8 @@ const App = {
     // immediate=true 表示走"页面隐藏/卸载"路径：能带 keepalive 就带（否则卸载会中断请求）
     _flushMirror(immediate) {
         if (this._mirrorTimer) { clearTimeout(this._mirrorTimer); this._mirrorTimer = null; }
+        if (this._mirrorInFlight) return this._mirrorRequest;
+        if (this._mirrorConflict || this._syncReady === false) return;
         // 取本次挂起的，或上次没送达留下来的（都是全量快照；有挂起的就用挂起的）
         const slot = this._readPendingSlot();
         const body = this._mirrorPending || (slot && slot.body);
@@ -467,7 +495,10 @@ const App = {
         // 若只在"来自槽"时才判重，正常保存路径上的重复内容永远会重发
         // （被守卫拒绝的整库会被反复重发，每次 175 KB）。
         if (body === this._mirrorSent) {
-            this._mirrorPending = null; this._mirrorStats.skippedSame++; return;
+            this._mirrorPending = null;
+            if (slot && slot.body === body) this._clearPendingSlot(slot.stamp);
+            this.mirrorStatus.pending = !!this._readPendingSlot();
+            this._mirrorStats.skippedSame++; return;
         }
         this._mirrorPending = null;
         this._mirrorStats.sent++;
@@ -489,17 +520,30 @@ const App = {
         } catch (e) {
             res = Promise.resolve({ ok: false, error: String((e && e.message) || e) });
         }
-        Promise.resolve(res).then(r => {
+        this._mirrorRequest = Promise.resolve(res).then(r => {
             this._mirrorInFlight = false;
             if (r && r.ok) {
-                this._mirrorSent = body;
+                const oldRevision = JSON.parse(body)._revision;
+                const advance = raw => {
+                    if (!raw || !r.revision) return raw;
+                    const value = JSON.parse(raw);
+                    if (value._revision === oldRevision) value._revision = r.revision;
+                    return JSON.stringify(value);
+                };
+                if (r.revision && this.store._revision === oldRevision) this.store._revision = r.revision;
+                this._mirrorPending = advance(this._mirrorPending);
+                this._mirrorSent = advance(body);
                 this._clearPendingSlot(stamp);          // 只清自己写的那一份
+                if (this._mirrorPending) this._writePendingSlot(this._mirrorPending, Date.now(), Date.now() + '-queued');
+                this.saveStore(true);
                 this.mirrorStatus.pending = !!this._readPendingSlot();
                 this.mirrorStatus.lastOkAt = Date.now();
+                this.mirrorStatus.lastError = null;
                 if (this.mirrorStatus.failures) {
                     this.showToast('本地数据已同步到服务器', 'success');
                     this.mirrorStatus.failures = 0;
                 }
+                if (this._mirrorPending) this._flushMirror(false);
                 return;
             }
             // 失败**不再静默**：记状态、提示一次（避免刷屏）。分两类（2026-09）：
@@ -512,6 +556,13 @@ const App = {
             //    超时）：待发副本已在发送前写好，留着重试。
             this.mirrorStatus.lastError = (r && (r.reason || r.error)) || 'unknown';
             this.mirrorStatus.failures++;
+            if (r && (r.conflict || r.rejected)) {
+                this._mirrorConflict = true;
+                this.mirrorStatus.pending = true;
+                this.mirrorStatus.rejected++;
+                this.showToast('服务器版本已变化，本地待同步数据已保留。请先导出备份并核对，再从服务器恢复', 'warning');
+                return;
+            }
             if (r && r.denied) {
                 // 权限问题（写接口要 token）：留待发副本（token 修正后能补上），
                 // 但提示文案必须说清是权限，而不是"服务器数据更新"。
@@ -523,34 +574,52 @@ const App = {
                 }
                 return;
             }
-            if (r && r.rejected) {
-                this._mirrorSent = body;
-                this._clearPendingSlot(stamp);
-                this.mirrorStatus.pending = !!this._readPendingSlot();
-                this.mirrorStatus.rejected++;
-                console.warn('服务器拒绝了本次整库镜像(本地未覆盖服务器):', this.mirrorStatus.lastError);
-                if (this.mirrorStatus.failures === 1) {
-                    this.showToast('服务器数据比本地更新，本次快照未覆盖服务器；正在尝试从服务器同步', 'info');
-                    // 让上面这句话变成真的：autoPullIfStale 原本只在启动时跑一次。
-                    // 只在一次失败 streak 的第一次触发，避免持续被拒时反复拉取。
-                    this.autoPullIfStale();
-                }
-                return;
-            }
             this.mirrorStatus.pending = true;
             console.warn('镜像未送达服务器:', this.mirrorStatus.lastError);
             if (this.mirrorStatus.failures === 1) {
                 this.showToast('本地数据未能同步到服务器，将在网络恢复或切回页面时自动重试', 'warning');
             }
         }).catch(() => { this._mirrorInFlight = false; });
+        return this._mirrorRequest;
+    },
+
+    async flushMirrorNow() {
+        this.saveStore();
+        await this._flushMirror(false);
+        while (this._mirrorInFlight) await this._mirrorRequest;
+        return {ok: !this._mirrorConflict && !this._readPendingSlot(), revision: this.store._revision};
     },
 
     // 失败后的重试入口（断网恢复 / 切回前台 / 下次保存时都会调用）。
     // 发送中的请求不算"待重试"，否则 online 事件会和正在飞的请求重复发一次整库。
     retryMirrorIfPending() {
+        this.syncHeavySamples();
         if (this._mirrorInFlight) return;
         const slot = this._readPendingSlot();
         if (slot || this._mirrorPending) this._flushMirror(false);
+    },
+
+    async syncHeavySamples() {
+        if (this._samplesInFlight || !window.Api || !window.location.protocol.startsWith('http')) return;
+        this._samplesInFlight = true;
+        try {
+            for (const sample of (this.store.heavySamples || []).filter(s => !s.synced)) {
+                if (!sample.client_id) {
+                    sample.client_id = this.newSampleId();
+                    this.saveStore(true); // 先持久化幂等键，响应丢失后仍能安全重试
+                }
+                const saved = await window.Api.syncHeavySample(sample);
+                Object.assign(sample, saved, {synced: true});
+                this.saveStore(true);
+            }
+        } catch (e) {
+            this.showToast('采样已保存在本机，服务器尚未确认；联网或重新打开页面时会重试', 'warning');
+        } finally { this._samplesInFlight = false; }
+    },
+
+    newSampleId() {
+        return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID()
+            : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2);
     },
 
     // 一次性数据迁移：清空旧数据并载入合并系统种子数据（__merged 标记版本）
@@ -568,6 +637,8 @@ const App = {
             const raw = localStorage.getItem('dmcs_store');
             if (raw) {
                 const data = JSON.parse(raw);
+                // 版本是持久化协议字段，默认业务 store 不含此键也必须恢复。
+                if (typeof data._revision === 'string') this.store._revision = data._revision;
                 // 迁移标记必须保留：默认store不含该字段，漏掉会导致每次刷新都重新种入种子数据
                 if (data.__merged !== undefined) this.store.__merged = data.__merged;
                 // 合并到默认 store，保留新增字段兼容性
@@ -873,7 +944,7 @@ const App = {
             magneticTail: [], rawSlime: [], coarseCoal: [], floatCoal: [],
             regressionModels: [], calcLogs: [], manualEntries: [],
             importLogs: [], alerts: [],
-            coarseModel: null, coarseModelHistory: [], coarseTolerance: 0.8,
+            coarseModel: null, coarseModelVariants: {}, coarseModelHistory: [], coarseTolerance: 0.8,
             coarseTrainRange: 'jun_jul',
             coarseAshEma: null,
             autoState: {},
@@ -1354,10 +1425,6 @@ const App = {
     setAmountInput(key, patch) {
         if (!this.store.amountInputs) this.store.amountInputs = {};
         if (!this.store.amountInputs[key]) this.store.amountInputs[key] = { mode: 'manual', manual: null };
-        if (this.store.totalAshManualOn && typeof patch.manual === 'number' && isFinite(patch.manual)) {
-            this.showToast('"总灰分修改"开启中，公式因素已锁定；关闭开关后可修改', 'warning');
-            return;
-        }
         if ('manual' in patch) {
             patch = Object.assign({}, patch);
             patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
@@ -1523,15 +1590,15 @@ const App = {
             dataBumped = true;
         } else if (id === 'density') {
             // 录入：优先手工补录的密度计值(density_meter，倒序取最近一条有效)，其次表3灰分密度导入最新密度(ash_density)
-            const dmLogs = (this.store.calcLogs || []).filter(l => l.calc_type === 'density_meter');
+            const dmLogs = (this.store.calcLogs || []).filter(l => l.calc_type === 'density_meter').sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
             for (let i = dmLogs.length - 1; i >= 0; i--) {
                 try {
                     const v = +JSON.parse(dmLogs[i].input_json || '{}').value;
-                    if (isFinite(v) && v >= 1.3 && v <= 1.6) { entry = v; break; }
+                    if (isFinite(v) && v >= 1.3 && v <= 1.65) { entry = v; break; }
                 } catch (e) { /* 忽略坏记录 */ }
             }
             if (entry == null) {
-                const logs = (this.store.calcLogs || []).filter(l => l.calc_type === 'ash_density');
+                const logs = (this.store.calcLogs || []).filter(l => l.calc_type === 'ash_density').sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
                 for (let i = logs.length - 1; i >= 0; i--) {
                     try {
                         const v = JSON.parse(logs[i].input_json || '{}');
@@ -1620,11 +1687,6 @@ const App = {
     setInstrumentInput(id, patch) {
         if (!this.store.instrumentInputs) this.store.instrumentInputs = {};
         if (!this.store.instrumentInputs[id]) this.store.instrumentInputs[id] = { manual: null };
-        // 总灰分为"手动"来源时，间接影响总灰分的仪表(皮带秤→总煤量→总灰分；液位→粗精灰分→总灰分)冻结
-        if (this.store.totalAshManualOn && ['scale_501', 'scale_502', 'level_tail'].includes(id) && typeof patch.manual === 'number' && isFinite(patch.manual)) {
-            this.showToast('总灰分当前为"手动"来源，该间接因素已冻结；切换为"计算"后可修改', 'warning');
-            return;
-        }
         if ('manual' in patch) {
             patch = Object.assign({}, patch);
             patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
@@ -2008,7 +2070,6 @@ const App = {
         const target = (this.store.ashTarget != null) ? this.store.ashTarget : 8.50;
         const scheme = (this.store.guideScheme === 'heavy') ? 'heavy' : 'total';
         const lim = this.getDensityGuide();
-        const heavyAsh = this.getHeavyAsh();          // 手动采样 > 502在线 > 默认7.9（不再恒值 8.50）
         const COARSE_AMT = 40;                        // 粗精煤泥量恒值（三表无数据源，沿用当前默认）
         const SCALE_501 = 268.5, SCALE_502 = 235.2;   // 皮带秤恒值（三表无数据源）
         const TOTAL_AMT = +(SCALE_501 + SCALE_502).toFixed(1);   // 503.7
@@ -2029,13 +2090,19 @@ const App = {
         // 表3 灰分密度（按皮带解析 501/502 灰分 + 密度）
         const adRecs = [];
         (this.store.calcLogs || []).forEach(l => {
-            if (l.calc_type !== 'ash_density') return;
+            if (!['ash_density', 'ash_meter', 'density_meter'].includes(l.calc_type)) return;
             const t = toTs(l.timestamp); if (t == null) return;
             try {
                 const v = JSON.parse(l.input_json || '{}');
-                const density = (isFinite(+v.density) && +v.density >= 1.3 && +v.density <= 1.6) ? +v.density : null;
-                adRecs.push({ t, belt: String(v.belt || ''), ash: isFinite(+v.ash_content) ? +v.ash_content : null, density });
+                const d = this.measurementNumber(l.calc_type === 'density_meter' ? v.value : v.density);
+                const a = this.measurementNumber(l.calc_type === 'ash_meter' ? v.value : v.ash_content);
+                const density = d != null && d >= 1.3 && d <= 1.65 ? d : null;
+                adRecs.push({ t, belt: String(v.belt || ''), ash: a != null && a >= 0 && a <= 100 ? a : null, density });
             } catch (e) { /* 忽略坏记录 */ }
+        });
+        (this.store.heavySamples || []).forEach(s => {
+            const t = toTs(s.timestamp || s.ts), ash = this.measurementNumber(s.ash_content);
+            if (t != null && ash != null && ash >= 0 && ash <= 100) adRecs.push({ t, belt: 'sample', ash, density: null });
         });
         adRecs.sort((a, b) => a.t - b.t);
 
@@ -2056,6 +2123,7 @@ const App = {
         let estCoarse = null;      // 递归软测量值（粗精煤泥灰分预测值）
         let prevForecast = null;   // 上一成行的模型原始预测（用于增量）
         let curAsh501 = null, curAsh502 = null, curDensity = null;
+        let heavyAsh = null, ash501T = -Infinity, ash502T = -Infinity, densityT = -Infinity, heavyT = -Infinity;
 
         const pad = n => String(n).padStart(2, '0');
         const fmtHour = hms => { const d = new Date(hms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`; };
@@ -2069,9 +2137,10 @@ const App = {
             const densityBefore = curDensity;
             while (iAd < adRecs.length && adRecs[iAd].t < hEnd) {
                 const a = adRecs[iAd];
-                if (a.belt === '501' && a.ash != null) curAsh501 = a.ash;
-                if (a.belt === '502' && a.ash != null) curAsh502 = a.ash;
-                if (a.density != null) curDensity = a.density;
+                if (a.belt === '501' && a.ash != null) { curAsh501 = a.ash; ash501T = a.t; }
+                if (a.belt === '502' && a.ash != null) { curAsh502 = a.ash; ash502T = a.t; }
+                if (['502', 'sample'].includes(a.belt) && a.ash != null) { heavyAsh = a.ash; heavyT = a.t; }
+                if (a.density != null) { curDensity = a.density; densityT = a.t; }
                 curAdT = a.t;
                 iAd++;
             }
@@ -2086,14 +2155,15 @@ const App = {
             if (!threeOk) continue;
 
             // 实测密度：仅本小时有表3新密度测量时有值（稀疏），用于与建议密度对照
-            const densityMeasured = (curDensity != null && curDensity !== densityBefore) ? curDensity : null;
+            const densityMeasured = densityT >= hEnd - 3600000 && densityT < hEnd ? curDensity : null;
 
             const level = (curCoarse && typeof curCoarse.level === 'number') ? curCoarse.level : DEF.level;
             const floatAsh = (curFloat && typeof curFloat.ash_content === 'number') ? curFloat.ash_content : DEF.floatAsh;
             const floatAmt = (curFloat && typeof curFloat.coal_amount === 'number') ? curFloat.coal_amount : null;
-            const ash501 = curAsh501;   // 无该小时的 501 记录 → null → 该列留空（不打印常量冒充实测）
-            const ash502 = curAsh502 != null ? curAsh502 : DEF.ash502;
-            const density = curDensity != null ? curDensity : DEF.density;
+            const ash501 = hEnd - ash501T <= FRESH_MS ? curAsh501 : null;
+            const ash502 = hEnd - ash502T <= FRESH_MS ? curAsh502 : null;
+            const density = hEnd - densityT <= FRESH_MS ? curDensity : null;
+            if (hEnd - heavyT > FRESH_MS) heavyAsh = null;
 
             // 粗精煤泥灰分实测 = 表1 315灰分（人工采样稀疏，仅采样时刻有值）
             const isNewSample = (curCoarse != null && curCoarse !== prevCoarse);
@@ -2115,7 +2185,7 @@ const App = {
             const coarseModel = estCoarse;
 
             const heavyAmt = (floatAmt != null) ? +(TOTAL_AMT - floatAmt - COARSE_AMT).toFixed(1) : null;
-            const formulaOk = (heavyAmt != null && heavyAmt > 0 && floatAmt != null && floatAsh != null && coarseModel != null);
+            const formulaOk = (heavyAmt != null && heavyAmt > 0 && floatAmt != null && floatAsh != null && coarseModel != null && heavyAsh != null);
 
             // 总精煤灰分：公式优先（粗灰用递归软测量）；否则 501 直读（501=总混配皮带）
             let totalAsh = null;
@@ -2129,7 +2199,7 @@ const App = {
 
             // 建议密度：仅公式完整(有粗灰数据)时计算；缺粗灰数据时留空（避免仪表加权失真顶到1.60）
             let rhoNew = null;
-            if (formulaOk) {
+            if (formulaOk && density != null) {
                 if (scheme === 'heavy') {
                     const totalAmt = heavyAmt + floatAmt + COARSE_AMT;
                     const targetHeavy = +((target * totalAmt - floatAsh * floatAmt - coarseModel * COARSE_AMT) / heavyAmt).toFixed(3);
@@ -2406,7 +2476,6 @@ const App = {
         this.stopDensityAuto();
         this._densityAutoLastEpoch = undefined;   // 首步必重算目标密度
         this._densityTarget = null;
-        this._densityPredictAsh = null;           // 调密后重介灰分预测值（仅展示，不参与计算）
         this._densityReachedNotified = false;
         this.densityAutoTimer = setInterval(() => {
             const g = this.computeDensityGuidance((this.store.ashTarget != null) ? this.store.ashTarget : 8.50);
@@ -2421,14 +2490,8 @@ const App = {
                 }
                 this._densityTarget = g.rhoNew;   // 达标时 g.rhoNew = 当前密度 → 保持
                 this._densityAutoLastEpoch = epochNow;
-                this._densityReachedNotified = false;
+                this._densityReachedNotified = Math.abs(g.deltaRho) <= 1e-9;
                 if (Math.abs(g.deltaRho) > 1e-9) this._logDensityDecision('retarget', g);   // 决策日志:真实重定目标
-                // 预测调密后的重介精煤灰分（仅展示，不参与实时计算；真实值以采样为准）
-                if (Math.abs(g.deltaRho) > 1e-9 && Math.abs(g.deltaA) > g.deadband) {
-                    this._densityPredictAsh = +(g.heavyAsh + (g.rhoNew - g.rhoCur) / (g.K || 0.03)).toFixed(2);
-                } else {
-                    this._densityPredictAsh = null;
-                }
             }
             // 按钳制逐步走向目标密度（每1秒、每步±maxStep），到位后保持，等下次采样/改数重算
             if (g.valid && this._densityTarget != null) {
@@ -2438,10 +2501,9 @@ const App = {
                     const step = Math.min(lim.maxStep, Math.abs(diff));
                     const rhoNew = +(cur + Math.sign(diff) * step).toFixed(3);
                     this.setInstrumentInput('density', { manual: rhoNew, autoExec: true });
-                } else if (!this._densityReachedNotified && this._densityPredictAsh != null) {
-                    // 已到目标密度：提示预测重介灰分（请采样验证）
+                } else if (!this._densityReachedNotified) {
                     this._densityReachedNotified = true;
-                    this.showToast(`密度已调至目标 ${this._densityTarget.toFixed(3)} g/cm³：预测重介精煤灰分 ≈ ${this._densityPredictAsh.toFixed(2)}%（仅预测，请采样验证实际值）`, 'success');
+                    this.showToast(`密度已调至本步目标 ${this._densityTarget.toFixed(3)} g/cm³；重介灰分反推值和目标值保留，实际效果等待新采样验证`, 'success');
                 }
                 // diff≈0 → 保持（已到目标密度，等待下一次采样）
             }
@@ -2486,13 +2548,24 @@ const App = {
     //  取值链：手动(双击修改) > 录入(导入/补录数据) > 默认(在线仪表死数据，将来接PLC实时值)
     // ============================================================
     // 最新一条指定类别/皮带的补录或导入值（calcLogs）
+    measurementNumber(value) {
+        // 兼容旧补录的数字文本；空串、布尔、非有限数和混合文本均不是测量值。
+        if (typeof value === 'string') {
+            value = value.trim();
+            if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value)) return null;
+            value = Number(value);
+        }
+        return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    },
+
     latestCalcValue(calcType, belt) {
-        const logs = (this.store.calcLogs || []).filter(l => l.calc_type === calcType);
+        const logs = (this.store.calcLogs || []).filter(l => l.calc_type === calcType)
+            .sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
         for (let i = logs.length - 1; i >= 0; i--) {
             try {
                 const v = JSON.parse(logs[i].input_json || '{}');
                 if ((belt == null || String(v.belt || '') === String(belt))
-                    && typeof v.value === 'number' && isFinite(v.value)) return v.value;
+                    && this.measurementNumber(v.value) != null) return this.measurementNumber(v.value);
             } catch (e) { /* 忽略坏记录 */ }
         }
         return null;
@@ -2502,12 +2575,13 @@ const App = {
     latestBeltAsh(belt) {
         const v = this.latestCalcValue('ash_meter', belt);
         if (v != null) return v;
-        const logs = (this.store.calcLogs || []).filter(l => l.calc_type === 'ash_density');
+        const logs = (this.store.calcLogs || []).filter(l => l.calc_type === 'ash_density')
+            .sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
         for (let i = logs.length - 1; i >= 0; i--) {
             try {
                 const d = JSON.parse(logs[i].input_json || '{}');
                 if (String(d.belt || '') === String(belt)
-                    && typeof d.ash_content === 'number' && isFinite(d.ash_content)) return d.ash_content;
+                    && this.measurementNumber(d.ash_content) != null) return this.measurementNumber(d.ash_content);
             } catch (e) { /* 忽略坏记录 */ }
         }
         return null;
@@ -2564,7 +2638,12 @@ const App = {
     resolveTotalAshEx() {
         const cfg = (this.store.ashInputs && this.store.ashInputs.totalAsh) || {};
         const manual = (typeof cfg.manual === 'number' && isFinite(cfg.manual) && cfg.manual >= 0) ? cfg.manual : null;
-        if (manual != null && this._manualValid(cfg, 'totalAsh')) return { value: manual, source: 'manual' };
+        // 明确选择人工来源时保持该值；切换到公式后仍保存人工值供对照/切回。
+        // 未存来源标志的旧快照继续按原有效期规则解析。
+        if (this.store.totalAshManualOn !== false && manual != null
+            && (this.store.totalAshManualOn === true || this._manualValid(cfg, 'totalAsh'))) {
+            return { value: manual, source: 'manual' };
+        }
         const formula = this.formulaTotalAsh();
         if (formula != null) { this._autoBump('totalAsh', formula); return { value: formula, source: 'formula' }; }
         const entry = this.totalAshEntry();
@@ -2597,6 +2676,13 @@ const App = {
 
     // 当前生效层级（在线仪表表来源列显示：手动/公式计算/录入/默认(仪表)）
     totalInputLayer(kind) {
+        if (kind === 'totalAsh') {
+            const source = this.resolveTotalAshEx().source;
+            if (source === 'manual') return '手动';
+            if (source === 'formula') return '公式计算';
+            if (source === 'entry') return '录入';
+            return this.ash501Layer() === 'none' ? '默认常量(501未接入)' : '默认(仪表)';
+        }
         const cfg = kind === 'totalAmount'
             ? ((this.store.amountInputs && this.store.amountInputs.totalAmount) || {})
             : ((this.store.ashInputs && this.store.ashInputs.totalAsh) || {});
@@ -2666,10 +2752,6 @@ const App = {
 
     setCoarseAshInput(patch) {
         if (!this.store.coarseAshInput) this.store.coarseAshInput = { manual: null };
-        if (this.store.totalAshManualOn && typeof patch.manual === 'number' && isFinite(patch.manual)) {
-            this.showToast('"总灰分修改"开启中，公式因素已锁定；关闭开关后可修改', 'warning');
-            return;
-        }
         if ('manual' in patch) {
             patch = Object.assign({}, patch);
             patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
@@ -2735,10 +2817,6 @@ const App = {
 
     setFloatAshInput(patch) {
         if (!this.store.floatAshInput) this.store.floatAshInput = { manual: null };
-        if (this.store.totalAshManualOn && typeof patch.manual === 'number' && isFinite(patch.manual)) {
-            this.showToast('"总灰分修改"开启中，公式因素已锁定；关闭开关后可修改', 'warning');
-            return;
-        }
         if ('manual' in patch) {
             patch = Object.assign({}, patch);
             patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
@@ -2754,7 +2832,7 @@ const App = {
     setAshInput(key, patch) {
         if (!this.store.ashInputs) this.store.ashInputs = {};
         if (!this.store.ashInputs[key]) this.store.ashInputs[key] = { mode: 'auto', manual: null };
-        // 总灰分来源自动同步：手动值输入→切"手动"来源（公式因素冻结）；清空→切"计算"来源（解冻）
+        // 填写人工值时启用人工来源；只有显式清空输入才删除人工值。
         if (key === 'totalAsh') {
             if (typeof patch.manual === 'number' && isFinite(patch.manual) && patch.manual >= 0) {
                 this.store.totalAshManualOn = true;
@@ -2773,20 +2851,20 @@ const App = {
         this.notifyAmountChange();
     },
 
-    // 总灰分修改开关：默认关（公式计算级别）；开=手动化验值优先且公式因素锁定；关→清空手动恢复公式计算
-    toggleTotalAshManual() {
-        if (this.store.totalAshManualOn) {
-            this.store.totalAshManualOn = false;
-            this.saveStore();
-            this.setAshInput('totalAsh', { manual: null });   // 恢复公式计算级别
-            this.showToast('已关闭"总灰分修改"：总精煤灰分恢复公式计算级别', 'info');
-        } else {
-            this.store.totalAshManualOn = true;
-            this.saveStore();
-            this.showToast('已开启"总灰分修改"：手动化验值优先，公式因素（重介/浮精/粗精）已锁定', 'warning');
-        }
+    setTotalAshSource(manualOn) {
+        this.store.totalAshManualOn = !!manualOn;
+        this._onExternalInput();
+        this.saveStore();
         this._syncTotalAshBtn();
-        if (typeof OverviewPage !== 'undefined' && OverviewPage.chart) OverviewPage.refresh();
+        this.notifyAmountChange();
+    },
+
+    // 来源切换不制造新化验，也不删除已保存的人工值。
+    toggleTotalAshManual() {
+        this.setTotalAshSource(!this.store.totalAshManualOn);
+        this.showToast(this.store.totalAshManualOn
+            ? '已选择人工总灰分；公式核算值单独显示，各组分可继续录入'
+            : '已选择公式总灰分；原人工值已保留，可随时切回', 'info');
     },
     _syncTotalAshBtn() {
         const btn = document.getElementById('btn-totalash-manual');
@@ -2794,43 +2872,25 @@ const App = {
         const on = !!this.store.totalAshManualOn;
         btn.textContent = on ? '总灰分修改：开' : '总灰分修改：关';
         btn.classList.toggle('btn-primary', on);
-        btn.title = on ? '手动总精煤灰分优先；公式因素已锁定。点击关闭恢复公式计算' : '总精煤灰分为公式计算级别（不可修改）。点击开启手动修改';
+        btn.title = on ? '使用人工总灰分；组分可继续录入。切换来源保留人工值' : '使用公式核算总灰分。点击切回已保存的人工值';
     },
 
-    // 反推重介精煤灰分（任务三核心）
-    // 保护：限幅5%~13%；相对上次反推值单次变化不超过±2%；重介精煤量<=0不反推
-    backCalcHeavyAsh() {
-        const totalAsh = this.resolveTotalAsh();
-        if (totalAsh == null) return this.store.heavyAshBackcalc;
+    // 质量平衡反推（仅展示）：传实际总灰分得当前反推值，传目标总灰分得所需目标。
+    // 不依赖密度，不缓存旧值、不限幅；异常结果应明示，不能改写成看似合理的灰分。
+    backCalcHeavyAsh(totalAsh = this.resolveTotalAsh()) {
+        if (typeof totalAsh !== 'number' || !isFinite(totalAsh) || totalAsh < 0) return null;
         const heavyAmt = this.resolveAmount('denseAmount');
         const floatAmt = this.resolveAmount('floatAmount');
         const coarseAmt = this.resolveAmount('coarseAmount');
-        if (heavyAmt == null || heavyAmt <= 0 || floatAmt == null || coarseAmt == null) return this.store.heavyAshBackcalc;
+        if (![heavyAmt, floatAmt, coarseAmt].every(v => typeof v === 'number' && isFinite(v) && v >= 0)
+            || heavyAmt <= 0) return null;
         const totalAmt = heavyAmt + floatAmt + coarseAmt;
         // 浮精灰分/粗精煤泥灰分：统一解析（手动>默认），与在线仪表表一致
         const floatAsh = this.resolveFloatAsh();
         const coarseAsh = this.resolveCoarseAsh();
-        if (floatAsh == null || coarseAsh == null) return this.store.heavyAshBackcalc;
-        let ash = (totalAsh * totalAmt - floatAsh * floatAmt - coarseAsh * coarseAmt) / heavyAmt;
-        if (!isFinite(ash)) return this.store.heavyAshBackcalc;
-        // 限幅 5%~13%
-        ash = Math.max(5.0, Math.min(13.0, ash));
-        // 总精煤灰分为手动值时视为权威输入，跳过±2%单步钳制（一步到位）；
-        // 自动/录入来源保留钳制，防止仪表/导入坏值突变
-        const totalCfg = (this.store.ashInputs && this.store.ashInputs.totalAsh) || {};
-        const isManualTotal = (typeof totalCfg.manual === 'number' && isFinite(totalCfg.manual) && totalCfg.manual >= 0);
-        const prev = this.store.heavyAshBackcalc;
-        if (!isManualTotal && typeof prev === 'number' && prev > 0) {
-            const cap = Math.max(0.1, prev * 0.02);
-            if (ash > prev + cap) ash = +(prev + cap).toFixed(3);
-            if (ash < prev - cap) ash = +(prev - cap).toFixed(3);
-        }
-        ash = +ash.toFixed(3);
-        if (this.store.heavyAshBackcalc !== ash) {
-            this.store.heavyAshBackcalc = ash;
-            this.saveStore();
-        }
-        return ash;
+        if (![floatAsh, coarseAsh].every(v => typeof v === 'number' && isFinite(v) && v >= 0)) return null;
+        const ash = (totalAsh * totalAmt - floatAsh * floatAmt - coarseAsh * coarseAmt) / heavyAmt;
+        return isFinite(ash) ? +ash.toFixed(6) : null;
     },
 
     // 取当前重介精煤灰分：手动(采样/手写) > 502皮带灰分仪在线值(502只承载重介精煤)
@@ -2858,6 +2918,38 @@ const App = {
     // 重介精煤灰分（在线仪表行）：手动 > 502在线 > 默认
     resolveHeavyAsh() { return this.getHeavyAsh(); },
 
+    ashMeasurementInfo(scheme) {
+        const manual = cfg => ({source: '人工输入', sampleAt: cfg.sampleAt || null, enteredAt: cfg.manualAt || null});
+        let belt = '502';
+        if (scheme === 'total') {
+            const resolved = this.resolveTotalAshEx();
+            if (resolved.source === 'manual') return manual((this.store.ashInputs || {}).totalAsh || {});
+            if (resolved.source === 'formula') return {source: '公式核算', sampleAt: null, enteredAt: null};
+            if (resolved.source === 'entry') {
+                const cfg = (this.store.ashInputs || {}).totalAsh || {};
+                if (Number.isFinite(cfg.entry)) return {source: '录入', sampleAt: cfg.sampleAt || null, enteredAt: cfg.entryAt || null};
+            }
+            belt = '501';
+        } else if (this.heavyAshSource() === 'manual') {
+            return manual(this.store.heavyAshInput || {});
+        }
+        const id = 'ash_' + belt, cfg = (this.store.instrumentInputs || {})[id] || {};
+        if (this._manualValid(cfg, id)) return manual(cfg);
+        const logs = (this.store.calcLogs || []).slice().sort((a, b) => String(b.timestamp || '').localeCompare(String(a.timestamp || '')));
+        for (const type of ['ash_meter', 'ash_density']) {
+            for (const log of logs) {
+                if (log.calc_type !== type) continue;
+                try {
+                    const v = JSON.parse(log.input_json || '{}');
+                    if (String(v.belt) !== belt || this.measurementNumber(type === 'ash_meter' ? v.value : v.ash_content) == null) continue;
+                    const t = new Date(String(log.timestamp || '').replace(' ', 'T')).getTime();
+                    return {source: belt + (type === 'ash_meter' ? '仪表补录' : '灰分密度导入'), sampleAt: Number.isFinite(t) ? t : null, enteredAt: null};
+                } catch (e) { /* 忽略无法解析的历史记录 */ }
+            }
+        }
+        return {source: '默认值', sampleAt: null, enteredAt: null};
+    },
+
     heavyAshLayer() {
         if (this.heavyAshSource() === 'manual') return '手动(采样)';
         return '自动(' + this._heavyAutoLayer() + ')';
@@ -2875,12 +2967,9 @@ const App = {
 
     setHeavyAshInput(patch) {
         if (!this.store.heavyAshInput) this.store.heavyAshInput = { manual: null };
-        if (this.store.totalAshManualOn && typeof patch.manual === 'number' && isFinite(patch.manual)) {
-            this.showToast('"总灰分修改"开启中，公式因素已锁定；关闭开关后可修改', 'warning');
-            return;
-        }
         if ('manual' in patch) {
             patch = Object.assign({}, patch);
+            if (!Object.prototype.hasOwnProperty.call(patch, 'sampleAt')) patch.sampleAt = null;
             patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
             // 双击填了值 = 明确想用手动值 → 自动切到手动档。
             // （否则会出现"填了却不生效"的最糟意外；清空值时不动档位，计算值自然接管。）
@@ -2939,7 +3028,40 @@ const App = {
         metrics: { r2: 0.534243, adjR2: 0.493545, rmse: 2.356507, mae: 1.759189, passRate: 31.858407, q2: 0.402075 }
     },
 
-    // 取当前生效的粗精煤泥模型（优先生产模型，缺则回退出厂默认）
+    // DS/GPT 版本由模型指标识别，兼容升级前的存档。
+    coarseEngine(model = this.store.coarseModel) {
+        // 兼容没有版本字段的旧存档：v2 属于 GPT，其余属于 DS。
+        return model && model.mlr && model.mlr.metrics && model.mlr.metrics.version === 2 ? 'gpt' : 'ds';
+    },
+
+    _rememberCoarseModel() {
+        if (!this.store.coarseModelVariants) this.store.coarseModelVariants = {};
+        if (this.store.coarseModel) {
+            const engine = this.coarseEngine(), current = this.store.coarseModel;
+            const saved = this.store.coarseModelVariants[engine];
+            // /state 的兼容模型表只返回部分字段。同一模型不覆盖完整快照，避免丢失 lambda/drop。
+            const identity = m => JSON.stringify([m.trainedAt, m.n, m.range, m.tolerance, m.production,
+                ...['mlr', 'pls'].map(k => [m[k].intercept, m[k].coefs, m[k].imputeMeans])]);
+            if (!saved || identity(saved) !== identity(current)) this.store.coarseModelVariants[engine] = current;
+        }
+    },
+
+    async switchCoarseEngine(engine) {
+        if (!['ds', 'gpt'].includes(engine)) return false;
+        this._rememberCoarseModel();
+        const saved = this.store.coarseModelVariants[engine];
+        const range = this.store.coarseTrainRange || 'jun_jul';
+        const tol = this.store.coarseTolerance ?? .8;
+        if (!saved || saved.range !== range || saved.tolerance !== tol) {
+            return this.retrainCoarseModelAsync(range, engine);
+        }
+        this.store.coarseModel = saved;
+        this.refreshCoarsePredictions();
+        this.saveStore();
+        return true;
+    },
+
+    // 取当前生效的粗精煤泥模型（优先生产模型，缺则回退出厂默认）。
     getCoarseModel(which) {
         which = which || (this.store.coarseModel ? this.store.coarseModel.production : 'pls');
         if (this.store.coarseModel && this.store.coarseModel[which]) return this.store.coarseModel[which];
@@ -2956,7 +3078,7 @@ const App = {
         let y = model.intercept;
         for (let j = 0; j < feats.length; j++) {
             let v = rec[feats[j]];
-            if (typeof v !== 'number' || isNaN(v)) v = means[j];
+            if (!Number.isFinite(v)) v = means[j];
             y += model.coefs[j] * v;
         }
         return y;
@@ -2965,7 +3087,7 @@ const App = {
     // 训练范围过滤：jun_jul=仅6-7月(出厂口径) | 30d=近30天 | all=全部
     filterTrainRows(range) {
         let rows = this.store.coarseCoal.filter(d =>
-            typeof d.ash_content === 'number' && !isNaN(d.ash_content) && d.ash_content > 0);
+            Number.isFinite(d.ash_content) && d.ash_content > 0);
         const r = range || this.store.coarseTrainRange || 'jun_jul';
         if (r === 'jun_jul') {
             rows = rows.filter(d => {
@@ -2993,43 +3115,180 @@ const App = {
         rows.sort((a, b) => { const ta = String(a.timestamp || ''), tb = String(b.timestamp || ''); return ta < tb ? -1 : ta > tb ? 1 : 0; });
         if (rows.length < feats.length + 2) return null;
         const means = feats.map(f => {
-            const vals = rows.map(r => r[f]).filter(v => typeof v === 'number' && !isNaN(v));
+            const vals = rows.map(r => r[f]).filter(v => Number.isFinite(v));
             return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
         });
         const X = rows.map(r => feats.map((f, i) => {
             const v = r[f];
-            return (typeof v === 'number' && !isNaN(v)) ? v : means[i];
+            return Number.isFinite(v) ? v : null;
         }));
         const y = rows.map(r => r.ash_content);
         return { X, y, means, rows };
     },
 
-    // 训练 MLR + PLS，按时间序列交叉验证 Q² 选生产模型（回退留一 Q²），回填每条记录 predicted_ash
-    trainCoarseModel(range) {
-        const useRange = range || this.store.coarseTrainRange || 'jun_jul';
-        const d = this._buildCoarseXY(useRange);
-        if (!d) return false;
+    // 粗灰专用训练 v2：按完整日期验证，专家假设由时间验证选择。
+    _coarseRows(records) {
+        const unique = new Map();
+        records.forEach(r => {
+            const instant = new Date(String(r.timestamp || '').replace(' ', 'T') + 'Z');
+            if (Number.isFinite(r.ash_content) && r.ash_content > 0 && r.ash_content <= 40 &&
+                /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(r.timestamp || '') &&
+                Number.isFinite(instant.getTime()) &&
+                instant.toISOString().slice(0, 19).replace('T', ' ') === r.timestamp) unique.set(r.timestamp, r);
+        });
+        return [...unique.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    },
+    _coarseDaily(records) {
+        const groups = new Map();
+        this._coarseRows(records).forEach(r => {
+            const d = r.timestamp.slice(0, 10);
+            if (!groups.has(d)) groups.set(d, []);
+            groups.get(d).push(r);
+        });
+        return [...groups].map(([day, records]) => {
+            const row = {day, timestamp: day + ' 12:00:00', n: records.length, records};
+            [...this.MLR_FEATURES, 'ash_content', 'moisture'].forEach(f => {
+                const vals = records.map(r => r[f]).filter(Number.isFinite);
+                row[f] = vals.length ? this._mean(vals) : null;
+            });
+            return row;
+        });
+    },
+    _coarseFolds(rows, outer = false) {
+        const days = [...new Set(rows.map(r => r.timestamp.slice(0, 10)))].sort();
+        const cuts = (outer ? [.7, .85, 1] : [.5, .7, .85, 1]).map(f => Math.floor(days.length * f));
+        const blocks = [];
+        for (let i = 0; i < cuts.length - 1; i++) {
+            const a = cuts[i], b = cuts[i + 1];
+            if (a < 4 || a >= b) continue;
+            const s = rows.findIndex(r => r.timestamp.slice(0, 10) === days[a]);
+            const e = b === days.length ? rows.length : rows.findIndex(r => r.timestamp.slice(0, 10) === days[b]);
+            if (s >= 6) blocks.push([s, e]);
+        }
+        return blocks;
+    },
+    _coarseCandidates(kind) {
+        const out = [];
+        ['all', 'expert'].forEach(subset => {
+            if (kind === 'mlr') [.001, .01, .1, 1, 10].forEach(alpha => {
+                (subset === 'all' ? [1, 4] : [1]).forEach(penalty => out.push({subset, alpha, penalty}));
+            });
+            else for (let A = 1; A <= (subset === 'all' ? 4 : 3); A++) out.push({subset, A, penalty: 1});
+        });
+        return out;
+    },
+    _coarseFit(rows, kind, config) {
+        const {X, means: impute} = this._impute(rows.map(r => this.MLR_FEATURES.map(f => r[f])));
+        const {means, stds} = this._colMeansStd(X), Z = this._standardize(X, means, stds);
+        const y = rows.map(r => r.ash_content), ym = this._mean(y), expert = [0, 6, 7];
+        const active = this.MLR_FEATURES.map((_, j) => j).filter(j =>
+            (config.subset === 'all' || expert.includes(j)) && X.some(r => Math.abs(r[j] - X[0][j]) > 1e-9));
+        const beta = this.MLR_FEATURES.map(() => 0);
+        if (active.length) {
+            const z = Z.map(r => active.map(j => r[j]));
+            let solution;
+            if (kind === 'mlr') {
+                const A = active.map((_, p) => active.map((_, q) => z.reduce((s, r) => s + r[p] * r[q], 0)));
+                const b = active.map((_, p) => z.reduce((s, r, i) => s + r[p] * (y[i] - ym), 0));
+                active.forEach((j, p) => { A[p][p] += config.alpha * rows.length * (expert.includes(j) ? 1 : config.penalty); });
+                solution = this.solveLinearSystem(A, b);
+            } else solution = this._plsCore(z, y.map(v => v - ym), Math.min(config.A, active.length)).Bstd;
+            active.forEach((j, p) => { beta[j] = solution[p]; });
+        }
+        const coefs = beta.map((b, j) => b / stds[j]);
+        const intercept = ym - coefs.reduce((s, c, j) => s + c * means[j], 0);
+        const yhat = X.map(r => intercept + coefs.reduce((s, c, j) => s + c * r[j], 0)), sy = this._std(y);
+        return {type: kind, version: 2, feature_names: this.MLR_FEATURES, intercept, coefs, means, stds,
+            imputeMeans: impute, stdCoef: beta.map(v => sy ? v / sy : 0),
+            drop: beta.map((_, j) => j).filter(j => !active.includes(j)),
+            n: rows.length, k: active.length, config, lambda: (config.alpha || 0) * rows.length, A: config.A || null,
+            yhat, metrics: this._metrics(y, yhat, active.length)};
+    },
+    _coarsePredict(r, m) {
+        return this._predictFromModelVec(this.MLR_FEATURES.map(f => r[f]), m);
+    },
+    _coarseSelect(rows, kind) {
+        const blocks = this._coarseFolds(rows);
+        if (!blocks.length) return null;
+        let best = null;
+        this._coarseCandidates(kind).forEach(config => {
+            const actual = [], pred = [];
+            blocks.forEach(([s, e]) => {
+                const m = this._coarseFit(rows.slice(0, s), kind, config);
+                rows.slice(s, e).forEach(r => { actual.push(r.ash_content); pred.push(this._coarsePredict(r, m)); });
+            });
+            const score = this._metrics(actual, pred, 0);
+            if (!best || score.rmse < best.score.rmse - 1e-10) best = {config, score};
+        });
+        return best;
+    },
+    _trainCoarseRows(records) {
+        const rows = this._coarseRows(records), kinds = ['mlr', 'pls'];
+        if (rows.length < 12 || new Set(rows.map(r => r.timestamp.slice(0, 10))).size < 8) return null;
+        const selected = Object.fromEntries(kinds.map(k => [k, this._coarseSelect(rows, k)]));
+        const choose = s => s.mlr.score.rmse <= s.pls.score.rmse ? 'mlr' : 'pls';
+        const production = choose(selected);
+        const models = Object.fromEntries(kinds.map(k => [k, this._coarseFit(rows, k, selected[k].config)]));
+        const actual = [], baseline = [], blocks = [], predictions = {mlr: [], pls: [], production: []};
+        this._coarseFolds(rows, true).forEach(([s, e]) => {
+            const tr = rows.slice(0, s), te = rows.slice(s, e);
+            const inner = Object.fromEntries(kinds.map(k => [k, this._coarseSelect(tr, k)]));
+            if (kinds.some(k => !inner[k])) return;
+            const chosen = choose(inner), fp = {};
+            kinds.forEach(k => {
+                const m = this._coarseFit(tr, k, inner[k].config);
+                fp[k] = te.map(r => this._coarsePredict(r, m)); predictions[k].push(...fp[k]);
+            });
+            predictions.production.push(...fp[chosen]); actual.push(...te.map(r => r.ash_content));
+            baseline.push(...te.map(() => this._mean(tr.map(r => r.ash_content))));
+            blocks.push({trainEnd: tr[tr.length - 1].timestamp, testStart: te[0].timestamp,
+                testEnd: te[te.length - 1].timestamp, n: te.length, production: chosen});
+        });
+        const validate = pred => {
+            if (!actual.length) return null;
+            const m = this._metrics(actual, pred, 0), bm = this._metrics(actual, baseline, 0);
+            return {...m, n: actual.length, folds: blocks, baselineMae: bm.mae, baselineRmse: bm.rmse,
+                beatsBaseline: m.rmse < bm.rmse, method: 'nested-day-walk-forward'};
+        };
+        kinds.forEach(k => {
+            const m = models[k], v = validate(predictions[k]);
+            Object.assign(m.metrics, {q2: selected[k].score.r2, q2Time: v ? v.r2 : null,
+                validation: v, selectionCv: selected[k].score, config: m.config, version: 2,
+                pipelineValidation: validate(predictions.production)});
+        });
+        return {...models, production, n: rows.length};
+    },
+
+    // DS 原版编排：留一验证训练、原版时间验证选择采样生产算法。
+    _trainCoarseDs(range) {
+        const d = this._buildCoarseXY(range);
+        if (!d) return null;
         const mlr = this.trainMlr(d.X, d.y);
         const pls = this.trainPls(d.X, d.y, this.MLR_FEATURES.length);
-        if (!mlr || !pls) return false;
-
-        // 记录训练时的缺失因子填补均值，保证预测时与训练一致（否则会用标准化均值，引入偏差）
+        if (!mlr || !pls) return null;
         mlr.imputeMeans = d.means; pls.imputeMeans = d.means;
-
-        // 时间序列交叉验证 Q²：更贴近"预测下一小时"的真实能力，生产模型优先按它选
         const mlrQ2t = this._timeCvQ2(d.X, d.y, 'mlr');
-        const plsQ2t = this._timeCvQ2(d.X, d.y, 'pls', pls.A);
-        mlr.metrics.q2Time = (mlrQ2t == null) ? null : +mlrQ2t.toFixed(4);
-        pls.metrics.q2Time = (plsQ2t == null) ? null : +plsQ2t.toFixed(4);
-        let production;
-        if (mlrQ2t != null && plsQ2t != null) production = (plsQ2t >= mlrQ2t) ? 'pls' : 'mlr';
-        else production = (pls.metrics.q2 >= mlr.metrics.q2) ? 'pls' : 'mlr';
+        const plsQ2t = this._timeCvQ2(d.X, d.y, 'pls', this.MLR_FEATURES.length);
+        mlr.metrics.q2Time = mlrQ2t == null ? null : +mlrQ2t.toFixed(4);
+        pls.metrics.q2Time = plsQ2t == null ? null : +plsQ2t.toFixed(4);
+        const production = mlrQ2t != null && plsQ2t != null
+            ? (plsQ2t >= mlrQ2t ? 'pls' : 'mlr') : (pls.metrics.q2 >= mlr.metrics.q2 ? 'pls' : 'mlr');
+        return {mlr, pls, production, n: d.rows.length};
+    },
+
+    trainCoarseModel(range, engine = this.coarseEngine()) {
+        const useRange = range || this.store.coarseTrainRange || 'jun_jul';
+        if (!['ds', 'gpt'].includes(engine)) return false;
+        const result = engine === 'gpt' ? this._trainCoarseRows(this.filterTrainRows(useRange)) : this._trainCoarseDs(useRange);
+        if (!result) return false;
+        const {mlr, pls, production, n} = result;
+        const mlrQ2t = mlr.metrics.q2Time, plsQ2t = pls.metrics.q2Time;
 
         const tol = (this.store.coarseTolerance !== undefined) ? this.store.coarseTolerance : 0.8;
         if (!this.store.coarseModelHistory) this.store.coarseModelHistory = [];
         this.store.coarseModelHistory.push({
-            trainedAt: this.formatDate(new Date()), n: d.rows.length, tolerance: tol,
-            range: useRange, production,
+            trainedAt: this.formatDate(new Date()), n, tolerance: tol,
+            range: useRange, production, engine,
             mlr: { r2: +mlr.metrics.r2.toFixed(4), passRate: +mlr.metrics.passRate.toFixed(1),
                    q2: +mlr.metrics.q2.toFixed(4), q2Time: (mlrQ2t == null) ? null : +mlrQ2t.toFixed(4),
                    rmse: +mlr.metrics.rmse.toFixed(3), mae: +mlr.metrics.mae.toFixed(3) },
@@ -3041,10 +3300,12 @@ const App = {
         if (this.store.coarseModelHistory.length > 30) this.store.coarseModelHistory.shift();
 
         // 先写入 coarseModel，再用生产模型回填每条记录预测值（缺失因子自动均值补全）
+        this._rememberCoarseModel();
         this.store.coarseModel = {
             mlr, pls, production, trainedAt: this.formatDate(new Date()),
-            n: d.rows.length, tolerance: tol, range: useRange
+            n, tolerance: tol, range: useRange, engine
         };
+        this._rememberCoarseModel();
         this.store.coarseCoal.forEach(r => {
             r.predicted_ash = +this.predictCoarseAsh(r, production).toFixed(4);
         });
@@ -3060,29 +3321,47 @@ const App = {
         });
     },
 
-    // 训练 MLR+PLS 粗灰模型：http 下走后端 sklearn 训练接口；file:// 或后端不可用回退本地训练。
+    // http 先同步再训练；服务端已保存模型，不再以旧版本整库覆盖。file:// 本地训练。
     // 返回 Promise<boolean>；成功时已更新 store.coarseModel / coarseModelHistory / predicted_ash 并 saveStore。
-    async retrainCoarseModelAsync(range) {
+    async retrainCoarseModelAsync(range, engine = this.coarseEngine()) {
         range = range || this.store.coarseTrainRange || 'jun_jul';
+        if (!['ds', 'gpt'].includes(engine)) return false;
         if (window.Api && window.location.protocol.startsWith('http')) {
             try {
-                const resp = await window.Api.retrainCoarseModel(range);
+                const sync = await this.flushMirrorNow();
+                if (!sync.ok) throw new Error('本地数据尚未同步，请处理同步提示后再训练');
+                const snapshot = JSON.stringify(this.store);
+                const resp = await window.Api.retrainCoarseModel(range, sync.revision, engine);
+                if (snapshot !== JSON.stringify(this.store)) {
+                    this._mirrorConflict = true;
+                    throw new Error('训练期间本地数据发生变化，已保留本地改动，请核对同步状态');
+                }
                 if (resp && resp.ok && resp.coarseModel) {
+                    if (this.coarseEngine(resp.coarseModel) !== engine) {
+                        this._mirrorConflict = true;
+                        throw new Error('后端返回的模型版本不匹配，请重启后端并同步后再试');
+                    }
+                    this._rememberCoarseModel();
+                    if (resp.coarseModelVariants) this.store.coarseModelVariants = resp.coarseModelVariants;
                     this.store.coarseModel = resp.coarseModel;
+                    this._rememberCoarseModel();
                     if (!this.store.coarseModelHistory) this.store.coarseModelHistory = [];
                     if (resp.history) {
                         this.store.coarseModelHistory.push(resp.history);
                         if (this.store.coarseModelHistory.length > 30) this.store.coarseModelHistory.shift();
                     }
                     this.refreshCoarsePredictions();
-                    this.saveStore();
+                    if (resp.revision) this.store._revision = resp.revision;
+                    this.saveStore(true);
                     return true;
                 }
             } catch (e) {
-                console.warn('远程训练失败，回退本地训练:', e);
+                console.warn('远程训练未完成:', e);
+                this.showToast(e.message || '远程训练未完成', 'error');
             }
+            return false;
         }
-        return this.trainCoarseModel(range);
+        return this.trainCoarseModel(range, engine);
     },
 
     // ---------- 线性代数小工具 ----------
@@ -3129,7 +3408,34 @@ const App = {
     },
 
     // ---------- MLR（标准化后正规方程，含 LOOCV Q²） ----------
+    _impute(X) {
+        const means = X[0].map((_, j) => {
+            const values = X.map(r => r[j]).filter(Number.isFinite);
+            return values.length ? this._mean(values) : 0;
+        });
+        return {X: X.map(r => r.map((v, j) => Number.isFinite(v) ? v : means[j])), means};
+    },
+
+    _ridgeContext(X, y) {
+        const filled = this._impute(X);
+        const {means, stds} = this._colMeansStd(filled.X);
+        const Z = this._standardize(filled.X, means, stds), k = means.length + 1;
+        const A = Array.from({length: k}, () => new Array(k).fill(0)), b = new Array(k).fill(0);
+        Z.forEach((row, i) => {
+            const v = [1, ...row];
+            for (let p = 0; p < k; p++) {
+                b[p] += v[p] * y[i];
+                for (let q = 0; q < k; q++) A[p][q] += v[p] * v[q];
+            }
+        });
+        const active = A.slice(1).map((r, j) => r[j + 1]).filter(v => v > 1e-12);
+        const diag = active.length ? this._mean(active) : 0;
+        for (let j = 1; j < k; j++) if (A[j][j] <= 1e-12) A[j][j] = 1;
+        return {A, b, diag, means, stds, impute: filled.means};
+    },
+
     trainMlr(X, y) {
+        const rawX = X, filled = this._impute(X); X = filled.X;
         const drop = this._constCols(X);
         const Xd = drop.length ? X.map(r => r.filter((_, j) => !drop.includes(j))) : X;
         const n = Xd.length, k = Xd[0].length;
@@ -3149,28 +3455,24 @@ const App = {
         // 岭回归：λ 在网格上按留一交叉误差选优（λ=0 即普通最小二乘；截距列不惩罚）
         let diagMean = 0;
         for (let p = 1; p < K; p++) diagMean += A[p][p];
-        diagMean /= (K - 1);
-        const lamGrid = [0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1].map(f => f * diagMean);
+        diagMean /= Math.max(1, K - 1);
+        const factors = [0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1];
+        const folds = rawX.map((_, i) => this._ridgeContext(rawX.filter((_, r) => r !== i), y.filter((_, r) => r !== i)));
         let best = null;
-        for (const lam of lamGrid) {
+        for (const factor of factors) {
+            const lam = factor * diagMean;
             const Ar = lam > 0 ? A.map((row, i) => row.map((v, j) => (i === j && j > 0) ? v + lam : v)) : A;
             const beta = this.solveLinearSystem(Ar, b);
             if (!beta) continue;
-            const Minv = this._matInv(Ar);
-            if (!Minv) continue;
             let sse = 0;
             for (let i = 0; i < n; i++) {
-                let yh = beta[0];
-                for (let p = 1; p < K; p++) yh += beta[p] * Z[i][p - 1];
-                let h = 0;
-                for (let p = 0; p < K; p++) {
-                    const mp = (p === 0) ? 1 : Z[i][p - 1];
-                    let inner = 0;
-                    for (let q = 0; q < K; q++) { const mq = (q === 0) ? 1 : Z[i][q - 1]; inner += Minv[p][q] * mq; }
-                    h += mp * inner;
-                }
-                const loo = (h < 1 - 1e-9) ? (y[i] - yh) / (1 - h) : (y[i] - yh);
-                sse += loo * loo;
+                const f = folds[i];
+                const ar = f.A.map((row, p) => row.map((v, q) => p === q && p > 0 ? v + factor * f.diag : v));
+                const fitted = this.solveLinearSystem(ar, f.b);
+                if (!fitted) { sse = Infinity; break; }
+                let yh = fitted[0];
+                rawX[i].forEach((v, j) => { yh += fitted[j + 1] * ((Number.isFinite(v) ? v : f.impute[j]) - f.means[j]) / f.stds[j]; });
+                sse += (y[i] - yh) ** 2;
             }
             if (!best || sse < best.sse) best = { sse, lam, beta };
         }
@@ -3192,7 +3494,7 @@ const App = {
 
         // 将被剔除的常数特征列补回（系数0，均值0，std1）
         const full = this._unDrop({ coefs, means, stds, stdCoef }, drop, X[0].length);
-        return { type: 'mlr', intercept, coefs: full.coefs, means: full.means, stds: full.stds, stdCoef: full.stdCoef, yhat, metrics: m, n, k, drop, lambda: best.lam };
+        return { type: 'mlr', intercept, coefs: full.coefs, means: full.means, stds: full.stds, stdCoef: full.stdCoef, yhat, metrics: m, n, k, drop, lambda: best.lam, imputeMeans: filled.means };
     },
 
     // ---------- PLS1 NIPALS（A 由 LOOCV 选优） ----------
@@ -3226,6 +3528,7 @@ const App = {
     },
 
     trainPls(X, y, Amax) {
+        const rawX = X, filled = this._impute(X); X = filled.X;
         const drop = this._constCols(X);
         const Xd = drop.length ? X.map(r => r.filter((_, j) => !drop.includes(j))) : X;
         const n = Xd.length, k = Xd[0].length;
@@ -3235,18 +3538,21 @@ const App = {
         const yc = y.map(v => v - yMean);
         Amax = Math.min(Amax || k, k);
 
-        // LOOCV 选 A（全局预处理，近似但稳定）
+        // 每个训练折独立填补、标准化和中心化，验证样本不参与拟合。
         let bestA = 1, bestQ2 = -Infinity;
         const sst = this._sst(y);
         if (n >= 10) {
             const sseByA = new Array(Amax + 1).fill(0);
             for (let i = 0; i < n; i++) {
-                const Zt = [], yct = [];
-                for (let r = 0; r < n; r++) if (r !== i) { Zt.push(Z[r]); yct.push(yc[r]); }
+                const fold = this._impute(rawX.filter((_, r) => r !== i));
+                const stats = this._colMeansStd(fold.X);
+                const Zt = this._standardize(fold.X, stats.means, stats.stds);
+                const yt = y.filter((_, r) => r !== i), ym = this._mean(yt), yct = yt.map(v => v - ym);
+                const test = rawX[i].map((v, j) => ((Number.isFinite(v) ? v : fold.means[j]) - stats.means[j]) / stats.stds[j]);
                 for (let A = 1; A <= Amax; A++) {
                     const core = this._plsCore(Zt, yct, A);
-                    let pred = yMean;
-                    for (let j = 0; j < k; j++) pred += core.Bstd[j] * Z[i][j];
+                    let pred = ym;
+                    for (let j = 0; j < test.length; j++) pred += core.Bstd[j] * test[j];
                     const e = y[i] - pred; sseByA[A] += e * e;
                 }
             }
@@ -3264,7 +3570,7 @@ const App = {
 
         // 将被剔除的常数特征列补回（系数0，均值0，std1）
         const full = this._unDrop({ coefs, means, stds, stdCoef }, drop, X[0].length);
-        return { type: 'pls', intercept, coefs: full.coefs, means: full.means, stds: full.stds, stdCoef: full.stdCoef, A: bestA, yhat, metrics: m, n, k, drop };
+        return { type: 'pls', intercept, coefs: full.coefs, means: full.means, stds: full.stds, stdCoef: full.stdCoef, A: bestA, yhat, metrics: m, n, k, drop, imputeMeans: filled.means };
     },
 
     // 用训练好的模型对一条完整特征向量预测（缺失值回退训练均值）
@@ -3273,7 +3579,7 @@ const App = {
         const nf = mdl.coefs.length;
         for (let j = 0; j < nf; j++) {
             let v = xrow[j];
-            if (typeof v !== 'number' || isNaN(v)) {
+            if (!Number.isFinite(v)) {
                 v = (mdl.imputeMeans && typeof mdl.imputeMeans[j] === 'number') ? mdl.imputeMeans[j] : (mdl.means[j] || 0);
             }
             s += mdl.coefs[j] * v;

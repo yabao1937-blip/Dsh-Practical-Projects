@@ -1388,6 +1388,18 @@ sheet(
 )
 
 DOCS.mkdir(parents=True, exist_ok=True)
+review_updates = json.loads(Path(__file__).with_name('todo_review_20260921.json').read_text(encoding='utf-8'))
+from copy import copy
+for name, cells in review_updates.items():
+    ws = wb[name]
+    for address, value in cells.items():
+        cell = ws[address]
+        if name == '遗留问题与建议(删仿真后)' and cell.row > 11:
+            cell._style = copy(ws.cell(11, cell.column)._style)
+        cell.value = value
+    if name == '遗留问题与建议(删仿真后)':
+        for row in range(4, 17):
+            ws.row_dimensions[row].height = 92
 wb.save(OUT)
 print("已生成:", OUT)
 for ws in wb.worksheets:

@@ -17,6 +17,8 @@ const output = vm.runInContext(`(() => {
     App.saveStore = () => {};
     const guidance = App.computeDensityGuidance();
     return {guidance, ash501: App.resolveInstrument('ash_501'),
-            ash502: App.resolveInstrument('ash_502'), density: App.resolveDensity()};
+            ash502: App.resolveInstrument('ash_502'), density: App.resolveDensity(),
+            inferredHeavy: App.backCalcHeavyAsh(),
+            targetHeavy: App.backCalcHeavyAsh(App.store.ashTarget ?? 8.5)};
 })()`, ctx);
 process.stdout.write(JSON.stringify(output));

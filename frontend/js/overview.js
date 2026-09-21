@@ -322,23 +322,7 @@ const OverviewPage = {
     // 灰分测量的"时间事实"：返回毫秒时间戳（找不到返回 null）。
     // 手动档用 heavyAshInput.manualAt；自动档依次找 502 手动录入时刻、表3 灰分记录时间。
     _heavyAshMeasuredAt(scheme) {
-        const cfg = App.store.heavyAshInput || {};
-        if (scheme === 'heavy' && App.heavyAshSource() === 'manual' && cfg.manualAt) return cfg.manualAt;
-        const ic = (App.store.instrumentInputs || {}).ash_502 || {};
-        if (ic.manualAt) return ic.manualAt;
-        const logs = App.store.calcLogs || [];
-        for (let i = logs.length - 1; i >= 0; i--) {
-            const l = logs[i];
-            if (!l || (l.calc_type !== 'ash_meter' && l.calc_type !== 'belt_ash')) continue;
-            try {
-                const v = JSON.parse(l.input_json || '{}');
-                if (String(v.belt || '') === '502' && typeof v.ash_content === 'number') {
-                    const t = new Date(String(l.ts || '').replace(' ', 'T')).getTime();
-                    return isFinite(t) ? t : null;
-                }
-            } catch (e) { /* 忽略坏记录 */ }
-        }
-        return null;
+        return App.ashMeasurementInfo(scheme).sampleAt;
     },
 
     // 卡片「测量事实」一行：来源 · 测量时间 · 距上次调密 · 为何保持（现场 2026-09-21 要求）
@@ -349,10 +333,10 @@ const OverviewPage = {
             return isFinite(d.getTime()) ? `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}` : null;
         };
         const scheme = (guide && guide.scheme === 'heavy') ? 'heavy' : 'total';
-        const src = scheme === 'heavy' ? App.heavyAshLayer() : App.instrumentLayer('ash_501');
-        const at = this._heavyAshMeasuredAt(scheme);
-        const parts = [`来源 ${src}`];
-        parts.push(at ? `测量 ${fmt(at)}` : '测量时间未知');
+        const info = App.ashMeasurementInfo(scheme);
+        const parts = [`来源 ${info.source}`];
+        parts.push(info.sampleAt ? `测量 ${fmt(info.sampleAt)}` : '测量时间未知');
+        if (info.enteredAt) parts.push(`录入 ${fmt(info.enteredAt)}`);
         const sinceMin = (guide && guide.sinceMoveMin != null) ? guide.sinceMoveMin : null;
         parts.push(sinceMin != null ? `距上次调密 ${sinceMin} 分钟` : '本班未调过密度');
         if (guide && guide.hold) {
@@ -464,7 +448,10 @@ const OverviewPage = {
     },
 
     showCardDetail(sysId) {
-        App.backCalcHeavyAsh();   // 反推重介灰分仅展示用（不参与密度建议）
+        const inferredHeavy = App.backCalcHeavyAsh();
+        const targetHeavy = App.backCalcHeavyAsh(App.store.ashTarget ?? 8.5);
+        const balanceText = value => value == null ? '—（量/灰分数据不完整）'
+            : value.toFixed(3) + '%' + (value < 0 || value > 100 ? '（超出0~100%，请核对输入）' : '（公式推算，非实测）');
         const defaultTarget = (App.store.ashTarget != null) ? App.store.ashTarget : 8.50;
         const heavyAsh = App.getHeavyAsh();      // 重介精煤灰分（手动采样 > 502在线 > 默认7.9）
         const heavyAmt = App.resolveAmount('denseAmount');      // 重介精煤量（录入或计算）
@@ -543,14 +530,11 @@ const OverviewPage = {
                     <tr><td>实测重介精煤灰分</td><td>${g.heavyAsh.toFixed(2)}%</td></tr>
                     <tr><td>目标重介精煤灰分</td><td>${g.targetHeavy != null ? g.targetHeavy.toFixed(2) + '%' : '—'}</td></tr>
                     <tr><td>重介灰分偏差</td><td>${(g.deltaAHeavy > 0 ? '+' : '') + g.deltaAHeavy.toFixed(2)}%</td></tr>` : `
-                    <tr><td>实际总灰分(在线仪表)</td><td>${g.valid ? g.actualTotal.toFixed(2) + '%' : '—'}</td></tr>`}
+                    <tr><td>用于建议的总灰分</td><td>${g.actualTotal != null ? g.actualTotal.toFixed(2) + '%' : '—'}（${App.totalInputLayer('totalAsh')}）</td></tr>`}
                     <tr><td>期望总灰分</td><td>${g.targetTotal.toFixed(2)}%</td></tr>
                     <tr><td>${g.scheme === 'heavy' ? '等效总灰分偏差' : '总灰分偏差'} ΔA</td><td>${g.valid ? (g.deltaA > 0 ? '+' : '') + g.deltaA.toFixed(2) + '%' : '—'}</td></tr>
                     <tr><td>调整规则(现场确认)</td><td>偏差≤0.05%不调；更大时按 <strong>Δρ = min(|ΔA|/15, 0.03)</strong>
                         （2026-09-12 现场口径：0.15%→0.01、0.30%→0.02、最多 0.03）</td></tr>
-                    <tr><td>预测增益 K</td><td>${g.K.toFixed(4)}　${App.kStateText(g.kInfo)}
-                        <span title="${App.kSystemsText(g.kInfo)}" style="cursor:help;color:var(--accent-blue)">［分系统明细］</span>
-                        <br><span style="color:var(--text-secondary);font-size:12px">仅用于"调密后重介灰分预测"，不参与调整量计算</span></td></tr>
                     <tr><td>密度修正量</td><td>${(g.valid && !g.hold)
                         ? (g.deltaRho > 0 ? '+' : '') + g.deltaRho.toFixed(3) + ' g/cm³（建议值，人工执行后录入实际密度）'
                         : '—<span style="color:var(--text-secondary);font-size:12px">（保持中：等新化验/新数据，本次不给修正量）</span>'}</td></tr>
@@ -574,9 +558,10 @@ const OverviewPage = {
                               + `不受单步限幅(≤${g.maxStep})约束，仅受 1.35~1.60 物理范围限制；`
                               + `属推测值（增益待阶跃实验实测），请以化验验证</span>`
                             : '—'}</td></tr>
-                    <tr><td>重介灰分预测(调密后)</td><td>${g.valid && Math.abs(g.deltaRho) > 1e-9 ? (g.heavyAsh + (g.rhoNew - g.rhoCur) / (g.K || 0.03)).toFixed(2) + '%（仅预测，不参与计算，请采样验证）' : '—'}</td></tr>
+                    <tr><td>重介灰分反推值</td><td>${balanceText(inferredHeavy)}；由当前总灰分反推</td></tr>
+                    <tr><td>目标重介灰分（质量平衡）</td><td>${balanceText(targetHeavy)}；由目标总灰分反推</td></tr>
+                    <tr><td>调密后重介灰分</td><td>等待下一次人工采样或502测量；以上反推值与目标值保留用于核对</td></tr>
                     <tr><td>达标判定</td><td>${g.hold ? '<span style="color:var(--accent-orange)">保持（等新化验/新数据）</span>：' + (g.reason || g.holdReason || '') : (g.valid && Math.abs(g.deltaA) <= g.deadband ? '<span style="color:var(--accent-green)">✓ 已达标（' + (g.scheme === 'heavy' ? '重介口径±' + (g.deadband * g.totalAmt / g.heavyAmt).toFixed(3) + '%，等效总灰分±' + g.deadband : '容差±' + g.deadband) + '%）</span>' : '<span style="color:var(--accent-orange)">未达标</span>')}</td></tr>
-                    <tr><td>重介灰分反推值(仅展示)</td><td>${App.store.heavyAshBackcalc != null ? App.store.heavyAshBackcalc.toFixed(2) + '%' : '—'}</td></tr>
                 </table>
                 <p style="color:var(--text-secondary)">${g.reason}</p>
                 <hr style="border-color:var(--border-color);margin:16px 0">

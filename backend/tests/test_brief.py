@@ -106,7 +106,7 @@ def test_heavyash_invalid_manual_rejected():
         s = fixture_store()
         s["heavyAshInput"] = {"manual": bad}
         first = build_hourly_brief(s)["rows"][0]
-        assert first[4] == "8.40", f"heavy_ash leaked for manual={bad!r}: {first[4]}"
+        assert first[4] == "8.50", f"heavy_ash leaked for manual={bad!r}: {first[4]}"
 
 
 def test_full_golden_diff():

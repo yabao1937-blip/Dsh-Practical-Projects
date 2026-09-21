@@ -66,7 +66,7 @@ def test_force_writes_backup_that_contains_pre_force_data():
 def test_normal_write_does_not_backup():
     """非 force 的普通镜像不做备份（否则每次镜像都复制一份库，纯浪费）。"""
     client.put("/api/v1/state?force=true", json=SEED)
-    j = client.put("/api/v1/state", json=SEED).json()
+    j = client.put("/api/v1/state", json={**SEED, "_revision": client.get("/api/v1/state").json()["_revision"]}).json()
     assert j["ok"] is True
     assert j.get("backup") is None
 

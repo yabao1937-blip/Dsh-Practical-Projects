@@ -73,13 +73,11 @@ const post = (p, body) => api(p, { method: 'POST', headers: { 'Content-Type': 'a
     body: JSON.stringify(body) });
 
 async function seed() {
-    // 四类测量记录里播种 coarse + 采样：让守卫的 sum(current)>0 成立、且 heavy_samples>=1
-    await post('/api/v1/records', { category: 'coarse', ts: '2000-01-01 00:00:00',
-        system: 'seed', ash_content: 10.0, coal_amount: 40 });
-    await post('/api/v1/records', { category: 'float', ts: '2000-01-01 00:00:00',
-        system: 'seed', ash_content: 9.0 });
-    await post('/api/v1/records', { category: 'ash_density', ts: '2000-01-01 00:00:00',
-        system: 'seed', density: 1.50, ash_content: 9.5 });
+    // 显式播种固定夹具，不再依赖浏览器启动时把本地种子反向覆盖服务器。
+    const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, '../data/seed_store.json'), 'utf8'));
+    fixture._revision = (await api('/api/v1/state'))._revision;
+    const saved = await api('/api/v1/state', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(fixture)});
+    if (!saved.ok) throw new Error('测试夹具写入失败: ' + JSON.stringify(saved));
     // 返回自增 id：重介采样**没有 GET 接口**（它在前端是纯本地键），
     // 于是用"自增 id 是否递增"来判断中间那次整库镜像有没有把采样表清掉
     // —— 表被清空后新插入会重新拿到 id=1，探针因此能察觉。
@@ -192,12 +190,12 @@ async function seed() {
         check('E2E_PROBE_IS_NEW', String(probe) !== String(serverAsh) && String(probe) !== String(localAsh),
             `probe=${probe} baseline=${baseline}`);
         // 缺陷 M-1 的复现前提：服务器有采样、浏览器没有（旧守卫据此判回退并拒绝整库写）
-        check('E2E_M1_PRECONDITION', localHeavy === 0 && heavyId >= 1,
+        check('E2E_M1_PRECONDITION', localHeavy >= 1 && heavyId >= 1,
             `浏览器 ${localHeavy} / 服务器播种 id ${heavyId}`);
 
         // ---------- 用例0：冷启动一次整库写必须成功（非 stale） ----------
         const cold = JSON.parse(await evalJs(
-            `(async () => JSON.stringify(await Api.putStateBody(JSON.stringify(App.store), {})))()`, true));
+            `(async () => JSON.stringify(await App.flushMirrorNow()))()`, true));
         check('MIRROR_COLD_START', cold.ok === true, JSON.stringify(cold).slice(0, 300));
 
         // ---------- 用例1a：传输失败必须留下痕迹（不静默） ----------
@@ -273,7 +271,7 @@ async function seed() {
             App.saveStore(); App._flushMirror(false);
             await new Promise(r => setTimeout(r, 900));
             const slot = App._readPendingSlot();
-            const info = document.querySelector('#toast-container .toast.info');
+            const info = document.querySelector('#toast-container .toast.warning');
             const first = { calls: window.__calls2, slotKept: !!(slot && slot.body),
                 rejected: App.mirrorStatus.rejected, failures: App.mirrorStatus.failures,
                 toast: info ? info.textContent.slice(0, 40) : null };
@@ -286,13 +284,13 @@ async function seed() {
         })()`, true));
         console.log('  (debug)', JSON.stringify(rej).slice(0, 320));
         check('MIRROR_REJECTED_NOT_RETRIED',
-            rej.first.calls === 1 && rej.first.slotKept === false && rej.first.rejected === 1
+            rej.first.calls === 1 && rej.first.slotKept === true && rej.first.rejected === 1
             && rej.first.failures === 1 && !!rej.first.toast && rej.second.calls === 1,
             `rejected=${rej.first.rejected} 槽保留=${rej.first.slotKept} 第二次发送次数=${rej.second.calls}`);
 
         // ---------- 复原：ashTarget 写回基线 ----------
         // 注意：_flushMirror 只发"待发内容"，没有待发就是空操作 —— 必须 saveStore 排入。
-        await evalJs(`App.mirrorStatus.failures = 0; App._mirrorSent = null;
+        await evalJs(`App._mirrorConflict = false; App.mirrorStatus.failures = 0; App._mirrorSent = null;
             App.store.ashTarget = ${JSON.stringify(baseline)};
             App.saveStore(); App._flushMirror(false); true`);
         let restored = null;

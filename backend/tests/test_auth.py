@@ -48,7 +48,7 @@ def remote_client():
 
 def test_write_requires_token_from_remote(token_on, remote_client):
     """远端无 token：所有写接口都必须 401（读接口不受影响）。"""
-    r = remote_client.put("/api/v1/state", json=SEED)
+    r = remote_client.put("/api/v1/state", json={**SEED, "_revision": remote_client.get("/api/v1/state").json()["_revision"]})
     assert r.status_code == 401, r.text
     assert "X-DMCS-Token" in r.json()["detail"]["error"]
     # 读接口仍然开放（现场看板不需要 token）
@@ -61,14 +61,14 @@ def test_write_with_token_from_remote(token_on, remote_client):
     这里只断言"没有被鉴权挡住"：写入本身可能因防回退守卫而 ok=False
     （测试库里已有记录），那是另一条规则的事，不该混在这条用例里。
     """
-    r = remote_client.put("/api/v1/state", json=SEED,
+    r = remote_client.put("/api/v1/state", json={**SEED, "_revision": remote_client.get("/api/v1/state").json()["_revision"]},
                           headers={"X-DMCS-Token": "test-token-123"})
     assert r.status_code == 200, r.text
     assert "unauthorized" not in r.text
 
 
 def test_write_with_wrong_token_rejected(token_on, remote_client):
-    r = remote_client.put("/api/v1/state", json=SEED, headers={"X-DMCS-Token": "wrong"})
+    r = remote_client.put("/api/v1/state", json={**SEED, "_revision": remote_client.get("/api/v1/state").json()["_revision"]}, headers={"X-DMCS-Token": "wrong"})
     assert r.status_code == 401
 
 
@@ -107,13 +107,13 @@ def test_force_only_from_loopback(token_on, remote_client):
     assert r.status_code == 403, r.text
     assert "只允许从服务器本机发起" in r.json()["detail"]["error"]
     # 非 force 的整库写（带 token）不受此限制
-    assert remote_client.put("/api/v1/state", json=SEED,
+    assert remote_client.put("/api/v1/state", json={**SEED, "_revision": remote_client.get("/api/v1/state").json()["_revision"]},
                             headers={"X-DMCS-Token": "test-token-123"}).status_code == 200
 
 
 def test_auth_disabled_by_env(token_off, remote_client):
     """显式关闭鉴权（DMCS_WRITE_TOKEN=off）时回到旧行为：远端也能写。"""
-    assert remote_client.put("/api/v1/state", json=SEED).json()["ok"] is True
+    assert remote_client.put("/api/v1/state", json={**SEED, "_revision": remote_client.get("/api/v1/state").json()["_revision"]}).json()["ok"] is True
 
 
 def test_index_injects_token_meta(token_on, local_client):

@@ -8,7 +8,8 @@ const URL = 'file:///D:/dense-medium-density-control-system/frontend/index.html'
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = 9377;
 const UD = path.join(process.env.TEMP, 'dmcs-cdp-train-dump');
-const OUT = process.argv[2] || path.join(__dirname, '..', 'data', 'train_js.json');
+// v1 train_js.json 保留为历史求解器基线，不能被当前 v2 训练覆盖。
+const OUT = process.argv[2] || path.join(__dirname, '..', 'data', 'coarse_v2_browser.json');
 if (fs.existsSync(UD)) fs.rmSync(UD, { recursive: true, force: true });
 
 const edge = spawn(EDGE, ['--headless=new', '--disable-gpu', '--no-first-run', '--allow-file-access-from-files', `--user-data-dir=${UD}`, `--remote-debugging-port=${PORT}`, '--window-size=1680,1200', URL], { stdio: 'ignore' });
@@ -35,7 +36,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
         // 运行训练并抓取全量结果（trainedAt 时间戳非确定，Python 侧忽略）
         const expr = `(() => {
-            const ok = App.trainCoarseModel('jun_jul');
+            const ok = App.trainCoarseModel('jun_jul', 'gpt');
             return JSON.stringify({
                 ok,
                 features: App.MLR_FEATURES,

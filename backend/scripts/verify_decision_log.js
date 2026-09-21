@@ -103,6 +103,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
             `JSON.stringify(((App.store.instrumentInputs || {}).density) || null)`));
         const savedLatch = JSON.parse(await evalJs('JSON.stringify(App.store.densityActionLatch || null)'));
         const savedLastMove = await evalJs('App.store.densityLastMoveAt || 0');
+        // 测试可重复执行：隔离此前遗留的同类节流条目，结束时恢复。
+        const savedLog = JSON.parse(await evalJs('JSON.stringify(App.store.densityDecisionLog || [])'));
+        await evalJs('App.store.densityDecisionLog = []; true');
 
         const n0 = await evalJs('(App.store.densityDecisionLog || []).length');
         // 操作员手动设定密度(决策日志应记录 density_set,含工况上下文)
@@ -116,7 +119,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         // 这里用确定性的写入，避免"服务器侧条数 0"究竟是没发出去还是被守卫拒绝看不出来
         // （CI run 12 就卡在这个不可见性上）。
         const putRes = await evalJs(
-            `(async () => JSON.stringify(await Api.putStateBody(JSON.stringify(App.store), {})))()`, true);
+            `(async () => JSON.stringify(await App.flushMirrorNow()))()`, true);
         console.log('显式整库 PUT 结果:', putRes);
         await evalJs('App._flushMirror(true); true');
         // 然后**轮询**等服务器侧出现，不要用固定 sleep 猜时间：
@@ -150,7 +153,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
             else st.instrumentInputs.density = ${JSON.stringify(savedDensity)};
             st.densityActionLatch = ${JSON.stringify(savedLatch)};
             st.densityLastMoveAt = ${JSON.stringify(savedLastMove)};
-            await Api.putStateBody(JSON.stringify(st), {});
+            st.densityDecisionLog = ${JSON.stringify(savedLog)};
+            await App.flushMirrorNow();
             const now = st.instrumentInputs.density || null;
             return JSON.stringify({ now: now, ok: JSON.stringify(now) === ${JSON.stringify(JSON.stringify(savedDensity))} });
         })()`, true));

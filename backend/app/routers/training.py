@@ -1,24 +1,28 @@
-"""粗精煤泥灰分 MLR/PLS 模型训练（sklearn 后移）+ 持久化。
+"""粗精煤泥灰分 DS（原版）/ GPT（按日分组时间验证）训练与持久化。
 
-POST /api/v1/training/coarse-model?range=jun_jul
+POST /api/v1/training/coarse-model?range=jun_jul&engine=ds|gpt
 - 从 coal_records(category=coarse) 取训练数据
-- sklearn 训练 mlr+pls，q2Time 选生产模型（选型口径与前端 JS 逐位一致）
+- DS 使用原版留一验证及时间选型；GPT 使用十因素/专家候选的嵌套时间验证
 - 单事务：替换 coarse_models（两行，train_run_id 关联）+ 写 coarse_model_history(detail 全量快照) + 回填 predicted_ash
 - 进程内锁串行化，防并发重训竞态
 """
+import math
 import threading
 from datetime import datetime
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..auth import require_write
 from ..database import get_db
-from ..models import CoalRecord, CoarseModel, CoarseModelHistory, Setting
-from ..services import training_sklearn as T
-from ..services.training import MLR_FEATURES
+from ..models import AutoState, CoalRecord, CoarseModel, CoarseModelHistory, Setting
+from ..services.coarse_training import train_models
+from ..services.modeling import predict_coarse_ash
+from ..services.training import MLR_FEATURES, _js_round, train_coarse_model as train_ds
+from ..services.state import load_store, state_revision
 
 router = APIRouter(prefix="/training", tags=["模型训练"])
 
@@ -51,10 +55,16 @@ def _get_setting(db: Session, key: str, default):
 @router.post("/coarse-model", dependencies=[Depends(require_write)])
 def train_coarse_model(
     train_range: Literal["jun_jul", "30d", "all"] = Query("jun_jul", alias="range"),
+    engine: Literal["ds", "gpt"] = Query("ds"),
+    expected_revision: str | None = Header(None, alias="X-DMCS-Revision"),
     db: Session = Depends(get_db),
 ):
-    """训练 MLR+PLS 粗灰模型（sklearn），持久化 coarse_models/coarse_model_history 并回填 predicted_ash。"""
+    """训练并保存所选版本；两种算法分别逐值对齐前端，保留另一版本。"""
     with _train_lock:
+        if db.bind.dialect.name == "sqlite":
+            db.execute(text("BEGIN IMMEDIATE"))
+        if expected_revision is not None and state_revision(db) != expected_revision:
+            raise HTTPException(409, "数据版本已变化，请同步后重新训练")
         # 数据快照在锁内取，避免「旧快照训练后覆盖新数据」的 lost update
         recs = (db.query(CoalRecord)
                 .filter(CoalRecord.category == "coarse")
@@ -68,18 +78,45 @@ def train_coarse_model(
             tol = float(tol_raw)
         except (TypeError, ValueError):
             raise HTTPException(422, f"coarse_tolerance 非法: {tol_raw!r}")
+        if not math.isfinite(tol) or tol <= 0:
+            raise HTTPException(422, "coarse_tolerance 必须为有限正数")
 
-        result = T.train_coarse_model_sklearn(store_records, train_range, tol)
+        result = (train_models if engine == "gpt" else train_ds)(store_records, train_range, tol)
         if result is None:
-            raise HTTPException(422, "训练数据不足（ash_content>0 且范围匹配的行数 < 特征数+2）")
+            raise HTTPException(422, "训练数据不足：DS需至少12条有效采样；GPT还需覆盖8个日期")
 
         trained_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         run_id = uuid4().hex
 
+        # 两个版本分别保留；coarse_models 两行仍是当前启用版本，兼容取值链。
+        before = load_store(db)
+        variants = dict(before.get("coarseModelVariants") or {})
+        previous = before.get("coarseModel")
+        if previous:
+            old_engine = "gpt" if (previous.get("mlr", {}).get("metrics") or {}).get("version") == 2 else "ds"
+            saved = variants.get(old_engine)
+            same = saved and all(saved.get(k) == previous.get(k) for k in
+                                 ("trainedAt", "n", "range", "tolerance", "production"))
+            same = same and all(saved[m].get(k) == previous[m].get(k)
+                                for m in ("mlr", "pls") for k in ("intercept", "coefs", "imputeMeans"))
+            if not same:  # 兼容表没有 lambda 等完整字段，同一模型保留已有快照。
+                variants[old_engine] = previous
+        coarse_model = {
+            "mlr": {k: v for k, v in result["mlr"].items() if k != "yhat"},
+            "pls": {k: v for k, v in result["pls"].items() if k != "yhat"},
+            "production": result["production"], "trainedAt": trained_at, "engine": engine,
+            "n": result["n"], "tolerance": result["tolerance"], "range": result["range"],
+        }
+        variants[engine] = coarse_model
+        bank = db.query(AutoState).filter(AutoState.key == "coarseModelVariants").first()
+        if bank is None:
+            db.add(AutoState(key="coarseModelVariants", value=variants))
+        else:
+            bank.value = variants
+
         # 回填 predicted_ash（全部 coarse 记录，round4，与前端同口径）
         for r, d in zip(recs, store_records):
-            if d.get("predicted_ash") is not None:
-                r.predicted_ash = d["predicted_ash"]
+            r.predicted_ash = _js_round(predict_coarse_ash(d, result[result["production"]]), 4)
 
         # 替换当前模型（mlr + pls 两行，production 标 is_current，train_run_id 关联）
         db.query(CoarseModel).delete()
@@ -102,6 +139,7 @@ def train_coarse_model(
             ))
 
         h = result["history"]
+        h["engine"] = engine
         detail = dict(h)
         detail["lambda"] = result["mlr"]["lambda"]
         detail["drop"] = result["mlr"]["drop"]
@@ -112,23 +150,16 @@ def train_coarse_model(
             mlr_q2=h["mlr"]["q2"], pls_q2=h["pls"]["q2"],
             pass_rate=h[h["production"]]["passRate"], detail=detail,
         ))
+        db.flush()
+        revision = state_revision(db)
         db.commit()
 
-    # 完整模型（前端 store.coarseModel 结构）+ 历史，供前端直接落本地
-    coarse_model = {
-        "mlr": {k: v for k, v in result["mlr"].items() if k != "yhat"},
-        "pls": {k: v for k, v in result["pls"].items() if k != "yhat"},
-        "production": result["production"],
-        "trainedAt": trained_at,
-        "n": result["n"],
-        "tolerance": result["tolerance"],
-        "range": result["range"],
-    }
     return {
-        "ok": True, "production": result["production"], "n": result["n"],
+        "ok": True, "revision": revision, "production": result["production"], "n": result["n"],
         "range": result["range"], "tolerance": tol, "trainedAt": trained_at,
         "trainRunId": run_id,
         "coarseModel": coarse_model,
+        "engine": engine, "coarseModelVariants": variants,
         "history": {**h, "trainedAt": trained_at},
         "mlr": {"r2": result["mlr"]["metrics"]["r2"], "q2": result["mlr"]["metrics"]["q2"],
                 "q2Time": result["mlr"]["metrics"]["q2Time"], "lambda": result["mlr"]["lambda"],

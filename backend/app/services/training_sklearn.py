@@ -1,8 +1,8 @@
-"""粗精煤泥灰分 MLR/PLS 训练 —— sklearn 内层求解器版（对拍 training.py 的逐值移植）。
+"""DS 原版 MLR/PLS 的 sklearn 对拍求解器（DS/GPT 入口由 routers/training.py 选择）。
 
 职责划分（对应评审建议）：
-- 预处理（_constCols / z-score ddof=1 / 缺失均值补全）、λ 网格 + hat-LOOCV 选 λ、
-  PLS 全局预处理 LOOCV 选 A、生产模型选择 —— 全部复用 training.py 的精确逻辑，
+- 预处理（_constCols / z-score ddof=1 / 缺失均值补全）、折内预处理 LOOCV 选 λ、
+  PLS 折内预处理 LOOCV 选 A、生产模型选择 —— 全部复用 training.py 的精确逻辑，
   保证离散决策（drop / λ 网格点 / A / production）与前端 JS 逐位一致；
 - 只把「最终系数求解」换成 sklearn：
     MLR  → Ridge(alpha=λ, fit_intercept=True, solver='svd')，喂预标准化 Z + 原始 y；
@@ -13,7 +13,7 @@ import numpy as np
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.linear_model import Ridge
 
-from .training import (_col_means_std, _const_cols, _js_round, _mean, _metrics,
+from .training import (_col_means_std, _const_cols, _js_round, _mean, _metrics, _impute,
                        _orchestrate, _standardize, _std, _un_drop, train_mlr, train_pls)
 
 
@@ -28,7 +28,7 @@ def train_mlr_sklearn(X, y, tol=0.8):
         return None
     lam = port["lambda"]
     drop = port["drop"]
-    Xd = _drop_cols(X, drop)
+    Xd = _drop_cols(_impute(X)[0], drop)
     n = len(Xd)
     k = len(Xd[0])
     means, stds = _col_means_std(Xd)
@@ -62,7 +62,7 @@ def train_pls_sklearn(X, y, tol=0.8, amax=None):
         return None
     A = port["A"]
     drop = port["drop"]
-    Xd = _drop_cols(X, drop)
+    Xd = _drop_cols(_impute(X)[0], drop)
     n = len(Xd)
     k = len(Xd[0])
     means, stds = _col_means_std(Xd)

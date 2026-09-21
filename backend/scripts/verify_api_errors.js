@@ -23,5 +23,9 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '../../frontend/js/api.js')
     assert.equal((await context.window.Api.putStateBody('{}')).rejected, false);
     context.fetch = async () => { throw new Error('offline'); };
     assert.equal((await context.window.Api.putStateBody('{}')).error, 'offline');
-    console.log('API error regression: 5 scenarios passed');
+    context.fetch = async () => ({status: 409, ok: false, json: async () => ({ok: false, conflict: true, error: 'version conflict'})});
+    assert.equal((await context.window.Api.putStateBody('{}')).conflict, true);
+    context.fetch = async () => ({status: 200, ok: true, json: async () => ({ok: true, revision: 'next'})});
+    assert.equal((await context.window.Api.putStateBody('{}')).revision, 'next');
+    console.log('API error regression: 7 scenarios passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

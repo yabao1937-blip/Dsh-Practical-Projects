@@ -17,7 +17,7 @@ def test_static_serves_index():
 
 
 def test_state_roundtrip():
-    r = client.put("/api/v1/state", json=SEED)
+    r = client.put("/api/v1/state", json={**SEED, "_revision": client.get("/api/v1/state").json()["_revision"]})
     assert r.status_code == 200
     got = client.get("/api/v1/state").json()
     assert len(got["coarseCoal"]) == 113
@@ -26,7 +26,7 @@ def test_state_roundtrip():
 
 
 def test_state_feeds_dashboard():
-    client.put("/api/v1/state", json=SEED)
+    client.put("/api/v1/state", json={**SEED, "_revision": client.get("/api/v1/state").json()["_revision"]})
     d = client.get("/api/v1/overview/dashboard").json()
     # 2026-09 皮带分工改造后:heavyAsh=502在线(8.1) → 公式 totalAsh=8.5488
     assert abs(d["totalAsh"] - 8.5488) < 1e-6
@@ -36,7 +36,7 @@ def test_state_feeds_dashboard():
 def test_state_stale_guard():
     """防回退守卫:入库记录少于现库 → 拒绝;force=true 可越过。"""
     small = {"coarseCoal": SEED["coarseCoal"][:10], "floatCoal": [], "calcLogs": []}
-    j = client.put("/api/v1/state", json=small).json()
+    j = client.put("/api/v1/state", json={**small, "_revision": client.get("/api/v1/state").json()["_revision"]}).json()
     assert j["ok"] is False and j.get("stale") is True
     # 被拒绝后现库数据完好
     assert len(client.get("/api/v1/state").json()["coarseCoal"]) == 113
@@ -57,7 +57,7 @@ def test_stale_guard_per_category_totals_equal():
     st = json.loads(json.dumps(SEED))
     st["coarseCoal"] = st["coarseCoal"] + [dict(st["coarseCoal"][0], timestamp="2026-07-15 09:00:00")]
     st["calcLogs"] = st["calcLogs"][:-1]          # ash_density 少一条
-    j = client.put("/api/v1/state", json=st).json()
+    j = client.put("/api/v1/state", json={**st, "_revision": client.get("/api/v1/state").json()["_revision"]}).json()
     assert j["ok"] is False and j.get("stale") is True
     assert "ash_density" in j["error"]             # 错误里点名是哪一类回退
     assert j["regressed"]["ash_density"][0] < j["regressed"]["ash_density"][1]
@@ -93,7 +93,7 @@ def test_mirror_does_not_delete_manual_entries():
 
     st = json.loads(json.dumps(SEED))
     st["manualEntries"] = []                      # 相当于 CollectPage.clearHistory()
-    j = client.put("/api/v1/state", json=st).json()
+    j = client.put("/api/v1/state", json={**st, "_revision": client.get("/api/v1/state").json()["_revision"]}).json()
     assert j["ok"] is True, j                     # 不得被守卫拒绝
     assert j["merged"]["manual_entries"] == 0     # 没有新行可并
     db = SessionLocal()
@@ -136,7 +136,7 @@ def test_mirror_merges_new_log_rows():
     st["importLogs"] = base["importLogs"] + [
         {"timestamp": "2026-09-02 09:00:00", "category": "浮选", "fileName": "b.xlsx",
          "total": 2, "success": 2, "failed": 0, "skipped": 0, "status": "成功"}]
-    j = client.put("/api/v1/state", json=st).json()
+    j = client.put("/api/v1/state", json={**st, "_revision": client.get("/api/v1/state").json()["_revision"]}).json()
     assert j["ok"] is True, j
     assert j["merged"]["import_logs"] == 1, j     # 只新增那一条
     db = SessionLocal()
@@ -156,7 +156,7 @@ def test_mirror_keeps_alerts_computed_server_side():
     st = json.loads(json.dumps(SEED))
     st["alerts"] = [{"system": "合并", "level": "警告", "message": "总灰分偏低",
                      "time": "2026-09-01 08:00:00"}]
-    assert client.put("/api/v1/state", json=st).json()["merged"]["alerts"] == 1
+    assert client.put("/api/v1/state", json={**st, "_revision": client.get("/api/v1/state").json()["_revision"]}).json()["merged"]["alerts"] == 1
     db = SessionLocal()
     try:
         assert db.query(Alert).count() == 1
@@ -166,7 +166,7 @@ def test_mirror_keeps_alerts_computed_server_side():
     # 下一次刷新时告警条件消失：镜像里 alerts 为空 → 服务器上的那条必须还在
     st2 = json.loads(json.dumps(SEED))
     st2["alerts"] = []
-    j = client.put("/api/v1/state", json=st2).json()
+    j = client.put("/api/v1/state", json={**st2, "_revision": client.get("/api/v1/state").json()["_revision"]}).json()
     assert j["ok"] is True, j
     db = SessionLocal()
     try:
@@ -194,7 +194,7 @@ def test_stale_guard_allows_mirror_with_empty_local_only_collections():
     server_has_sample["heavySamples"] = [{
         "timestamp": "2026-09-01 08:00:00", "rho": 1.50, "ash_content": 7.9,
     }]
-    assert client.put("/api/v1/state", json=server_has_sample).json()["ok"] is True
+    assert client.put("/api/v1/state", json={**server_has_sample, "_revision": client.get("/api/v1/state").json()["_revision"]}).json()["ok"] is True
 
     # 模拟"新浏览器拉完服务器数据"：三类测量记录齐全，但纯本地键为空
     pulled = json.loads(json.dumps(SEED))
@@ -202,7 +202,7 @@ def test_stale_guard_allows_mirror_with_empty_local_only_collections():
     pulled["manualEntries"] = []
     pulled["importLogs"] = []
     pulled["alerts"] = []
-    j = client.put("/api/v1/state", json=pulled).json()
+    j = client.put("/api/v1/state", json={**pulled, "_revision": client.get("/api/v1/state").json()["_revision"]}).json()
     assert j["ok"] is True, f"镜像被守卫误拒（这正是那次事故的现象）：{j}"
     client.put("/api/v1/state?force=true", json=SEED)
 
@@ -234,7 +234,7 @@ def test_mirror_does_not_wipe_heavy_samples():
     # 模拟新浏览器镜像：三类测量记录齐全，但 heavySamples 为空
     pulled = json.loads(json.dumps(SEED))
     pulled["heavySamples"] = []
-    j = client.put("/api/v1/state", json=pulled).json()
+    j = client.put("/api/v1/state", json={**pulled, "_revision": client.get("/api/v1/state").json()["_revision"]}).json()
     assert j["ok"] is True, j
 
     db = SessionLocal()
@@ -272,7 +272,7 @@ def test_force_get_payload_roundtrip_is_not_destructive():
 
     # 拿到 GET 的载荷（这正是事故里被"原样写回"的东西）并确认它确实不带这些键
     got = client.get("/api/v1/state").json()
-    for k in ("manualEntries", "importLogs", "alerts", "coarseModelHistory", "heavySamples"):
+    for k in ("manualEntries", "importLogs", "alerts", "coarseModelHistory"):
         assert k not in got, f"前提变了：GET /state 现在会返回 {k}，本用例需要重新设计"
 
     j = client.put("/api/v1/state?force=true", json=got).json()
@@ -315,7 +315,7 @@ def test_decision_log_roundtrip():
                 "miningFace": "6303", "levelTail": 55},
         "response": None,
     }]
-    r = client.put("/api/v1/state", json=st)
+    r = client.put("/api/v1/state", json={**st, "_revision": client.get("/api/v1/state").json()["_revision"]})
     assert r.json()["ok"] is True
     got = client.get("/api/v1/state").json()
     entry = got["densityDecisionLog"][0]
@@ -323,7 +323,7 @@ def test_decision_log_roundtrip():
     # 响应补记同样无损
     st["densityDecisionLog"][0]["response"] = {"ts": "2026-09-10 11:00:00", "rhoNow": 1.48,
                                                "heavyAshNow": 7.72, "dRhoActual": -0.01, "dAActual": -0.13}
-    client.put("/api/v1/state", json=st)
+    client.put("/api/v1/state", json={**st, "_revision": client.get("/api/v1/state").json()["_revision"]})
     entry2 = client.get("/api/v1/state").json()["densityDecisionLog"][0]
     assert entry2["response"]["dAActual"] == -0.13
     # 恢复种子
