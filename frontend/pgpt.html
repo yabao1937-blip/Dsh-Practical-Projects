@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P-GPT 粗精煤泥分析 - 重介密控系统</title>
+  <link rel="stylesheet" href="css/style.css?v=11"><link rel="stylesheet" href="pgpt/page.css">
+  <script defer src="js/chart-lite.js?v=7"></script>
+  <script defer src="pgpt/data.js"></script><script defer src="pgpt/model.js"></script>
+  <script defer src="pgpt/models.js"></script><script defer src="pgpt/page.js"></script>
+</head>
+<body>
+  <header class="top-bar"><div class="logo"><span class="logo-icon">⚙</span><h1>重介密控系统</h1></div>
+    <nav class="main-nav"><a class="nav-item" href="index.html">密度推荐总览</a><a class="nav-item active" href="pgpt.html">▲ 粗精煤泥分析</a></nav>
+    <a class="btn" href="index.html">返回系统</a></header>
+  <main class="main-content"><section class="page active">
+    <div class="page-header"><h2>粗精煤泥灰分实时分析</h2><div class="page-header-actions">
+      <div class="filter-group" role="group" aria-label="粗精煤泥模型版本"><label>模型版本：</label>
+        <a class="btn" href="index.html#pgpt-return-ds">DS</a><a class="btn" href="index.html#pgpt-return-gpt">GPT</a><button class="btn btn-primary" aria-pressed="true">P-GPT</button></div>
+      <div class="filter-group"><label for="pgpt-mode">视图：</label><select id="pgpt-mode"><option value="sample">按采样（班内）</option><option value="day">按日（一天一班）</option></select></div>
+      <button class="btn" id="pgpt-retrain">重新训练模型</button><button class="btn btn-primary" id="pgpt-refresh">刷新</button>
+    </div></div>
+    <p id="pgpt-note" class="pgpt-note" aria-live="polite"></p>
+    <div class="card-grid-5">
+      <div class="stat-card"><div class="stat-card-label">最新记录实测灰分</div><div class="stat-card-value" id="pgpt-actual">--</div><div class="stat-card-sub" id="pgpt-level">精磁尾液位：--</div></div>
+      <div class="stat-card accent-blue"><div class="stat-card-label">多因素预测灰分</div><div class="stat-card-value" id="pgpt-predicted">--</div><div class="stat-card-sub" id="pgpt-prediction-note">独立岭回归</div></div>
+      <div class="stat-card accent-purple"><div class="stat-card-label">粗精煤泥量</div><div class="stat-card-value">--<span class="stat-unit">t/h</span></div><div class="stat-card-sub">原表未提供粗精煤泥产量</div></div>
+      <div class="stat-card accent-orange"><div class="stat-card-label">累计灰分（最新生产日）</div><div class="stat-card-value" id="pgpt-cumulative">--</div><div class="stat-card-sub" id="pgpt-count">按有效采样算术平均</div></div>
+      <div class="stat-card accent-green"><div class="stat-card-label">历史拟合度 R²</div><div class="stat-card-value" id="pgpt-fit">--</div><div class="stat-card-sub" id="pgpt-fit-note">不代表向前预测能力</div></div>
+    </div>
+    <div class="panel"><div class="panel-header"><h3>模型效果：历史拟合 / 调参验证 / 向前时间检验</h3></div><div class="panel-body">
+      <div class="table-scroll"><table class="data-table"><thead><tr><th>评估范围</th><th>样本数</th><th>MAE（百分点）</th><th>RMSE（百分点）</th><th>R²</th><th>±0.8 合格率</th></tr></thead><tbody id="pgpt-metrics"></tbody></table></div>
+      <p class="pgpt-note" id="pgpt-evaluation-note"></p></div></div>
+    <div class="panel"><div class="panel-header"><h3>粗精煤泥灰分趋势</h3><span class="pgpt-note" id="pgpt-trend-note">6—7月为拟合值；8—9月为冻结模型检验值</span></div><div class="panel-body chart-container"><canvas id="pgpt-trend"></canvas></div></div>
+    <div class="panel-row"><div class="panel panel-narrow"><div class="panel-header"><h3>多因素模型关联强度</h3></div><div class="panel-body chart-container-small"><canvas id="pgpt-factors"></canvas></div><p class="pgpt-note">标准化系数绝对值；表示模型关联，不代表因果作用。</p></div>
+      <div class="panel panel-wide"><div class="panel-header"><h3>粗精煤泥灰分 vs 精磁尾液位（实际值 / 多因素预测值）</h3></div><div class="panel-body chart-container" style="height:340px"><canvas id="pgpt-scatter" aria-label="灰分与精磁尾液位散点图"></canvas></div></div></div>
+    <div class="panel"><div class="panel-header"><h3>历史公式对照（模型计算值 vs 实测值）</h3><div class="page-header-actions">
+      <label for="pgpt-tolerance">容差±百分点</label><input id="pgpt-tolerance" type="number" min="0.1" step="0.1" value="0.8">
+      <label for="pgpt-range">训练范围</label><select id="pgpt-range"><option value="factory">6—7月冻结模型</option><option value="all">全部有效数据（仅历史拟合）</option><option value="30d">最新生产日前30天（仅历史拟合）</option></select>
+      <button class="btn btn-sm" id="pgpt-restore">恢复冻结模型</button></div></div><div class="panel-body">
+      <p id="pgpt-summary" class="pgpt-note"></p><div class="table-scroll pgpt-records"><table class="data-table"><thead><tr><th>生产日 / 采样自然时间</th><th>实测灰分(%)</th><th>预测灰分(%)</th><th>偏差（百分点）</th><th>合格判定</th><th>评估类别</th><th>有效采样数</th></tr></thead><tbody id="pgpt-rows"></tbody></table></div></div></div>
+    <div class="panel"><div class="panel-header"><h3>输入工况预测</h3><span class="pgpt-note">按日模型输入当天平均工况；开停字段输入运行比例0—1</span></div><div class="panel-body"><form id="pgpt-form"><div class="pgpt-inputs" id="pgpt-inputs"></div><button class="btn btn-primary" type="submit">计算预测灰分</button><output id="pgpt-result" aria-live="polite"></output></form></div></div>
+    <div class="panel"><div class="panel-header"><h3>P-GPT 重训练历史</h3><span class="pgpt-note">仅保存于当前浏览器；各粒度分别训练</span></div><div class="panel-body"><div class="table-scroll"><table class="data-table"><thead><tr><th>训练时间</th><th>粒度</th><th>样本数</th><th>训练范围</th><th>正则参数</th><th>历史拟合 R²</th></tr></thead><tbody id="pgpt-history"></tbody></table></div></div></div>
+    <div class="panel"><div class="panel-header"><h3>数据来源与口径</h3></div><div class="panel-body"><p id="pgpt-source" class="pgpt-note"></p><details><summary>查看剔除记录与建模说明</summary><div id="pgpt-quality"></div><p class="pgpt-note">315灰分为目标；315全水分是同次化验结果，未作为提前预测因素。浮精、灰分密度表缺少与粗精样本一致的采样时间，未强行拼接。缺失输入以训练集的中位数填补；标准化参数只由训练集计算。一天一班，采样模型逐条预测，日模型在生产日均值上单独训练。日均值是样本平均，不是质量加权班报值；当日未结束时只是已采样点的估计。</p></details></div></div>
+  </section></main>
+</body></html>
