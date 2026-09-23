@@ -24,6 +24,7 @@ import math
 from fractions import Fraction
 
 from .modeling import MLR_FEATURES, predict_coarse_ash
+from .coarse_direction import direction_report
 
 LAM_FACTORS = [0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]
 
@@ -596,8 +597,27 @@ def _orchestrate(records, range_, tol, mlr_trainer, pls_trainer):
     for r in records:
         r["predicted_ash"] = _js_round(predict_coarse_ash(r, prod_model), 4)
 
+    # DS 专用：方向判断（前向可用信号）。水平值预测在锁死检验集上打不过"取均值"基线，
+    # 但"下一读数相对本次的涨跌"在三个切分点上稳定命中 0.727~0.771（多数基线 0.51~0.52）。
+    # 纪律：开发月=**本次实际用于训练的那些月**（d["rows"] 的月份），检验月=数据里**不在开发月内**
+    # 的最后两个月 —— 绝不把已用于开发的样本当独立检验集。不足时模块自己返回 unusable。
+    try:
+        _months = sorted({str(r.get("timestamp") or "")[:7] for r in records if str(r.get("timestamp") or "")[:7]})
+        _dev = sorted({str(r.get("timestamp") or "")[:7] for r in d["rows"]})
+        _test = [m for m in _months if m not in _dev][-2:]
+        _direction = direction_report(records, _dev, _test) if _test else {
+            "usable": False, "hit": None, "baseline": None, "ci": None, "n": 0,
+            "note": "没有可用于独立检验的月份（训练范围已覆盖全部数据）",
+            "gating": "特征仅用 t 时刻已知量；不含到下次读数的时间间隔"}
+        _direction["devMonths"], _direction["testMonths"] = _dev, _test
+    except Exception as exc:                                     # 方向判断失败不影响主训练
+        _direction = {"usable": False, "hit": None, "baseline": None, "ci": None, "n": 0,
+                      "note": "方向判断计算失败：%s" % exc,
+                      "gating": "特征仅用 t 时刻已知量；不含到下次读数的时间间隔"}
+
     return {"mlr": mlr, "pls": pls, "production": production,
-            "n": len(d["rows"]), "tolerance": tol, "range": range_, "history": history}
+            "n": len(d["rows"]), "tolerance": tol, "range": range_, "history": history,
+            "direction": _direction}
 
 
 def train_coarse_model(records, range_="jun_jul", tol=0.8):
