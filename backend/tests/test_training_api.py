@@ -87,6 +87,15 @@ def test_train_coarse_model_endpoint():
     state = client.get("/api/v1/state").json()
     assert state["_revision"] == body["revision"]
     assert state["coarseModel"]["mlr"]["metrics"]["validation"]["method"] == "nested-day-walk-forward"
+    assert state["coarseModel"]["mlr"]["metrics"]["trainingRevision"] == "gpt-coverage-robust-20260922"
+    assert state["coarseModel"]["mlr"]["metrics"]["groupCv"]["method"] == "leave-one-day-out"
+    from app.services.modeling import predict_coarse_ash
+    restored = state["coarseModel"]["mlr"]
+    original = body["coarseModel"]["mlr"]
+    assert restored["inputPolicy"] == "clip-training-range"
+    assert restored["inputBounds"] == original["inputBounds"]
+    outside = {"raw_ash": 99, "level": -100}
+    assert predict_coarse_ash(outside, restored) == predict_coarse_ash(outside, original)
     assert state["coarseModel"]["production"] == "mlr"
     assert abs(state["coarseModel"]["pls"]["intercept"] - GOLD["coarseModel"]["pls"]["intercept"]) < 1e-4
 

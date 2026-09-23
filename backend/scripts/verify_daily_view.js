@@ -144,6 +144,10 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
         // 5. 因子权重
         const factorLabels = await evalJs(`JSON.stringify(CoarsePage.factorChart.data.labels.slice(0,3))`);
         console.log('因子前3:', factorLabels);
+        const groupedNote = await evalJs(`document.getElementById('coarse-model-summary').textContent.includes('GPT 留整日选参参考')`);
+        if (groupedNote !== (engine === 'gpt')) throw new Error('GPT 选参说明与所选版本不一致');
+        const coverageNote = await evalJs(`document.getElementById('coarse-model-summary').textContent.includes('GPT 工况覆盖')`);
+        if (coverageNote !== (engine === 'gpt')) throw new Error('工况覆盖说明与所选版本不一致');
 
         // 6. 切回按采样
         await evalJs(`(() => {

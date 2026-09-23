@@ -1081,6 +1081,179 @@ select {
     font-weight: 600;
 }
 
+/* 粗灰 GPT 专属摘要；切回 DS 后仍使用原摘要样式。 */
+#coarse-model-summary.coarse-gpt-summary {
+    display: block;
+    padding: 16px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    line-height: 1.65;
+}
+
+.coarse-gpt-summary .coarse-gpt-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 32px;
+    margin-bottom: 16px;
+}
+
+.coarse-gpt-summary .coarse-gpt-meta > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    min-width: 0;
+}
+
+.coarse-gpt-summary .coarse-gpt-meta span,
+.coarse-gpt-summary dt,
+.coarse-gpt-summary .coarse-gpt-detail > span {
+    color: var(--text-secondary);
+}
+
+.coarse-gpt-summary .coarse-gpt-meta strong {
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+.coarse-gpt-summary .coarse-gpt-sections {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+    gap: 12px;
+}
+
+.coarse-gpt-summary .coarse-gpt-section {
+    min-width: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-panel);
+}
+
+.coarse-gpt-summary h4 {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 4px 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.coarse-gpt-summary h4 > span {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 400;
+}
+
+.coarse-gpt-summary .coarse-gpt-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+    gap: 10px 12px;
+    margin-bottom: 14px;
+}
+
+.coarse-gpt-summary .coarse-gpt-metric dt {
+    font-size: 12px;
+}
+
+.coarse-gpt-summary .coarse-gpt-metric dd {
+    color: var(--text-primary);
+    font-size: 20px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.coarse-gpt-summary .coarse-gpt-metric small {
+    display: block;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 400;
+}
+
+.coarse-gpt-summary .coarse-gpt-detail {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin-top: 8px;
+    font-size: 12px;
+}
+
+.coarse-gpt-summary .coarse-gpt-detail strong {
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+.coarse-gpt-summary .coarse-gpt-reference {
+    padding-top: 4px;
+    border-top: 1px solid var(--border-color);
+}
+
+.coarse-gpt-summary .coarse-gpt-status,
+.coarse-gpt-summary .coarse-gpt-empty {
+    margin-top: 10px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.coarse-gpt-summary .is-better { color: var(--accent-green); }
+.coarse-gpt-summary .is-caution { color: var(--accent-orange); }
+
+.coarse-gpt-summary .coarse-gpt-coverage {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 16px;
+    margin-top: 14px;
+    color: var(--text-secondary);
+}
+
+.coarse-gpt-summary .coarse-gpt-coverage strong {
+    color: var(--accent-blue-light);
+    font-weight: 500;
+}
+
+.coarse-gpt-summary .coarse-gpt-coverage.has-outside strong {
+    color: var(--accent-orange);
+}
+
+.coarse-gpt-summary .coarse-gpt-notes {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+.coarse-gpt-summary .coarse-gpt-notes summary {
+    width: fit-content;
+    cursor: pointer;
+    color: var(--accent-blue-light);
+}
+
+.coarse-gpt-summary .coarse-gpt-notes summary:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 4px;
+}
+
+.coarse-gpt-summary .coarse-gpt-notes dl {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    gap: 12px 24px;
+    margin-top: 12px;
+}
+
+.coarse-gpt-summary .coarse-gpt-notes dt {
+    margin-bottom: 4px;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.coarse-gpt-summary .coarse-gpt-notes dd {
+    max-width: 64ch;
+    overflow-wrap: anywhere;
+}
+
 .preview-row-error {
     background: rgba(239,68,68,0.06) !important;
 }

@@ -118,6 +118,10 @@ def load_store(db) -> dict:
             }
             if m.method == "pls":
                 node["A"] = m.pls_A
+            if (m.metrics or {}).get("inputPolicy") == "clip-training-range":
+                node["inputPolicy"] = m.metrics["inputPolicy"]
+                node["inputBounds"] = m.metrics.get("inputBounds")
+                node["config"] = m.metrics.get("config")
             cm[m.method] = node
             if m.is_current:
                 prod = m.method

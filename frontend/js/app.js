@@ -3079,6 +3079,7 @@ const App = {
         for (let j = 0; j < feats.length; j++) {
             let v = rec[feats[j]];
             if (!Number.isFinite(v)) v = means[j];
+            if (model.inputPolicy === 'clip-training-range') v = this._coarseBoundValue(v, j, model);
             y += model.coefs[j] * v;
         }
         return y;
@@ -3167,8 +3168,13 @@ const App = {
         }
         return blocks;
     },
-    _coarseCandidates(kind) {
+    _coarseCandidates(kind, daily = false) {
         const out = [];
+        if (daily && kind === 'mlr') {
+            [.03, .1, .3, 1].forEach(alpha => [false, true].forEach(robust =>
+                out.push({subset: 'all', alpha, penalty: 1, robust})));
+            return out;
+        }
         ['all', 'expert'].forEach(subset => {
             if (kind === 'mlr') [.001, .01, .1, 1, 10].forEach(alpha => {
                 (subset === 'all' ? [1, 4] : [1]).forEach(penalty => out.push({subset, alpha, penalty}));
@@ -3184,10 +3190,25 @@ const App = {
         const active = this.MLR_FEATURES.map((_, j) => j).filter(j =>
             (config.subset === 'all' || expert.includes(j)) && X.some(r => Math.abs(r[j] - X[0][j]) > 1e-9));
         const beta = this.MLR_FEATURES.map(() => 0);
+        let offset = ym;
         if (active.length) {
             const z = Z.map(r => active.map(j => r[j]));
             let solution;
-            if (kind === 'mlr') {
+            if (kind === 'mlr' && config.robust) {
+                const design = z.map(r => [1, ...r]), size = active.length + 1;
+                let weights = rows.map(() => 1), fitted;
+                for (let iteration = 0; iteration < 8; iteration++) {
+                    const A = Array.from({length: size}, (_, p) => Array.from({length: size}, (_, q) =>
+                        design.reduce((s, r, i) => s + weights[i] * r[p] * r[q], 0)));
+                    const b = Array.from({length: size}, (_, p) =>
+                        design.reduce((s, r, i) => s + weights[i] * r[p] * y[i], 0));
+                    for (let p = 1; p < size; p++) A[p][p] += config.alpha * rows.length;
+                    fitted = this.solveLinearSystem(A, b);
+                    weights = design.map((r, i) => Math.min(1, 1.5 / Math.max(Math.abs(
+                        y[i] - r.reduce((s, v, j) => s + v * fitted[j], 0)), 1e-9)));
+                }
+                offset = fitted[0]; solution = fitted.slice(1);
+            } else if (kind === 'mlr') {
                 const A = active.map((_, p) => active.map((_, q) => z.reduce((s, r) => s + r[p] * r[q], 0)));
                 const b = active.map((_, p) => z.reduce((s, r, i) => s + r[p] * (y[i] - ym), 0));
                 active.forEach((j, p) => { A[p][p] += config.alpha * rows.length * (expert.includes(j) ? 1 : config.penalty); });
@@ -3196,29 +3217,58 @@ const App = {
             active.forEach((j, p) => { beta[j] = solution[p]; });
         }
         const coefs = beta.map((b, j) => b / stds[j]);
-        const intercept = ym - coefs.reduce((s, c, j) => s + c * means[j], 0);
+        const intercept = offset - coefs.reduce((s, c, j) => s + c * means[j], 0);
         const yhat = X.map(r => intercept + coefs.reduce((s, c, j) => s + c * r[j], 0)), sy = this._std(y);
         return {type: kind, version: 2, feature_names: this.MLR_FEATURES, intercept, coefs, means, stds,
             imputeMeans: impute, stdCoef: beta.map(v => sy ? v / sy : 0),
             drop: beta.map((_, j) => j).filter(j => !active.includes(j)),
             n: rows.length, k: active.length, config, lambda: (config.alpha || 0) * rows.length, A: config.A || null,
-            yhat, metrics: this._metrics(y, yhat, active.length)};
+            yhat, metrics: this._metrics(y, yhat, active.length), inputPolicy: 'clip-training-range',
+            inputBounds: this.MLR_FEATURES.map((_, j) => [Math.min(...X.map(r => r[j])), Math.max(...X.map(r => r[j]))])};
+    },
+    _coarseBoundValue(value, j, model) {
+        const bounds = model.inputPolicy === 'clip-training-range' && model.inputBounds && model.inputBounds[j];
+        return bounds ? Math.min(bounds[1], Math.max(bounds[0], value)) : value;
+    },
+    _coarseCoverage(record, model) {
+        if (!record || !model || model.inputPolicy !== 'clip-training-range') return [];
+        return this.MLR_FEATURES.flatMap((feature, j) => {
+            const value = record[feature], bounds = model.inputBounds && model.inputBounds[j];
+            if (!Number.isFinite(value) || !bounds || (value >= bounds[0] && value <= bounds[1])) return [];
+            return [{feature, value, used: this._coarseBoundValue(value, j, model), min: bounds[0], max: bounds[1]}];
+        });
     },
     _coarsePredict(r, m) {
-        return this._predictFromModelVec(this.MLR_FEATURES.map(f => r[f]), m);
+        return this._predictFromModelVec(this.MLR_FEATURES.map((f, j) =>
+            Number.isFinite(r[f]) ? this._coarseBoundValue(r[f], j, m) : r[f]), m);
     },
     _coarseSelect(rows, kind) {
         const blocks = this._coarseFolds(rows);
         if (!blocks.length) return null;
+        // GPT：留整日参考，同日采样不跨训练/验证两侧。
+        const days = [...new Set(rows.map(r => r.timestamp.slice(0, 10)))].sort();
+        const daySplits = days.map(day => [rows.filter(r => r.timestamp.slice(0, 10) !== day),
+            rows.filter(r => r.timestamp.slice(0, 10) === day)]);
+        const daily = rows.every(r => r.day);
         let best = null;
-        this._coarseCandidates(kind).forEach(config => {
+        this._coarseCandidates(kind, daily).forEach(config => {
             const actual = [], pred = [];
             blocks.forEach(([s, e]) => {
                 const m = this._coarseFit(rows.slice(0, s), kind, config);
                 rows.slice(s, e).forEach(r => { actual.push(r.ash_content); pred.push(this._coarsePredict(r, m)); });
             });
             const score = this._metrics(actual, pred, 0);
-            if (!best || score.rmse < best.score.rmse - 1e-10) best = {config, score};
+            const groupedActual = [], groupedPred = [];
+            daySplits.forEach(([tr, te]) => {
+                const m = this._coarseFit(tr, kind, config);
+                te.forEach(r => { groupedActual.push(r.ash_content); groupedPred.push(this._coarsePredict(r, m)); });
+            });
+            const groupCv = {...this._metrics(groupedActual, groupedPred, 0),
+                n: groupedActual.length, days: days.length, method: 'leave-one-day-out'};
+            const selectionRmse = Math.sqrt((score.rmse ** 2 + groupCv.rmse ** 2) / 2);
+            const selectionMae = (score.mae + groupCv.mae) / 2;
+            const objective = daily ? selectionMae : selectionRmse;
+            if (!best || objective < best.objective - 1e-10) best = {config, score, groupCv, selectionRmse, selectionMae, objective};
         });
         return best;
     },
@@ -3226,7 +3276,8 @@ const App = {
         const rows = this._coarseRows(records), kinds = ['mlr', 'pls'];
         if (rows.length < 12 || new Set(rows.map(r => r.timestamp.slice(0, 10))).size < 8) return null;
         const selected = Object.fromEntries(kinds.map(k => [k, this._coarseSelect(rows, k)]));
-        const choose = s => s.mlr.score.rmse <= s.pls.score.rmse ? 'mlr' : 'pls';
+        const selectionMetric = rows.every(r => r.day) ? 'mae' : 'rmse';
+        const choose = s => s.mlr.score[selectionMetric] <= s.pls.score[selectionMetric] ? 'mlr' : 'pls';
         const production = choose(selected);
         const models = Object.fromEntries(kinds.map(k => [k, this._coarseFit(rows, k, selected[k].config)]));
         const actual = [], baseline = [], blocks = [], predictions = {mlr: [], pls: [], production: []};
@@ -3254,7 +3305,11 @@ const App = {
             const m = models[k], v = validate(predictions[k]);
             Object.assign(m.metrics, {q2: selected[k].score.r2, q2Time: v ? v.r2 : null,
                 validation: v, selectionCv: selected[k].score, config: m.config, version: 2,
-                pipelineValidation: validate(predictions.production)});
+                pipelineValidation: validate(predictions.production),
+                trainingRevision: 'gpt-coverage-robust-20260922', groupCv: selected[k].groupCv,
+                selectionRmse: selected[k].selectionRmse, selectionMae: selected[k].selectionMae,
+                selectionPolicy: {method: 'balanced-time-and-day', timeWeight: .5, groupWeight: .5,
+                    primary: selectionMetric}, inputPolicy: 'clip-training-range', inputBounds: m.inputBounds});
         });
         return {...models, production, n: rows.length};
     },

@@ -109,7 +109,8 @@ const CoarsePage = {
         let v = model.intercept;
         for (let j = 0; j < feats.length; j++) {
             const x = dayRec[feats[j]];
-            const val = (typeof x === 'number' && isFinite(x)) ? x : (model.imputeMeans ? model.imputeMeans[j] : 0);
+            let val = (typeof x === 'number' && isFinite(x)) ? x : (model.imputeMeans ? model.imputeMeans[j] : 0);
+            if (model.inputPolicy === 'clip-training-range') val = App._coarseBoundValue(val, j, model);
             v += (model.coefs[j] || 0) * val;
         }
         return v;
@@ -586,6 +587,60 @@ const CoarsePage = {
         }).join('');
     },
 
+    // GPT 专属摘要布局；只组织展示，指标沿用原计算结果。
+    _gptSummaryLayout({daily, recent, recent30, m, m30, prodTxt, trainedTxt, active, vm, data}) {
+        const esc = value => String(value).replace(/[&<>"']/g, c => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+        const number = (value, digits = 2) => Number.isFinite(value) ? value.toFixed(digits) : '—';
+        const item = (label, value, unit = '') => `<div class="coarse-gpt-metric"><dt>${label}</dt><dd>${value}${unit ? `<small>${unit}</small>` : ''}</dd></div>`;
+        const am = active && active.metrics;
+        const group = am && am.groupCv;
+        const unit = daily ? '天' : '条';
+        const notes = [
+            ['历史对照', '趋势、散点与校验表可能包含训练样本；关联系数不代表因果影响权重。'],
+            ['验证口径', '模型训练区的Q²为向前时间调参得分，留整日验证仅作选参参考；后续预测能力查看嵌套时间验证。DS与GPT的Q²口径不同，不宜直接比较。']
+        ];
+        let coverage = '';
+        if (active && active.inputPolicy === 'clip-training-range') {
+            const outside = data.filter(r => App._coarseCoverage(r, active).length).length;
+            coverage = `<div class="coarse-gpt-coverage${outside ? ' has-outside' : ''}"><strong>GPT 工况覆盖</strong><span><b>${outside} / ${data.length}</b> ${unit}超出训练范围</span></div>`;
+            notes.push(['预测边界', '超范围因素按训练边界作保守估计，原始数据保留；未覆盖工况的影响尚未学到，需补充对应化验验证。']);
+            const loss = active.config && active.config.robust ? 'Huber稳健回归' : '常规回归';
+            notes.push(['选参方式', daily ? `日级优先按MAE选参，当前${loss}。` : '采样级保留原有选参，增加工况覆盖约束。']);
+        }
+        notes.push(['采样与聚合', `${daily ? '按采样点均值聚合，不是煤量加权日灰分；不能提前使用当日尚未获得的化验值。' : ''}开关的每日采样开启比例不代表全天运行时长。`]);
+        return `<div class="coarse-gpt-meta">
+            <div><span>生产算法</span><strong>${esc(prodTxt)}</strong></div>
+            <div><span>最近训练</span><strong>${esc(trainedTxt)}</strong></div>
+        </div>
+        <div class="coarse-gpt-sections">
+            <section class="coarse-gpt-section">
+                <h4>近期历史对照 <span>近10天 · ${recent.length}${unit}</span></h4>
+                <dl class="coarse-gpt-metrics">
+                    ${item('R²', number(m && m.r2, 3))}${item('MAE', number(m && m.mae), '百分点')}${item('RMSE', number(m && m.rmse), '百分点')}
+                </dl>
+                <div class="coarse-gpt-detail"><span>合格率 ±0.8 / 1.0 / 1.5%</span><strong>${m ? `${number(m.passRate, 0)} / ${number(m.passRate1 ?? m.passRate, 0)} / ${number(m.passRate15 ?? m.passRate, 0)}%` : '—'}</strong></div>
+                <div class="coarse-gpt-detail"><span>近30天 · ${recent30.length}${unit}</span><strong>合格率 ${m30 ? number(m30.passRate, 0) + '%' : '—'}</strong></div>
+            </section>
+            <section class="coarse-gpt-section">
+                <h4>模型训练 <span>${daily ? '日级' : '采样'}模型</span></h4>
+                <dl class="coarse-gpt-metrics">
+                    ${item('训练 R²', number(am && am.r2, 3))}${item('时间调参 Q²', number(am && am.q2, 3))}
+                </dl>
+                ${group ? `<div class="coarse-gpt-reference"><div class="coarse-gpt-detail"><span>GPT 留整日选参参考</span><strong>${group.days}天</strong></div><div class="coarse-gpt-detail"><span>Q² ${number(group.r2, 3)}</span><strong>RMSE ${number(group.rmse)} 百分点</strong></div></div>` : '<p class="coarse-gpt-empty">暂无留整日选参结果</p>'}
+            </section>
+            <section class="coarse-gpt-section">
+                <h4>嵌套时间验证 <span>${vm ? vm.n + unit : '待验证'}</span></h4>
+                ${vm ? `<dl class="coarse-gpt-metrics">${item('MAE', number(vm.mae), '百分点')}${item('RMSE', number(vm.rmse), '百分点')}${item('R²', number(vm.r2, 3))}</dl>
+                <div class="coarse-gpt-detail"><span>历史均值基线 RMSE</span><strong>${number(vm.baselineRmse)} 百分点</strong></div>
+                <p class="coarse-gpt-status ${vm.beatsBaseline ? 'is-better' : 'is-caution'}">${vm.beatsBaseline ? '模型误差低于历史均值基线' : '模型未超过基线，预测仅供参考'}</p>` : '<p class="coarse-gpt-empty">尚无时间验证结果，请导入足够日期的数据后重新训练。</p>'}
+            </section>
+        </div>
+        ${coverage}
+        <details class="coarse-gpt-notes"><summary>指标口径与预测说明</summary><dl>${notes.map(([title, text]) => `<div><dt>${title}</dt><dd>${text}</dd></div>`).join('')}</dl></details>`;
+    },
+
     // 校验面板摘要 + 重训练历史
     updateModelSummary() {
         const tol = (App.store.coarseTolerance !== undefined) ? App.store.coarseTolerance : 0.8;
@@ -633,6 +688,17 @@ const CoarsePage = {
         if (active && active.metrics) {
             const am = active.metrics;
             html += `<div class="summary-item"><span class="summary-label">${daily ? '日级' : '采样'}模型训练R² / Q²：</span><span class="summary-val">${am.r2.toFixed(3)} / ${am.q2.toFixed(3)}</span></div>`;
+            if (engine === 'gpt' && am.groupCv) {
+                html += `<div class="summary-item"><span class="summary-label">GPT 留整日选参参考：</span><span class="summary-val">Q² ${am.groupCv.r2.toFixed(3)}，RMSE ${am.groupCv.rmse.toFixed(2)}，${am.groupCv.days}天</span></div>`;
+                html += '<div class="summary-item">GPT 同时参考时间验证和留整日验证选择参数；上方Q²仍为向前时间调参得分，后续预测能力查看下方嵌套时间验证。</div>';
+            }
+            if (engine === 'gpt' && active.inputPolicy === 'clip-training-range') {
+                const outside = data.filter(r => App._coarseCoverage(r, active).length).length;
+                const loss = active.config && active.config.robust ? 'Huber稳健回归' : '常规回归';
+                html += `<div class="summary-item"><span class="summary-label">GPT 工况覆盖：</span><span class="summary-val">${outside}/${data.length}${daily ? '天' : '条'}超出训练范围</span></div>`;
+                html += '<div class="summary-item">超范围因素按训练边界作保守估计，原始数据保留；未覆盖工况的影响尚未学到，需补充对应化验验证。</div>';
+                html += `<div class="summary-item">${daily ? `日级优先按MAE选参，当前${loss}。` : '采样级保留原有选参，增加工况覆盖约束。'} 开启比例仅代表采样状态，不代表全天运行时长。</div>`;
+            }
         }
         html += `<div class="summary-item">${engine === 'ds'
             ? 'DS：原版模型，Q²为留一交叉验证；开关按每日多数状态聚合。'
@@ -649,7 +715,12 @@ const CoarsePage = {
         }
         html += '<div class="summary-item">趋势、散点与校验表为历史对照，可能包含训练样本；关联系数不代表因果影响权重。</div>';
 
-        if (el) el.innerHTML = html;
+        if (el) {
+            el.classList.toggle('coarse-gpt-summary', engine === 'gpt');
+            el.innerHTML = engine === 'gpt' ? this._gptSummaryLayout({
+                daily, recent, recent30, m, m30, prodTxt, trainedTxt, active, vm, data
+            }) : html;
+        }
 
         // 重训练历史 mini 表
         const histEl = document.getElementById('coarse-history-tbody');

@@ -1,0 +1,319 @@
+{
+  "baselineRef": "401003800afeeccbb74195966f9d78031cf90591",
+  "revision": "gpt-day-balanced-20260922",
+  "protocol": "同数据、同外层时间窗口；6–7月训练/8–9月比较仅为已知历史复核，不是新的独立检验",
+  "audit": {
+    "rows": 152,
+    "days": 37,
+    "first": "2026-06-16 09:31:00",
+    "last": "2026-09-03 07:22:00",
+    "sha256": "044aded0b9559170016c238b4b00caa2b7982dbf73cd694a3e618d86903c3993"
+  },
+  "results": {
+    "sample": {
+      "DS": {
+        "method": "mlr",
+        "metrics": {
+          "r2": 0.41911339884206755,
+          "adjR2": 0.3779157675542709,
+          "rmse": 2.5333504940889253,
+          "mae": 1.9238809414215476,
+          "passRate": 28.289473684210524,
+          "passRate1": 32.23684210526316,
+          "passRate15": 51.973684210526315,
+          "q2": 0.32509591832953555,
+          "lambda": 15.099999999999998,
+          "q2Time": -0.5463
+        },
+        "note": "DS 原版只读参照；Q²为留一验证，不与GPT时间Q²直接排序"
+      },
+      "before": {
+        "production": "mlr",
+        "n": 152,
+        "config": {
+          "subset": "all",
+          "alpha": 1,
+          "penalty": 4
+        },
+        "training": {
+          "r2": 0.1547625049668958,
+          "mae": 2.497774894672433,
+          "rmse": 3.0558988642166964,
+          "passRate": 17.763157894736842
+        },
+        "timeSelectionQ2": -0.03763793235757995,
+        "groupCv": null,
+        "predictionRange": [
+          13.154826875966753,
+          15.62889397592794
+        ],
+        "nestedTimeValidation": {
+          "r2": -0.04676868479146146,
+          "adjR2": -0.04676868479146146,
+          "rmse": 2.8703548740920732,
+          "mae": 2.132581905540749,
+          "passRate": 24.390243902439025,
+          "passRate1": 34.146341463414636,
+          "passRate15": 46.34146341463415,
+          "n": 41,
+          "folds": [
+            {
+              "trainEnd": "2026-07-13 22:40:00",
+              "testStart": "2026-07-14 07:43:00",
+              "testEnd": "2026-08-27 21:51:00",
+              "n": 22,
+              "production": "mlr"
+            },
+            {
+              "trainEnd": "2026-08-27 21:51:00",
+              "testStart": "2026-08-28 00:20:00",
+              "testEnd": "2026-09-03 07:22:00",
+              "n": 19,
+              "production": "mlr"
+            }
+          ],
+          "baselineMae": 2.2371087739123685,
+          "baselineRmse": 2.9572867833582084,
+          "beatsBaseline": true,
+          "method": "nested-day-walk-forward"
+        },
+        "fixedHistoricalComparison": {
+          "developmentN": 113,
+          "laterN": 39,
+          "r2": -0.012996853313928414,
+          "adjR2": -0.012996853313928414,
+          "rmse": 2.8537167381716735,
+          "mae": 1.9958102613582718,
+          "passRate": 38.46153846153847,
+          "passRate1": 46.15384615384615,
+          "passRate15": 56.41025641025641
+        }
+      },
+      "after": {
+        "production": "mlr",
+        "n": 152,
+        "config": {
+          "subset": "all",
+          "alpha": 0.1,
+          "penalty": 4
+        },
+        "training": {
+          "r2": 0.3846358913306981,
+          "mae": 2.0372238511882177,
+          "rmse": 2.607448149781521,
+          "passRate": 25.0
+        },
+        "timeSelectionQ2": -0.09132107712137505,
+        "groupCv": {
+          "r2": 0.30327889934431074,
+          "adjR2": 0.30327889934431074,
+          "rmse": 2.7744639215777465,
+          "mae": 2.1540783048483108,
+          "passRate": 22.36842105263158,
+          "passRate1": 29.605263157894733,
+          "passRate15": 44.07894736842105,
+          "n": 152,
+          "days": 37,
+          "method": "leave-one-day-out"
+        },
+        "predictionRange": [
+          10.6860346985023,
+          18.031679076538623
+        ],
+        "nestedTimeValidation": {
+          "r2": -0.04276109800562433,
+          "adjR2": -0.04276109800562433,
+          "rmse": 2.8648549830248253,
+          "mae": 2.132872611638592,
+          "passRate": 26.82926829268293,
+          "passRate1": 31.70731707317073,
+          "passRate15": 51.21951219512195,
+          "n": 41,
+          "folds": [
+            {
+              "trainEnd": "2026-07-13 22:40:00",
+              "testStart": "2026-07-14 07:43:00",
+              "testEnd": "2026-08-27 21:51:00",
+              "n": 22,
+              "production": "mlr"
+            },
+            {
+              "trainEnd": "2026-08-27 21:51:00",
+              "testStart": "2026-08-28 00:20:00",
+              "testEnd": "2026-09-03 07:22:00",
+              "n": 19,
+              "production": "mlr"
+            }
+          ],
+          "baselineMae": 2.2371087739123685,
+          "baselineRmse": 2.9572867833582084,
+          "beatsBaseline": true,
+          "method": "nested-day-walk-forward"
+        },
+        "fixedHistoricalComparison": {
+          "developmentN": 113,
+          "laterN": 39,
+          "r2": -0.05202455215291768,
+          "adjR2": -0.05202455215291768,
+          "rmse": 2.908169746248399,
+          "mae": 2.0892584728248913,
+          "passRate": 33.33333333333333,
+          "passRate1": 41.02564102564102,
+          "passRate15": 56.41025641025641
+        }
+      }
+    },
+    "daily": {
+      "DS": {
+        "method": "mlr",
+        "metrics": {
+          "r2": 0.6570912441579309,
+          "adjR2": 0.5427883255439078,
+          "rmse": 1.0656721205955142,
+          "mae": 0.7975192722766293,
+          "passRate": 62.16216216216216,
+          "passRate1": 67.56756756756756,
+          "passRate15": 83.78378378378379,
+          "q2": 0.4357091552081329,
+          "lambda": 3.6
+        },
+        "note": "DS 原版只读参照；Q²为留一验证，不与GPT时间Q²直接排序"
+      },
+      "before": {
+        "production": "mlr",
+        "n": 37,
+        "config": {
+          "subset": "all",
+          "alpha": 1,
+          "penalty": 1
+        },
+        "training": {
+          "r2": 0.414795401342111,
+          "mae": 1.062545203744979,
+          "rmse": 1.3921568929757937,
+          "passRate": 51.35135135135135
+        },
+        "timeSelectionQ2": 0.07522743119452091,
+        "groupCv": null,
+        "predictionRange": [
+          13.05601082325352,
+          16.06260420509223
+        ],
+        "nestedTimeValidation": {
+          "r2": 0.16682366587291142,
+          "adjR2": 0.16682366587291142,
+          "rmse": 1.3023390797355066,
+          "mae": 1.0526199188134167,
+          "passRate": 50.0,
+          "passRate1": 58.333333333333336,
+          "passRate15": 75.0,
+          "n": 12,
+          "folds": [
+            {
+              "trainEnd": "2026-07-13 12:00:00",
+              "testStart": "2026-07-14 12:00:00",
+              "testEnd": "2026-08-27 12:00:00",
+              "n": 6,
+              "production": "mlr"
+            },
+            {
+              "trainEnd": "2026-08-27 12:00:00",
+              "testStart": "2026-08-28 12:00:00",
+              "testEnd": "2026-09-03 12:00:00",
+              "n": 6,
+              "production": "mlr"
+            }
+          ],
+          "baselineMae": 1.4630400179211467,
+          "baselineRmse": 1.7408830118238656,
+          "beatsBaseline": true,
+          "method": "nested-day-walk-forward"
+        },
+        "fixedHistoricalComparison": {
+          "developmentN": 26,
+          "laterN": 11,
+          "r2": -0.49282341348979575,
+          "adjR2": -0.49282341348979575,
+          "rmse": 1.7160382414230853,
+          "mae": 1.4313630914877629,
+          "passRate": 36.36363636363637,
+          "passRate1": 45.45454545454545,
+          "passRate15": 72.72727272727273
+        }
+      },
+      "after": {
+        "production": "mlr",
+        "n": 37,
+        "config": {
+          "subset": "all",
+          "alpha": 1,
+          "penalty": 1
+        },
+        "training": {
+          "r2": 0.414795401342111,
+          "mae": 1.062545203744979,
+          "rmse": 1.3921568929757937,
+          "passRate": 51.35135135135135
+        },
+        "timeSelectionQ2": 0.07522743119452091,
+        "groupCv": {
+          "r2": 0.24868835416431523,
+          "adjR2": 0.24868835416431523,
+          "rmse": 1.5774092285157553,
+          "mae": 1.2133852735072077,
+          "passRate": 45.94594594594595,
+          "passRate1": 54.054054054054056,
+          "passRate15": 70.27027027027027,
+          "n": 37,
+          "days": 37,
+          "method": "leave-one-day-out"
+        },
+        "predictionRange": [
+          13.05601082325352,
+          16.06260420509223
+        ],
+        "nestedTimeValidation": {
+          "r2": 0.37278967275515007,
+          "adjR2": 0.37278967275515007,
+          "rmse": 1.1299577632330133,
+          "mae": 0.9165164181923752,
+          "passRate": 50.0,
+          "passRate1": 50.0,
+          "passRate15": 75.0,
+          "n": 12,
+          "folds": [
+            {
+              "trainEnd": "2026-07-13 12:00:00",
+              "testStart": "2026-07-14 12:00:00",
+              "testEnd": "2026-08-27 12:00:00",
+              "n": 6,
+              "production": "mlr"
+            },
+            {
+              "trainEnd": "2026-08-27 12:00:00",
+              "testStart": "2026-08-28 12:00:00",
+              "testEnd": "2026-09-03 12:00:00",
+              "n": 6,
+              "production": "mlr"
+            }
+          ],
+          "baselineMae": 1.4630400179211467,
+          "baselineRmse": 1.7408830118238656,
+          "beatsBaseline": true,
+          "method": "nested-day-walk-forward"
+        },
+        "fixedHistoricalComparison": {
+          "developmentN": 26,
+          "laterN": 11,
+          "r2": -0.5311018688671674,
+          "adjR2": -0.5311018688671674,
+          "rmse": 1.7379000114247234,
+          "mae": 1.591316877991371,
+          "passRate": 9.090909090909092,
+          "passRate1": 9.090909090909092,
+          "passRate15": 63.63636363636363
+        }
+      }
+    }
+  }
+}

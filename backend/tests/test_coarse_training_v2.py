@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app.services.coarse_training import aggregate_daily, fit, folds, prepare_rows, train_models
+from app.services.coarse_training import TRAINING_REVISION, aggregate_daily, fit, folds, prepare_rows, select, train_models
 from app.services.modeling import MLR_FEATURES, predict_coarse_ash
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -110,3 +110,86 @@ def test_holdout_targets_do_not_change_first_outer_fold_choice():
     a = train_models(rows)["mlr"]["metrics"]["pipelineValidation"]["folds"][0]
     b = train_models(changed)["mlr"]["metrics"]["pipelineValidation"]["folds"][0]
     assert a == b
+
+
+def test_group_validation_excludes_every_record_on_held_day(monkeypatch):
+    """留日候选的预测绝不能看到该日期的其他化验；不只是检查折编号。"""
+    import app.services.coarse_training as module
+    original_fit, original_predict = module.fit, module.predict_coarse_ash
+    held_out_checks = []
+
+    def observed_fit(training, kind, config, tol=.8):
+        model = original_fit(training, kind, config, tol)
+        model["_training_days"] = {r["timestamp"][:10] for r in training}
+        return model
+
+    def observed_predict(record, model):
+        day = record["timestamp"][:10]
+        assert day not in model["_training_days"]
+        held_out_checks.append(day)
+        return original_predict(record, model)
+
+    monkeypatch.setattr(module, "fit", observed_fit)
+    monkeypatch.setattr(module, "predict_coarse_ash", observed_predict)
+    result = select(records(), "mlr")
+    assert len(set(held_out_checks)) == 24
+    assert result["groupCv"]["n"] == 48
+    assert result["groupCv"]["days"] == 24
+    assert result["groupCv"]["method"] == "leave-one-day-out"
+
+
+def test_training_distinguishes_selection_from_future_validation():
+    result = train_models(records())
+    for kind in ("mlr", "pls"):
+        metrics = result[kind]["metrics"]
+        assert metrics["trainingRevision"] == TRAINING_REVISION
+        assert metrics["q2"] == metrics["selectionCv"]["r2"]
+        assert metrics["groupCv"]["days"] == 24
+        assert metrics["groupCv"]["n"] == 48
+        assert metrics["pipelineValidation"]["n"] < metrics["groupCv"]["n"]
+        assert metrics["pipelineValidation"]["method"] == "nested-day-walk-forward"
+        assert metrics["selectionPolicy"]["primary"] == "rmse"
+
+
+def test_gpt_bounds_limit_extrapolation_without_changing_source_or_legacy_models():
+    rows = records()
+    model = fit(rows, "mlr", {"subset": "all", "alpha": .1, "penalty": 1})
+    outside = dict(rows[-1], raw_ash=99, level=-200, ash_content=39)
+    saved = dict(outside)
+    boundary = dict(outside, raw_ash=model["inputBounds"][0][1], level=model["inputBounds"][9][0])
+    assert predict_coarse_ash(outside, model) == predict_coarse_ash(boundary, model)
+    assert outside == saved
+    assert model["inputBounds"][0] == [min(r["raw_ash"] for r in rows if r["raw_ash"] is not None),
+                                        max(r["raw_ash"] for r in rows if r["raw_ash"] is not None)]
+    legacy = {k: v for k, v in model.items() if k not in ("inputPolicy", "inputBounds")}
+    assert predict_coarse_ash(outside, legacy) != pytest.approx(predict_coarse_ash(outside, model))
+
+
+def test_robust_fit_reduces_one_extreme_label_influence_and_matches_js():
+    rows = aggregate_daily(records())
+    for i, row in enumerate(rows):
+        row["raw_ash"] = 30 + i
+        row["ash_content"] = 8 + i / 5
+    clean = copy.deepcopy(rows)
+    rows[-1]["ash_content"] = 35
+    config = {"subset": "all", "alpha": .03, "penalty": 1, "robust": True}
+    robust = fit(rows, "mlr", config)
+    ordinary = fit(rows, "mlr", {**config, "robust": False})
+    error = lambda model: sum(abs(predict_coarse_ash(r, model) - r["ash_content"]) for r in clean[:-1])
+    assert error(robust) < error(ordinary)
+    assert robust["n"] == len(rows) and rows[-1]["ash_content"] == 35
+    if shutil.which("node"):
+        script = "const {App}=require('./backend/scripts/app_vm')(); const fs=require('fs'); " \
+                 "const p=JSON.parse(fs.readFileSync(0,'utf8')); console.log(JSON.stringify(App._coarseFit(p.rows,'mlr',p.config)));"
+        result = subprocess.check_output(["node", "-e", script], cwd=ROOT,
+                                         input=json.dumps({"rows": rows, "config": config}), text=True, encoding="utf-8")
+        assert_close(robust, json.loads(result))
+
+
+def test_daily_selection_reports_mae_objective():
+    result = train_models(aggregate_daily(records()))
+    for kind in ("mlr", "pls"):
+        metrics = result[kind]["metrics"]
+        assert metrics["selectionPolicy"]["primary"] == "mae"
+        assert metrics["selectionMae"] == pytest.approx(
+            (metrics["selectionCv"]["mae"] + metrics["groupCv"]["mae"]) / 2)

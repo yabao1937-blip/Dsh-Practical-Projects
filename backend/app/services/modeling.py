@@ -20,6 +20,11 @@ def predict_coarse_ash(rec, model):
         v = rec.get(f)
         if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v):
             v = means[j] if j < len(means) else 0.0
+        # GPT 专用覆盖约束。DS 和旧存档没有此标记，保留原预测路径。
+        if model.get("inputPolicy") == "clip-training-range":
+            bounds = model.get("inputBounds") or []
+            if j < len(bounds) and bounds[j] is not None:
+                v = min(bounds[j][1], max(bounds[j][0], v))
         if j < len(coefs):
             y += coefs[j] * v
     return y
