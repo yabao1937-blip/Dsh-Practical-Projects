@@ -787,6 +787,13 @@ const CoarsePage = {
         if (d && d.hit != null) {
             html += `<div class="summary-item"><span class="summary-label">下一读数方向：</span><span class="summary-val">命中 ${f(d.hit)}（多数基线 ${f(d.baseline)}／惯性 ${f(d.inertia)}），95%区间 [${f(d.ci && d.ci[0])}, ${f(d.ci && d.ci[1])}]，n=${d.n} → ${d.usable ? '可用' : '不足以下结论'}</span></div>`;
         }
+        if (d && d.recent && d.recent.length) {
+            const chips = d.recent.slice(-8).map(r =>
+                `<span style="color:${r.ok ? 'var(--accent-green)' : 'var(--accent-red)'}" title="${r.t} 预测${r.pred} / 实际${r.actual}">${r.pred}${r.ok ? '✔' : '✘'}</span>`).join(' ');
+            html += `<div class="summary-item"><span class="summary-label">最近判断：</span><span class="summary-val">${chips}（近${d.recent.length}次命中 ${f(d.recentHit)}，悬停看时间）</span></div>`;
+            html += '<div class="summary-item">方向只说明下一读数的“涨/跌”、不含幅度，也不代表一定发生；'
+                + '<strong>当前只展示、不参与密度建议</strong>（按你的选择：先观察一段时间，再决定是否接入操作提示）。</div>';
+        }
         if (rep.note) html += `<div class="summary-item">${rep.note}</div>`;
         if (this._forwardSets) html += this._forwardSetsTable();
         html += `<div class="summary-item"><button class="link-btn" onclick="CoarsePage.loadCoarseForward(true)">重新计算</button>`;

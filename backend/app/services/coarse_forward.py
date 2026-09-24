@@ -141,7 +141,8 @@ def evaluate_window(records, train_end, test_end=None, feature_sets=None, with_d
                 "A": r.get("A"), "fitN": r["n"]}
     if with_direction:
         d = direction_report(seq, split_ts=train_end)
-        out["direction"] = {k: d.get(k) for k in ("usable", "hit", "baseline", "inertia", "ci", "n", "note")}
+        out["direction"] = {k: d.get(k) for k in ("usable", "hit", "baseline", "inertia", "ci", "n",
+                                                  "note", "recent", "recentHit")}
     # 结论：现行生产配置（10 因子、MLR/PLS 中向前更好的那个）与最强朴素基线比
     prod = [v for k, v in out["models"].items() if k.startswith("%d因子(现行)" % len(MLR_FEATURES))]
     best_base = min(out["baselines"], key=lambda k: out["baselines"][k]["mae"])

@@ -101,6 +101,9 @@ const ok = (cond, msg) => { if (!cond) throw new Error('断言失败：' + msg);
         pass++; console.log('  ✓ 显示模型向前 MAE（百分数，3 位小数）');
         ok(html.includes('最强朴素基线'), '显示最强朴素基线对照');
         ok(html.includes('下一读数方向：'), '显示下一读数方向命中与区间');
+        ok(html.includes('最近判断：'), '显示「最近判断」逐条清单（涨✔跌✘，供观察）');
+        ok(html.includes('不参与密度建议'), '明确声明方向当前不参与密度建议（用户 Q6=B）');
+        ok((rep.body.windows[0].direction.recent || []).length > 0, '接口返回 recent 清单供页面观察');
         ok(html.includes('样本内 R²'), '提示样本内 R² 不等于向前精度');
         ok(!html.includes('向前验证不可用'), '没有出现接口错误提示');
 

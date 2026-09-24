@@ -55,8 +55,12 @@ def _parse_ts(s):
 
 
 def _design(seq):
-    """X = 第 t 条**已知**信息（10 因子 + Δprev + prev 水平）；标签 = 第 t+1 条相对第 t 条的变化。"""
-    X, d_next = [], []
+    """X = 第 t 条**已知**信息（10 因子 + Δprev + prev 水平）；标签 = 第 t+1 条相对第 t 条的变化。
+
+    → (X, d_next, ts_cur)：ts_cur 是每行对应的"第 t 条"时间戳，供页面显示"最近几次判断对不对"
+    （用户 Q6 选 B：方向先只展示、观察一段时间再决定是否接入操作建议）。
+    """
+    X, d_next, ts_cur = [], [], []
     for i in range(2, len(seq) - 1):
         cur, p1 = seq[i], seq[i - 1]
         if not (_num(cur.get("ash_content")) and _num(p1.get("ash_content"))
@@ -67,7 +71,8 @@ def _design(seq):
         row.append(float(p1["ash_content"]))                               # 上一条水平（已知）
         X.append(row)
         d_next.append(float(seq[i + 1]["ash_content"]) - float(cur["ash_content"]))
-    return X, d_next
+        ts_cur.append(str(_ts(cur)))
+    return X, d_next, ts_cur
 
 
 def _ridge_fit(X, y, alpha=RIDGE_ALPHA):
@@ -130,14 +135,14 @@ def direction_report(records, dev_months=None, test_months=None, bootstrap=BOOTS
     else:
         dev = [r for r in seq if str(_ts(r))[:7] in (dev_months or [])]
         test = [r for r in seq if str(_ts(r))[:7] in (test_months or [])]
-    Xtr, dtr = _design(dev)
-    Xte, dte = _design(test)
+    Xtr, dtr, _ts_tr = _design(dev)
+    Xte, dte, ts_te = _design(test)
     mtr = [i for i, d in enumerate(dtr) if abs(d) > DELTA_TH]
     mte = [i for i, d in enumerate(dte) if abs(d) > DELTA_TH]
     if len(mtr) < 8 or len(mte) < 5:
         return {"usable": False, "hit": None, "baseline": None, "ci": None,
                 "n": len(mte), "note": "样本不足（开发≥8、检验≥5 才给结论）",
-                "gating": "特征仅用 t 时刻已知量；不含到下次读数的时间间隔"}
+                "gating": "特征仅用 t 时刻已知量；不含到下次读数的时间间隔", "recent": []}
     model = _ridge_fit([Xtr[i] for i in mtr], [dtr[i] for i in mtr])
     pred = [1 if v > 0 else 0 for v in _predict(model, [Xte[i] for i in mte])]
     y = [1 if dte[i] > 0 else 0 for i in mte]
@@ -161,11 +166,17 @@ def direction_report(records, dev_months=None, test_months=None, bootstrap=BOOTS
     boots.sort()
     lo, hi = boots[int(n * 0) + int(len(boots) * 0.025)], boots[int(len(boots) * 0.975)]
     usable = lo > max(baseline, inertia)
+    # 最近若干次"判断 vs 实际"（供页面观察；用户 Q6 选 B：先只展示、不接入操作建议）
+    recent = [{"t": ts_te[i], "pred": "涨" if pred[k] else "跌",
+               "actual": "涨" if y[k] else "跌", "ok": pred[k] == y[k]}
+              for k, i in enumerate(mte)][-20:]
     return {"usable": usable, "hit": round(hit, 3), "baseline": round(baseline, 3),
             "inertia": round(inertia, 3), "ci": [round(lo, 3), round(hi, 3)], "n": n,
             "note": ("方向可用：区间下界高于多数基线与惯性基线" if usable
                      else "方向命中未能显著超过基线，不作可用结论"),
-            "gating": "特征仅用 t 时刻已知量；不含到下次读数的时间间隔"}
+            "gating": "特征仅用 t 时刻已知量；不含到下次读数的时间间隔",
+            "recent": recent,
+            "recentHit": (round(sum(1 for r in recent if r["ok"]) / len(recent), 3) if recent else None)}
 
 
 def _cli():

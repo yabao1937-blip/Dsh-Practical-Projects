@@ -97,6 +97,8 @@ def test_training_result_carries_forward_and_direction():
     assert set(fwd["models"]) == {"mlr", "pls"}, fwd
     assert "取训练均值" in fwd["baselines"] and fwd["verdict"]["aheadOfBaseline"] in (True, False)
     assert res["direction"]["n"] > 5 and res["direction"]["testFrom"] == fwd["testFrom"], res["direction"]
+    # 方向"最近判断"清单要随训练结果一起带出来（页面用于观察，用户 Q6=B）
+    assert res["direction"]["recent"] and all("ok" in x for x in res["direction"]["recent"])
 
 
 def test_training_result_states_reason_when_no_forward_window():

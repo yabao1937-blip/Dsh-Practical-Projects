@@ -60,3 +60,18 @@ def test_report_declares_gating_and_sample_gate():
     rep = direction_report(_series(phi=0.3, n=40), ["2026-06"], ["2026-07"])
     assert "gating" in rep and "时间间隔" in rep["gating"]      # 声明不使用采样节奏特征
     assert rep["usable"] in (True, False)
+    assert rep["recent"] == []                                  # 样本不足时不给"最近判断"清单
+
+
+def test_recent_predictions_are_listed_for_observation():
+    """用户 Q6 选 B（方向先只展示观察）→ 报告要给出"最近几次判断 vs 实际"，供页面显示。"""
+    rep = direction_report(_series(phi=0.3, n=260), ["2026-06"], ["2026-07"])
+    assert rep["usable"] is True, rep
+    rec = rep["recent"]
+    assert 5 <= len(rec) <= 20, rec
+    assert all(set(x) == {"t", "pred", "actual", "ok"} for x in rec), rec
+    assert all(x["pred"] in ("涨", "跌") and x["actual"] in ("涨", "跌") for x in rec), rec
+    assert all(x["ok"] == (x["pred"] == x["actual"]) for x in rec), rec
+    assert 0.0 <= rep["recentHit"] <= 1.0, rep["recentHit"]
+    # 清单必须按时间升序（页面从右往左读"最近"，顺序反了会误导）
+    assert rec == sorted(rec, key=lambda x: x["t"]), rec[:3]
