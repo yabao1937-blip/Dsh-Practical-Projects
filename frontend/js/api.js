@@ -99,8 +99,17 @@ window.Api = {
         return (await r.json()).sample;
     },
 
-    async retrainCoarseModel(range, revision, engine = 'ds') {
-        // 后端训练 MLR+PLS 粗灰模型；返回 { coarseModel(全量), history, production, ... }
+    // DS 粗灰「真向前验证」（只读接口：训练范围之后的数据当检验集 + 朴素基线 + 方向命中）。
+    // 服务端按 (数据指纹, range, 特征集) 缓存；首次约 8 秒，之后立即返回。
+    // sets=true 会附特征集对照（含 4 因子备选），需要多拟合两次 PLS，较慢。
+    async getCoarseForward(range, sets) {
+        const r = await fetch(this.base + '/training/coarse-forward?range=' + encodeURIComponent(range || 'all')
+            + (sets ? '&sets=1' : ''), {signal: AbortSignal.timeout(180000)});
+        if (!r.ok) throw new Error('forward ' + r.status);
+        return await r.json();
+    },
+
+    async retrainCoarseModel(range, revision, engine = 'ds') {        // 后端训练 MLR+PLS 粗灰模型；返回 { coarseModel(全量), history, production, ... }
         const tk = this.writeToken();
         const r = await fetch(this.base + '/training/coarse-model?range=' + encodeURIComponent(range || 'jun_jul') + '&engine=' + encodeURIComponent(engine), {
             headers: {...(tk ? { 'X-DMCS-Token': tk } : {}), ...(revision ? {'X-DMCS-Revision': revision} : {})},

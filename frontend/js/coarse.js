@@ -703,6 +703,10 @@ const CoarsePage = {
         html += `<div class="summary-item">${engine === 'ds'
             ? 'DS：原版模型，Q²为留一交叉验证；开关按每日多数状态聚合。'
             : 'GPT：优化版模型，Q²为按日分组时间调参得分；开关按每日采样开启比例聚合。'} 两版Q²口径不同，不能直接用分数高低判断未来预测能力。</div>`;
+        if (engine === 'ds' && !daily) {
+            html += this._forwardBlock();
+            this._maybeLoadForward();
+        }
         const vm = active && active.metrics && (this.viewModel === 'production'
             ? active.metrics.pipelineValidation : active.metrics.validation);
         if (vm) {
@@ -741,6 +745,95 @@ const CoarsePage = {
                 </tr>`).join('');
             }
         }
+    },
+
+    // ---------- DS 真向前验证（只读接口 /api/v1/training/coarse-forward） ----------
+    // 为什么单列：样本内 R² 与向前精度会脱节。实测（2026-09-24）把目标换成「灰分−原煤灰」后
+    // 样本内 R² 从 0.374 升到 0.754，而向前 MAE 从 1.814 恶化到 1.939 —— 只看 R² 会选错模型。
+    // 这里显示的是「训练范围之后、模型没见过的那段」的成绩，并列出同段上朴素基线与方向命中。
+    _forwardKey() {
+        const data = App.store.coarseCoal || [];
+        const last = data.length ? String(data[data.length - 1].timestamp || '') : '';
+        return [App.store.coarseTrainRange || 'jun_jul', data.length, last].join('|');
+    },
+
+    _forwardBlock() {
+        const rep = this._forwardRep;
+        if (!rep) {
+            return this._forwardBusy
+                ? '<div class="summary-item"><span class="summary-label">向前验证：</span><span class="summary-val">计算中…（首次约 8 秒，之后走服务端缓存）</span></div>'
+                : '<div class="summary-item"><span class="summary-label">向前验证：</span><span class="summary-val">待加载（需要 http:// 后端模式）</span></div>';
+        }
+        // 后端还是旧版本（没有这个接口）时只提示一句，不把它渲染成红色故障
+        if (rep.unavailable) {
+            return `<div class="summary-item"><span class="summary-label">向前验证：</span><span class="summary-val" style="color:var(--text-muted)">${rep.note}</span></div>`;
+        }
+        if (rep.error) return `<div class="summary-item" style="color:var(--accent-red)">向前验证不可用：${rep.error}</div>`;
+        const w = (rep.windows || [])[0];
+        if (!w) return `<div class="summary-item">向前验证：${rep.note || '数据不足'}</div>`;
+        if (w.usable === false) return `<div class="summary-item">向前验证：${w.note || '样本不足'}</div>`;
+        const f = v => (v == null ? '--' : (+v).toFixed(3));
+        const models = Object.entries(w.models || {}).sort((a, b) => a[1].mae - b[1].mae);
+        const bases = Object.entries(w.baselines || {}).sort((a, b) => a[1].mae - b[1].mae);
+        const best = models[0], bb = bases[0], d = w.direction || {};
+        const kind = w.kind === 'tail'
+            ? '留尾参考：当前训练范围已覆盖全部数据，测不出真向前成绩'
+            : '训练范围之后的数据，模型训练时没见过';
+        let html = `<div class="summary-item"><span class="summary-label">向前验证（${kind}）：</span><span class="summary-val">训练→${(w.trainEnd || '').slice(0, 10)}｜检验 ${(w.testFrom || '').slice(0, 10)} ~ ${(w.testTo || '').slice(0, 10)}（${w.testN} 条）</span></div>`;
+        html += `<div class="summary-item">检验期真值均值 ${f(w.testMean)}%，训练期 ${f(w.trainMean)}%（中枢漂移 ${(w.testMean >= w.trainMean ? '+' : '')}${f(w.testMean - w.trainMean)}）。</div>`;
+        if (best) html += `<div class="summary-item"><span class="summary-label">模型向前 MAE：</span><span class="summary-val" style="color:${w.verdict && w.verdict.aheadOfBaseline ? 'var(--accent-green)' : 'var(--accent-orange)'}">${f(best[1].mae)}%（${best[0]}）</span></div>`;
+        if (bb) html += `<div class="summary-item"><span class="summary-label">最强朴素基线：</span><span class="summary-val">${f(bb[1].mae)}%（${bb[0]}）</span></div>`;
+        if (best) html += `<div class="summary-item">样本内 R² ${f(best[1].inSampleR2)} 只说明历史解释力；${w.verdict ? w.verdict.text + '。' : ''}</div>`;
+        if (d && d.hit != null) {
+            html += `<div class="summary-item"><span class="summary-label">下一读数方向：</span><span class="summary-val">命中 ${f(d.hit)}（多数基线 ${f(d.baseline)}／惯性 ${f(d.inertia)}），95%区间 [${f(d.ci && d.ci[0])}, ${f(d.ci && d.ci[1])}]，n=${d.n} → ${d.usable ? '可用' : '不足以下结论'}</span></div>`;
+        }
+        if (rep.note) html += `<div class="summary-item">${rep.note}</div>`;
+        if (this._forwardSets) html += this._forwardSetsTable();
+        html += `<div class="summary-item"><button class="link-btn" onclick="CoarsePage.loadCoarseForward(true)">重新计算</button>`;
+        html += ` <button class="link-btn" onclick="CoarsePage.loadCoarseForward(true, true)">含特征集对照（较慢）</button>`;
+        html += ` · ${rep.cached === false ? '本次服务端新算' : '服务端缓存'}${rep.elapsedMs ? `（${(rep.elapsedMs / 1000).toFixed(1)}s）` : ''}</div>`;
+        return html;
+    },
+
+    _forwardSetsTable() {
+        const w = (this._forwardRep && this._forwardRep.windows || [])[0];
+        if (!w || !w.models) return '';
+        const rows = Object.entries(w.models).map(([k, v]) =>
+            `<tr><td>${k}</td><td>MAE ${(+v.mae).toFixed(3)}</td><td>偏差 ${(+v.bias).toFixed(3)}</td><td>样本内R² ${(+v.inSampleR2).toFixed(3)}</td></tr>`).join('');
+        return `<div class="summary-item">特征集对照（只作存档参考，生产模型未改）：<table class="coarse-gpt-metrics" style="margin-top:4px"><tbody>${rows}</tbody></table></div>`;
+    },
+
+    // 同一份数据只自动拉一次；点「重新计算」用 force 重拉（服务端仍走缓存，除非数据变了）
+    _maybeLoadForward() {
+        const key = this._forwardKey();
+        if (this._forwardKeyTried === key) return;
+        this._forwardKeyTried = key;
+        this.loadCoarseForward(false, false);
+    },
+
+    async loadCoarseForward(force, sets) {
+        if (!window.Api || typeof window.Api.getCoarseForward !== 'function') return;
+        // 已经有请求在跑就复用它：否则"自动加载 + 用户点重新计算"会并发两次，
+        // 而且 force 那次立即返回会让调用方（含验证脚本）以为已经算完、读到旧 DOM。
+        if (this._forwardBusy) return this._forwardPromise;
+        this._forwardBusy = true;
+        if (force) { this._forwardSets = !!sets; this.updateModelSummary(); }
+        this._forwardPromise = (async () => {
+            try {
+                this._forwardRep = await window.Api.getCoarseForward(App.store.coarseTrainRange || 'jun_jul', !!sets);
+            } catch (e) {
+                const msg = (e && e.message) || String(e);
+                // 旧后端（未部署该接口）与真正的故障要分开：前者只是一句灰字提示
+                this._forwardRep = /\b(404|405)\b/.test(msg)
+                    ? {unavailable: true, note: '当前后端未提供该接口（更新后端后可用）'}
+                    : {error: msg};
+            } finally {
+                this._forwardBusy = false;
+                this._forwardPromise = null;
+                this.updateModelSummary();
+            }
+        })();
+        return this._forwardPromise;
     },
 
     // ---------- 控件 ----------
