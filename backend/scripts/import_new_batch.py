@@ -17,6 +17,14 @@
   python backend/scripts/import_new_batch.py                    # 写库（只导 A 系统；重叠以新为准）
   python backend/scripts/import_new_batch.py --ash-systems A,B  # 若以后要补导 B 系统
   python backend/scripts/import_new_batch.py --overlap skip     # 若改成"重叠时保留库内旧值"
+  # 固定供给（用户 2026-09-24 Q7=A）：把文件丢进投放目录 → 一条命令搞定
+  python backend/scripts/import_new_batch.py --scan-dir "C:\\Users\\25925\\Desktop\\web(2)导入数据\\自动导入"
+  python backend/scripts/import_new_batch.py --scan-dir <目录> --apply   # 真正写库并把源文件移入 已导入\\
+固定供给约定：
+  · 目录里放 xlsx，文件名含「粗精煤泥」= 粗灰表、含「灰分」+「密度」= 灰分密度表、含「浮精」= 浮精表；
+  · 每类取**修改时间最新**的一个文件（旧文件不会盖新文件）；~$ 临时文件自动忽略；
+  · 不带 --apply 时只看计划；带 --apply 写库成功后把用过的文件移到 已导入\\<时间戳>\\；
+  · --db 可覆盖库路径（验证时指向临时库，避免碰生产）。
 """
 import argparse
 import json
@@ -37,12 +45,71 @@ FILES = {
     "ash_density": "灰分、密度 （导入版)9-23.xlsx",
     "float": "浮精 (1)9-23.xlsx",
 }
+# ---- 固定供给（用户 2026-09-24 选择 Q7=A）：投放目录 + 文件名识别 + 导入后归档 ----
+# 约定：把三个文件放进投放目录（固定列序，见 docs/DS粗灰预测-疑问与决策.xlsx），
+# 文件名只要含下列关键字就能被识别；每类取**修改时间最新**的一个；导入成功后移到 已导入\<时间戳>\。
+DROP_DIR = Path(r"C:\Users\25925\Desktop\web(2)导入数据\自动导入")
+KEYWORDS = (("coarse", ("粗精煤泥",)), ("ash_density", ("灰分", "密度")), ("float", ("浮精",)))
+ARCHIVE_DIRNAME = "已导入"
 # 与库内既有 import_logs 的 category 取值保持一致（见 sqlite: select distinct category from import_logs）
 CAT_NAME = {"coarse": "coarse_factors", "ash_density": "ash_density", "float": "float_ash"}
 YEAR = "2026"
 # 「同一次采样、时间戳略有出入」的判定窗口（分钟）。粗/浮精采样间隔以小时计 → 60 分钟安全；
 # 灰分密度表相邻只有 5 分钟，一律按精确时间戳判重（窗口 0）。
 OVERLAP_WINDOW = {"coarse": 60, "float": 60, "ash_density": 0}
+
+
+def classify(name):
+    """文件名 → 类别（None=不认识）。粗精煤泥必须先判，否则会被『灰分』误抓。"""
+    if name.startswith("~$") or name.startswith("."):
+        return None
+    for cat, keys in KEYWORDS:
+        if all(k in name for k in keys):
+            return cat
+    return None
+
+
+def resolve_sources(scan_dir, min_bytes=4096):
+    """扫描投放目录 → {类别: 文件路径}（每类取 mtime 最新；已导入/临时文件跳过）。
+
+    为什么要 min_bytes：2026-09-24 实测，一个 0 字节的同名垃圾文件会因为 mtime 更新而"赢得"
+    选取，随后 load_workbook 抛异常把整轮导入打断。真实表格 ≥ 十几 KB，按体积先挡一道。
+    """
+    scan_dir = Path(scan_dir)
+    if not scan_dir.is_dir():
+        raise SystemExit("投放目录不存在：%s" % scan_dir)
+    best, tiny = {}, []
+    for p in sorted(scan_dir.iterdir()):
+        if not p.is_file() or p.suffix.lower() not in (".xlsx", ".xls", ".xlsm"):
+            continue
+        cat = classify(p.name)
+        if cat is None:
+            continue
+        if p.stat().st_size < min_bytes:
+            tiny.append("%s（%.1f KB，太小，按临时/损坏文件跳过）" % (p.name, p.stat().st_size / 1024))
+            continue
+        if cat not in best or p.stat().st_mtime > best[cat].stat().st_mtime:
+            best[cat] = p
+    if tiny:
+        print("   已忽略 %d 个体积异常的文件：" % len(tiny))
+        for t in tiny:
+            print("      · %s" % t)
+    return best
+
+
+def archive_sources(sources):
+    """导入成功后把用过的文件移进 已导入\\<时间戳>\\，避免下一轮重复导入。"""
+    if not sources:
+        return None
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest_dir = Path(next(iter(sources.values()))).parent / ARCHIVE_DIRNAME / stamp
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    moved = []
+    for p in sources.values():
+        target = dest_dir / Path(p).name
+        Path(p).replace(target)
+        moved.append(str(target))
+    return moved
 
 
 def norm_ts(v):
@@ -107,9 +174,9 @@ def read_rows(path):
     return out
 
 
-def build(cat, ash_systems):
+def build(cat, ash_systems, path=None):
     """→ (可入库记录, 异常/口径跳过明细, 统计计数, 文件名)"""
-    path = SRC / FILES[cat]
+    path = Path(path) if path else (SRC / FILES[cat])
     built, skipped = [], []
     st = Counter()
     for sheet, rows in read_rows(path):
@@ -245,16 +312,42 @@ def main():
     ap.add_argument("--ash-systems", default="A", help="灰分密度表导入哪些系统（默认只导 A）")
     ap.add_argument("--overlap", default="replace", choices=("replace", "skip", "both"),
                     help="与库内旧行近似重叠时：replace=以新文件为准换掉旧行（默认）/ skip=保留旧行 / both=两套都留")
+    ap.add_argument("--scan-dir", default=None,
+                    help="固定供给模式：扫描该投放目录（每类取 mtime 最新的文件）。"
+                         "默认只报告，必须加 --apply 才会写库并归档")
+    ap.add_argument("--apply", action="store_true", help="配合 --scan-dir：确认写库并把源文件移入 已导入\\")
+    ap.add_argument("--db", default=None, help="覆盖数据库路径（验证用临时库时使用）")
     a = ap.parse_args()
     ash_systems = {s.strip().upper() for s in a.ash_systems.split(",") if s.strip()}
+    scan_mode = bool(a.scan_dir)
+    if scan_mode and not a.apply:
+        a.dry_run = True
+    sources = {}
+    if scan_mode:
+        sources = resolve_sources(a.scan_dir)
+        print("扫描投放目录：%s" % a.scan_dir)
+        for cat in ("coarse", "ash_density", "float"):
+            p = sources.get(cat)
+            print("   %-12s %s" % (cat, p.name + "（%.1f KB，%s）" % (p.stat().st_size / 1024,
+                  datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M")) if p else "未找到文件"))
+        missing = [c for c in ("coarse", "ash_density", "float") if c not in sources]
+        if missing:
+            print("   注意：缺 %s 的文件，本轮只导找到的那些" % "、".join(missing))
 
-    con = sqlite3.connect(str(DB), timeout=30)
+    con = sqlite3.connect(str(a.db or DB), timeout=30)
     cur = con.cursor()
     before = dict(cur.execute("select category, count(*) from coal_records group by category").fetchall())
 
-    plans = {}
+    plans, failures = {}, {}
     for cat in FILES:
-        built, skipped, st, fname = build(cat, ash_systems)
+        if scan_mode and cat not in sources:
+            continue
+        try:
+            built, skipped, st, fname = build(cat, ash_systems, sources.get(cat))
+        except Exception as exc:              # 单个文件坏掉不该拖垮另外两类
+            failures[cat] = "%s: %s" % (sources.get(cat).name if sources.get(cat) else FILES[cat], exc)
+            print("[%s] 解析失败，本轮跳过这一类：%s" % (cat, exc))
+            continue
         db_ts = [r[0] for r in cur.execute(
             "select ts from coal_records where category=? order by ts", (cat,))]
         exist = set(db_ts)
@@ -289,8 +382,16 @@ def main():
                 print("      · %s | %s" % (why, sample[:78]))
 
     if a.dry_run:
-        print("\n--dry-run：未写入")
+        print("\n--dry-run：未写入" + ("（--scan-dir 模式需加 --apply 才会写库并归档）" if scan_mode else ""))
+        if failures:
+            print("解析失败的类别（源文件保持不动，可修正后重跑）：%s" % "、".join(failures))
         con.close()
+        return
+    if not plans or all(not p["new"] and not p["drop"] for p in plans.values()):
+        print("\n没有需要写入的行（都已在库内）")
+        con.close()
+        if scan_mode:
+            _archive_ok(sources, plans)
         return
 
     cols = ["category", "ts", "system", "source", "ash_content", "coal_amount", "density", "level",
@@ -323,6 +424,11 @@ def main():
                         " status, errors, created_at) values (?,?,?,?,?,?,?,?,?,?)",
                         (now, CAT_NAME[cat], p["fname"], p["total"], len(p["new"]), 0, len(p["skipped"]),
                          "成功", json.dumps(errs, ensure_ascii=False), now))
+        for cat, msg in failures.items():     # 解析失败也要留痕（类别/文件名/原因）
+            cur.execute("insert into import_logs (ts, category, filename, total, success, failed, skipped,"
+                        " status, errors, created_at) values (?,?,?,?,?,?,?,?,?,?)",
+                        (now, CAT_NAME[cat], msg.split(": ")[0], 0, 0, 1, 0, "失败",
+                         json.dumps([{"why": "解析失败", "sample": msg}], ensure_ascii=False), now))
         con.commit()
     except Exception as exc:
         con.rollback()
@@ -342,6 +448,24 @@ def main():
           " 最新 3 条：", cur.execute(
               "select id, ts, category, total, success, skipped from import_logs order by id desc limit 3").fetchall())
     con.close()
+    if scan_mode and sources:
+        _archive_ok(sources, plans)
+    if failures:
+        print("解析失败的类别（源文件保持不动，可修正后重跑）：%s" % "、".join(failures))
+    if scan_mode:
+        print("提示：导入后可在粗精煤泥页看「向前验证」区块，或跑 "
+              "python backend/scripts/evaluate_ds_forward.py 复算向前成绩。")
+
+
+def _archive_ok(sources, plans):
+    """只归档**解析成功**的源文件：解析失败的那份留在投放目录里等修正后重跑。"""
+    ok = {cat: p for cat, p in sources.items() if cat in plans}
+    if not ok:
+        return
+    moved = archive_sources(ok)
+    print("源文件已归档（下轮不会重复导入）：")
+    for m in moved or []:
+        print("   ", m)
 
 
 if __name__ == "__main__":
