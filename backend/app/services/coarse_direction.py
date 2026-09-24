@@ -39,6 +39,12 @@ def _num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
+def _ts(rec):
+    """取时间戳：库行是 `ts`，前端 store 行是 `timestamp`（2026-09-24 修：
+    训练编排传进来的是 store 行，只读 `ts` 会让方向报告永远返回"样本不足"）。"""
+    return rec.get("ts") or rec.get("timestamp")
+
+
 def _parse_ts(s):
     for f in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
@@ -106,12 +112,24 @@ def _predict(model, X):
     return out
 
 
-def direction_report(records, dev_months, test_months, bootstrap=BOOTSTRAP):
-    """按时间切分做"真向前"方向验收。records 需含 ts 与 10 个特征 + ash_content。"""
-    seq = sorted([r for r in records if _parse_ts(r.get("ts")) is not None],
-                 key=lambda r: str(r["ts"]))
-    dev = [r for r in seq if str(r["ts"])[:7] in dev_months]
-    test = [r for r in seq if str(r["ts"])[:7] in test_months]
+def direction_report(records, dev_months=None, test_months=None, bootstrap=BOOTSTRAP, split_ts=None):
+    """按时间切分做"真向前"方向验收。records 需含 ts 与 10 个特征 + ash_content。
+
+    两种切分口径：
+      · split_ts="2026-09-04"：**按时间点切**，ts < split_ts 为开发、ts ≥ split_ts 为检验（优先）。
+        为什么要它：按月份切在"开发集已覆盖最新月份"时会把检验集切成空集 —— 2026-09-24 导入
+        9-04~9-21 新数据后，开发集是 6-16~9-03（含 2026-09），检验月份就成了 []，报告只能返回
+        "样本不足"。数据是连续导入的，真正的向前窗口是"最后一个训练样本之后"，而不是"下一个月"。
+      · dev_months / test_months：按月切（保留原口径，供三切分对照使用）。
+    """
+    seq = sorted([r for r in records if _parse_ts(_ts(r)) is not None],
+                 key=lambda r: str(_ts(r)))
+    if split_ts:
+        dev = [r for r in seq if str(_ts(r)) < split_ts]
+        test = [r for r in seq if str(_ts(r)) >= split_ts]
+    else:
+        dev = [r for r in seq if str(_ts(r))[:7] in (dev_months or [])]
+        test = [r for r in seq if str(_ts(r))[:7] in (test_months or [])]
     Xtr, dtr = _design(dev)
     Xte, dte = _design(test)
     mtr = [i for i, d in enumerate(dtr) if abs(d) > DELTA_TH]
@@ -126,6 +144,10 @@ def direction_report(records, dev_months, test_months, bootstrap=BOOTSTRAP):
     n = len(y)
     hit = sum(1 for a, b in zip(pred, y) if a == b) / n
     baseline = max(sum(y), n - sum(y)) / n
+    # 惯性基线：直接假设"下一次的变化方向与刚发生的变化同号"（均值回复时它应当很差）
+    # X[i][len(FEATS)] 就是第 t 条相对上一条的已知变化量（见 _design）。
+    inertia = sum(1 for i in mte
+                  if (dte[i] > 0) == (Xte[i][len(FEATS)] > 0)) / n
     # bootstrap 95% 区间（自实现线性同余，避免引入 numpy 依赖）
     state = SEED
     boots = []
@@ -138,11 +160,11 @@ def direction_report(records, dev_months, test_months, bootstrap=BOOTSTRAP):
         boots.append(acc / n)
     boots.sort()
     lo, hi = boots[int(n * 0) + int(len(boots) * 0.025)], boots[int(len(boots) * 0.975)]
-    usable = lo > baseline
+    usable = lo > max(baseline, inertia)
     return {"usable": usable, "hit": round(hit, 3), "baseline": round(baseline, 3),
-            "ci": [round(lo, 3), round(hi, 3)], "n": n,
-            "note": ("方向可用：区间下界高于多数基线" if usable
-                     else "方向命中未能显著超过多数基线，不作可用结论"),
+            "inertia": round(inertia, 3), "ci": [round(lo, 3), round(hi, 3)], "n": n,
+            "note": ("方向可用：区间下界高于多数基线与惯性基线" if usable
+                     else "方向命中未能显著超过基线，不作可用结论"),
             "gating": "特征仅用 t 时刻已知量；不含到下次读数的时间间隔"}
 
 

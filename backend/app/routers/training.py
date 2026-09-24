@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from ..auth import require_write
 from ..database import get_db
 from ..models import AutoState, CoalRecord, CoarseModel, CoarseModelHistory, Setting
+from ..services.coarse_forward import FEATURE_SETS as FORWARD_FEATURE_SETS, report_cached
 from ..services.coarse_training import train_models
 from ..services.modeling import predict_coarse_ash
 from ..services.training import MLR_FEATURES, _js_round, train_coarse_model as train_ds
@@ -50,6 +51,38 @@ def _record_to_dict(r: CoalRecord) -> dict:
 def _get_setting(db: Session, key: str, default):
     row = db.query(Setting).filter(Setting.key == key).first()
     return row.value if row is not None and row.value is not None else default
+
+
+def _coarse_records(db: Session) -> list[dict]:
+    """库内粗精煤泥记录 → store 口径记录（与训练取数同序）。"""
+    recs = (db.query(CoalRecord)
+            .filter(CoalRecord.category == "coarse")
+            .order_by(CoalRecord.ts, CoalRecord.id).all())
+    return [_record_to_dict(r) for r in recs]
+
+
+@router.get("/coarse-forward")
+def coarse_forward(
+    train_range: Literal["jun_jul", "30d", "all"] = Query("all", alias="range"),
+    engine: Literal["ds", "gpt"] = Query("ds"),
+    sets: bool = Query(False, description="是否附特征集对照（含 4 因子备选，较慢）"),
+    db: Session = Depends(get_db),
+):
+    """**只读**：DS 粗灰模型的真向前验证（不训练、不写库、不改模型）。
+
+    检验口径：按 `range` 训练后，把**训练范围之后**的数据当检验集（现场"隔几周导一次 Excel →
+    重训 → 往后用"的用法）。若该范围已覆盖全部数据（如 all），则没有剩余数据可检验 —— 这时返回
+    kind=tail 的留尾参考，并明确说明这不是部署模型的向前成绩。
+    含朴素基线（取训练均值 / 在线近 k 条均值 / 指数平滑）与"下一读数方向"命中率。
+    """
+    if engine != "ds":
+        raise HTTPException(400, "向前验证只对 DS 版本提供（GPT 版本用嵌套时间验证口径）")
+    records = _coarse_records(db)
+    if not records:
+        raise HTTPException(422, "无粗精煤泥(coarse)记录，无法评估")
+    rep = report_cached(records, train_range, FORWARD_FEATURE_SETS if sets else None)
+    rep["range"] = train_range
+    return rep
 
 
 @router.post("/coarse-model", dependencies=[Depends(require_write)])
@@ -106,6 +139,8 @@ def train_coarse_model(
             "pls": {k: v for k, v in result["pls"].items() if k != "yhat"},
             "production": result["production"], "trainedAt": trained_at, "engine": engine,
             "n": result["n"], "tolerance": result["tolerance"], "range": result["range"],
+            # 真向前验收随模型一起存档（训练范围之后那段的 MAE/基线对照，见 services/coarse_forward.py）
+            "forward": result.get("forward"), "direction": result.get("direction"),
         }
         variants[engine] = coarse_model
         bank = db.query(AutoState).filter(AutoState.key == "coarseModelVariants").first()
@@ -161,6 +196,7 @@ def train_coarse_model(
         "coarseModel": coarse_model,
         "engine": engine, "coarseModelVariants": variants,
         "history": {**h, "trainedAt": trained_at},
+        "forward": result.get("forward"), "direction": result.get("direction"),
         "mlr": {"r2": result["mlr"]["metrics"]["r2"], "q2": result["mlr"]["metrics"]["q2"],
                 "q2Time": result["mlr"]["metrics"]["q2Time"], "lambda": result["mlr"]["lambda"],
                 "rmse": result["mlr"]["metrics"]["rmse"], "mae": result["mlr"]["metrics"]["mae"]},

@@ -549,6 +549,63 @@ def _time_cv_q2(X, y, kind, amax=None, tol=0.8):
 
 
 # ---------------- 训练编排（镜像 trainCoarseModel） ----------------
+def _forward_summary(train_rows, all_records, mlr, pls):
+    """训练范围**之后**那一段当真向前检验集（DS 专用验收）。复用已拟合的 mlr/pls，不额外拟合。
+
+    为什么必须单列：样本内 R² 与向前精度会脱节。实测（2026-09-24，锁定窗 9-04~9-21）现行 10 因子
+    MLR 样本内 R² 0.374、向前 MAE 1.814，而"取训练均值"基线只要 1.744 —— 只看 R² 会误判模型可用。
+    返回 {usable, trainN, testN, trainEnd, testFrom, testTo, models:{mlr,pls}, baselines:{...}}
+    """
+    if not train_rows:
+        return {"usable": False, "note": "无训练样本"}
+    last = max(str(r.get("timestamp") or "") for r in train_rows)
+    seq = sorted([r for r in all_records if _is_num(r.get("ash_content"))],
+                 key=lambda r: str(r.get("timestamp") or ""))
+    test = [r for r in seq if str(r.get("timestamp") or "") > last]
+    if len(test) < 5:
+        return {"usable": False, "n": len(test), "trainEnd": last,
+                "note": "训练范围之后只有 %d 条数据，无法做真向前检验（要 ≥5 条）" % len(test)}
+    y = [r["ash_content"] for r in test]
+    const = sum(r["ash_content"] for r in train_rows) / len(train_rows)
+    out = {"usable": True, "trainN": len(train_rows), "testN": len(test), "trainEnd": last,
+           "testFrom": str(test[0].get("timestamp") or ""), "testTo": str(test[-1].get("timestamp") or ""),
+           "trainMean": _js_round(const, 3), "testMean": _js_round(sum(y) / len(y), 3),
+           "models": {}, "baselines": {}}
+
+    def _score(pred):
+        mae = sum(abs(a - b) for a, b in zip(pred, y)) / len(y)
+        bias = sum(a - b for a, b in zip(pred, y)) / len(y)
+        ym = sum(y) / len(y)
+        sst = sum((b - ym) ** 2 for b in y)
+        r2 = 1 - sum((a - b) ** 2 for a, b in zip(pred, y)) / sst if sst else 0.0
+        return {"mae": _js_round(mae, 3), "bias": _js_round(bias, 3), "r2": _js_round(r2, 3)}
+
+    for name, model in (("mlr", mlr), ("pls", pls)):
+        out["models"][name] = _score([predict_coarse_ash(r, model) for r in test])
+    out["baselines"]["取训练均值"] = _score([const] * len(test))
+    pos = {id(r): i for i, r in enumerate(seq)}
+    for k in (1, 5, 20):
+        pred = []
+        for r in test:
+            i = pos[id(r)]
+            past = [seq[j]["ash_content"] for j in range(max(0, i - k), i)]
+            pred.append(sum(past) / len(past) if past else const)
+        out["baselines"]["在线·近%d条均值" % k] = _score(pred)
+    best_base = min(out["baselines"], key=lambda k: out["baselines"][k]["mae"])
+    best_model = min(out["models"], key=lambda k: out["models"][k]["mae"])
+    out["verdict"] = {
+        "bestModel": best_model, "bestBaseline": best_base,
+        "modelMae": out["models"][best_model]["mae"], "baselineMae": out["baselines"][best_base]["mae"],
+        "aheadOfBaseline": out["models"][best_model]["mae"] < out["baselines"][best_base]["mae"],
+        "text": ("训练范围之后 %d 条真向前：模型(%s) MAE %.3f，%s MAE %.3f → 模型%s"
+                 % (len(test), best_model.upper(), out["models"][best_model]["mae"], best_base,
+                    out["baselines"][best_base]["mae"],
+                    "优于该基线" if out["models"][best_model]["mae"] < out["baselines"][best_base]["mae"]
+                    else "不如该基线（拟合度不等于向前能力）")),
+    }
+    return out
+
+
 def _orchestrate(records, range_, tol, mlr_trainer, pls_trainer):
     """训练编排：数据构造 → 拟合 mlr/pls → q2Time 选生产 → 历史 → 回填 predicted_ash。
 
@@ -597,27 +654,28 @@ def _orchestrate(records, range_, tol, mlr_trainer, pls_trainer):
     for r in records:
         r["predicted_ash"] = _js_round(predict_coarse_ash(r, prod_model), 4)
 
-    # DS 专用：方向判断（前向可用信号）。水平值预测在锁死检验集上打不过"取均值"基线，
-    # 但"下一读数相对本次的涨跌"在三个切分点上稳定命中 0.727~0.771（多数基线 0.51~0.52）。
-    # 纪律：开发月=**本次实际用于训练的那些月**（d["rows"] 的月份），检验月=数据里**不在开发月内**
-    # 的最后两个月 —— 绝不把已用于开发的样本当独立检验集。不足时模块自己返回 unusable。
+    # ---------------- DS 专用：真向前验收（复用已拟合模型，几乎零成本） ----------------
+    # 用户要求（2026-09-24）：「不能仅追求拟合度，还要保证向前预测的能力」。所以训练结果里
+    # 同时给出**训练范围之后**那一段的向前 MAE 与朴素基线对照，以及"下一读数方向"的命中率。
+    # 关键：这里的 test 是"最后一个训练样本之后"的数据 —— 训练时**没有**用到它们。
+    _forward = _forward_summary(d["rows"], records, mlr, pls)
+    _split = _forward.get("testFrom") or None
     try:
-        _months = sorted({str(r.get("timestamp") or "")[:7] for r in records if str(r.get("timestamp") or "")[:7]})
-        _dev = sorted({str(r.get("timestamp") or "")[:7] for r in d["rows"]})
-        _test = [m for m in _months if m not in _dev][-2:]
-        _direction = direction_report(records, _dev, _test) if _test else {
-            "usable": False, "hit": None, "baseline": None, "ci": None, "n": 0,
-            "note": "没有可用于独立检验的月份（训练范围已覆盖全部数据）",
-            "gating": "特征仅用 t 时刻已知量；不含到下次读数的时间间隔"}
-        _direction["devMonths"], _direction["testMonths"] = _dev, _test
+        if _split:
+            _direction = direction_report(records, split_ts=_split)
+        else:
+            _direction = {"usable": False, "hit": None, "baseline": None, "inertia": None,
+                          "ci": None, "n": 0, "note": _forward.get("note") or "没有可用于独立检验的向前窗口",
+                          "gating": "特征仅用 t 时刻已知量；不含到下次读数的时间间隔"}
+        _direction["devUntil"], _direction["testFrom"] = _forward.get("trainEnd"), _split
     except Exception as exc:                                     # 方向判断失败不影响主训练
-        _direction = {"usable": False, "hit": None, "baseline": None, "ci": None, "n": 0,
-                      "note": "方向判断计算失败：%s" % exc,
+        _direction = {"usable": False, "hit": None, "baseline": None, "inertia": None,
+                      "ci": None, "n": 0, "note": "方向判断计算失败：%s" % exc,
                       "gating": "特征仅用 t 时刻已知量；不含到下次读数的时间间隔"}
 
     return {"mlr": mlr, "pls": pls, "production": production,
             "n": len(d["rows"]), "tolerance": tol, "range": range_, "history": history,
-            "direction": _direction}
+            "direction": _direction, "forward": _forward}
 
 
 def train_coarse_model(records, range_="jun_jul", tol=0.8):
