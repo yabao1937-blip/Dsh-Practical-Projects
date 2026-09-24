@@ -54,6 +54,7 @@ jobs:
           node scripts/verify_api_errors.js
           node scripts/verify_total_ash_workflow.js
           node scripts/verify_coarse_models.js
+          node scripts/gpt/verify_retrain.js models/gpt/retrain-20260923
 
       - name: 静态检查（不阻塞：先只做信号，等基线干净后再转为强制）
         continue-on-error: true
