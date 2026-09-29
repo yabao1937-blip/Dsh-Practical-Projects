@@ -1,8 +1,7 @@
 @echo off
-chcp 65001 >nul
-title 重介密控系统 - 停止
+title �ؽ��ܿ�ϵͳ - ֹͣ
 echo ============================================
-echo   重介密控系统 停止中...
+echo   �ؽ��ܿ�ϵͳ ֹͣ��...
 echo ============================================
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0backend\scripts\stop_server.ps1"
 echo.
