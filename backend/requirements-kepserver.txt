@@ -1,0 +1,2 @@
+# Optional collector dependency; install requirements.lock.txt first.
+asyncua==2.0.1

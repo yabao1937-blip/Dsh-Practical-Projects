@@ -4,6 +4,10 @@
 
 已从「纯前端（localStorage）」重构为**前后端分离**：后端 FastAPI + SQLAlchemy，前端原生 JS（无构建），双轨过渡。
 
+2026-10-05 完成第一轮工程化改造：增加独立的 OPC UA 只读采集进程、三张采集表、数据质量与时效判断、磁盘批次缓存、采集查询 API 和真实运行状态界面。采集数据目前用于监测展示，尚未接入密度建议取值链。现场 KEPServer 还没有连接。
+
+接手项目先读 [前后端架构与模块职责](docs/系统架构与模块职责-20261005.md)，现场接入按 [KEPServer 接入与运行维护](docs/KEPServer接入与运行维护-20261005.md) 操作。DS 原版及其对拍基线保持不变。
+
 ## 目录结构
 
 ```
@@ -12,7 +16,9 @@ dense-medium-density-control-system/
 │   ├── requirements.txt        # fastapi/uvicorn/SQLAlchemy/alembic/pydantic/numpy/scikit-learn/openpyxl
 │   ├── run.py                  # 启动入口（uvicorn :8000）
 │   ├── alembic.ini             # Alembic 迁移配置
-│   ├── migrations/             # 迁移（0001 init + 0002 训练列）
+│   ├── migrations/             # 0001 初始、0002 训练列、0003 采集表
+│   ├── collector.py            # 独立 OPC UA 只读采集入口
+│   ├── config/                 # 脱敏示例配置；本地配置/证书不入 Git
 │   ├── data/                   # seed_store.json + dense_medium.db(SQLite)
 │   ├── scripts/                # golden dump(4) + 前端回归 verify(5) + Excel 生成器(generate_*.py)
 │   ├── tests/                  # pytest（用例数量以收集为准）
@@ -20,7 +26,9 @@ dense-medium-density-control-system/
 │       ├── main.py             # FastAPI 应用（建表 + 路由 + 前端静态托管）
 │       ├── config.py           # DATABASE_URL、FRONTEND_DIR（相对定位）
 │       ├── database.py         # SQLAlchemy 引擎/会话
-│       ├── models.py           # 11 张表 ORM
+│       ├── models.py           # 原有 11 张业务表 ORM
+│       ├── telemetry/          # 协议适配、质量规则、缓存、存储、采集循环
+│       ├── observability.py    # 请求编号、耗时日志、安全错误响应
 │       ├── schemas.py          # Pydantic 请求/响应模型
 │       ├── routers/            # health/state/settings/inputs/records/samples/
 │       │                       # manual_entries/overview/migration/import_api/training
@@ -32,6 +40,7 @@ dense-medium-density-control-system/
 │   └── js/
 │       ├── app.js              # 全局核心：store/saveStore/取值链/密度建议/MLR+PLS 训练
 │       ├── api.js              # 数据层（GET/PUT /state、远程训练）
+│       ├── operations.js       # 后端、采集、同步状态与实时点位展示
 │       ├── seed_data.js        # 种子数据（113 条粗精煤泥 + 出厂模型）
 │       ├── coarse.js           # 粗精煤泥灰分页（重训练/散点图）
 │       ├── overview.js         # 总览仪表盘
@@ -49,11 +58,13 @@ dense-medium-density-control-system/
 ```powershell
 cd backend
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
 .\.venv\Scripts\python.exe run.py     # 或 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 后端同时**托管前端**（`FRONTEND_DIR` 指向仓库根的 `frontend/`），访问 **http://127.0.0.1:8000/** 即打开系统；接口文档 http://127.0.0.1:8000/docs 。
+
+以上是现有库兼容启动方式。新建数据库先执行 `python -m alembic upgrade head`；已有库先检查迁移状态并备份，详见接入维护文档。采集进程需另外安装 `requirements-kepserver.lock.txt`，不会随网页服务自动启动。
 
 ### 测试
 
@@ -61,7 +72,7 @@ python -m venv .venv
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q          # 临时库隔离，不触真实数据
 node scripts\verify_api_errors.js                # 无网络：同步失败分类回归
-node scripts\dump_train_js.js                     # 重生成训练 oracle（需 Edge）
+node scripts\verify_operations.js                 # 无网络：同步竞争、断线、状态显示回归
 node scripts\import_xlsx_via_ui.js [目录]         # 通过真实 UI 路径批量导入三表 xlsx（需后端+Edge）
 node scripts\verify_pull_from_server.js           # 双向同步/防回退端到端验证
 ```
@@ -81,7 +92,7 @@ node scripts\verify_pull_from_server.js           # 双向同步/防回退端到
 - `PUT /state` 带防回退守卫：入库记录数少于现库 → 拒绝（旧 localStorage 镜像不能洗掉服务器侧导入/训练的新数据），`?force=true` 供清空/恢复备份等有意回退；
 - 启动期默认值补齐/种子灌入仅写本地，不镜像。
 
-## 数据模型（11 张表）
+## 数据模型（11 张业务表和 3 张采集表）
 
 统一主表 **`coal_records`**（`category` 区分 `coarse|float|ash_density` 三表，`UNIQUE(category, ts, system)` 防重复导入）；时间戳 `ts` 存字符串 `YYYY-MM-DD HH:MM:SS`（字符串序==时间序，规避时区）。
 
@@ -94,6 +105,11 @@ node scripts\verify_pull_from_server.js           # 双向同步/防回退端到
 | coarse_model_history | 重训练历史（detail JSON 全量快照） |
 | regression_models | 单因素密度模型（linear/poly2/poly3） |
 | settings / auto_state | 键值配置（8 单值）/ 录入层对象键（10 个） |
+| telemetry_sources | 采集进程状态、心跳与来源租约 |
+| telemetry_points | 点位定义、启用标记、最新读数 |
+| telemetry_readings | 按间隔及质量变化保存的历史批次 |
+
+采集表由采集进程维护，`PUT /state` 不会清空或覆盖它们。DS 基线 `backend/data/train_js.json` 不随工程化改造重新生成。
 
 详见 `docs/前后端分离-差异清单.xlsx`。
 
@@ -117,7 +133,10 @@ node scripts\verify_pull_from_server.js           # 双向同步/防回退端到
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | /health | 健康检查 |
+| GET | /health · /health/ready | 数据库连接与必要表的就绪检查；异常返回 503 |
+| GET | /health/live | 进程存活检查 |
+| GET | /telemetry/latest | 来源状态、最新点位、质量与可用性 |
+| GET | /telemetry/history | 指定来源/点位历史，游标分页，上限 500 条 |
 | GET/PUT | /state | 读/写整库快照（DB↔store） |
 | GET/PUT | /settings | 配置读写 |
 | GET/PUT | /inputs | 录入层 |

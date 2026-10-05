@@ -32,3 +32,11 @@ backend/data/backups/
 
 # AI助手LLM密钥(本地,勿入库)
 backend/.llm_keys.json
+
+# Local KEPServer configuration, credentials and durable collector batches
+backend/config/kepserver.local.json
+backend/config/certs/
+backend/data/telemetry-spool/
+# Local browser verification artifacts
+.playwright-cli/
+output/playwright/

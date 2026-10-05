@@ -5,10 +5,12 @@ from fastapi.staticfiles import StaticFiles
 
 from . import auth
 from . import models  # noqa: F401  确保建表前模型已注册
-from .config import FRONTEND_DIR
+from .telemetry import models as telemetry_models  # noqa: F401
+from .config import APP_VERSION, FRONTEND_DIR
 from .database import Base, engine
+from .observability import install_observability
 from .routers import (assistant, health, import_api, inputs, manual_entries, migration, overview,
-                      records, samples, settings, state, training)
+                      records, samples, settings, state, telemetry, training)
 
 Base.metadata.create_all(bind=engine)
 from .schema_upgrade import upgrade_schema
@@ -17,8 +19,9 @@ upgrade_schema(engine)
 app = FastAPI(
     title="重介密控系统",
     description="前后端分离后端：密度推荐 + 精煤灰分监控（coal_records 统一主表）",
-    version="0.2.0",
+    version=APP_VERSION,
 )
+install_observability(app)
 
 # 2026-09 删除 CORSMiddleware(allow_origins=["*"])：
 # 前端由本服务**同源**托管（见文件末尾 mount "/"），api.js 的 base 是相对路径 '/api/v1'，
@@ -42,6 +45,7 @@ app.include_router(overview.router, prefix="/api/v1")
 app.include_router(state.router, prefix="/api/v1")
 app.include_router(import_api.router, prefix="/api/v1")
 app.include_router(training.router, prefix="/api/v1")
+app.include_router(telemetry.router, prefix="/api/v1")
 
 # 首页显式注册：**必须放在 mount("/") 之前**才能生效。
 # 作用：把写接口用的 token 作为 <meta> 注入页面，浏览器端零配置即可带上

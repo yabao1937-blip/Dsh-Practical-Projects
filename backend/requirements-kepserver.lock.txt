@@ -1,0 +1,14 @@
+# Validated collector dependencies on CPython 3.11.9, 2026-10-05.
+# Install on top of requirements.lock.txt; core package versions remain unchanged.
+-r requirements.lock.txt
+asyncua==2.0.1
+aiosqlite==0.22.1
+cffi==2.1.1
+cryptography==50.0.2
+pycparser==3.0
+pyopenssl==26.4.0
+python-dateutil==2.9.0.post0
+pytz==2026.5
+six==1.17.0
+sortedcontainers==2.4.0
+wait-for2==0.4.1

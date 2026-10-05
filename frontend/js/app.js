@@ -202,7 +202,8 @@ const App = {
     // 用服务器 state 覆盖本地数据集合(纯本地键保留),供手动/自动两条路径复用
     // __merged / __fixes 必须保留：它们是「本地已执行过的一次性动作」标记，
     // 被服务器数据清掉会导致种子重灌或历史清理重复执行。
-    _applyServerState(st) {
+    _applyServerState(st, pendingStamp) {
+        if (this._mirrorInFlight) return false;
         const localOnly = ['manualEntries', 'importLogs', 'alerts', 'regressionModels',
                            'coarseModelHistory', 'rawSlime', '__merged', '__fixes'];
         const keep = {};
@@ -213,12 +214,18 @@ const App = {
         this.store.heavySamples = (st.heavySamples || []).concat(pendingSamples.filter(s => !s.client_id || !ids.has(s.client_id)));
         this._mirrorConflict = false;
         this._mirrorPending = null;
+        this._serverStateConfirmed = true;
         // 刚从服务器拉了权威数据 → 之前没送达的旧快照已过时（它的内容已被本次覆盖吸收），
         // 留着只会在下次启动被推回去、把刚同步下来的服务器数据洗回旧状态。
-        this._clearPendingSlot(null);
+        if (pendingStamp) this._clearPendingSlot(pendingStamp);
+        this.mirrorStatus.pending = !!this._readPendingSlot();
+        this.mirrorStatus.lastError = null;
+        this.mirrorStatus.failures = 0;
+        this.mirrorStatus.lastOkAt = Date.now();
         this.saveStore(true);
         this._onExternalInput();
         this.refreshAllPages();
+        return true;
     },
 
     // 「测量记录向量」：与后端防回退守卫的判据同口径（migrate._record_vector）。
@@ -241,9 +248,13 @@ const App = {
     // 任一类本地更多 → 不动本地（本地为最新）。
     async autoPullIfStale() {
         if (!window.location.protocol.startsWith('http') || !window.Api) return;
+        if (this._mirrorInFlight) return;
         try {
+            const before = JSON.stringify(this.store);
             const st = await window.Api.getState();
             if (!st || !Array.isArray(st.coarseCoal)) return;
+            if (this._mirrorInFlight || JSON.stringify(this.store) !== before) return;
+            this._serverStateConfirmed = true;
             if (st._revision) {
                 if (this._hadLocalStore && !this.store._revision) {
                     this._mirrorConflict = true;
@@ -274,7 +285,7 @@ const App = {
                 // 两侧各有更全的部分：不自动覆盖，避免把本地较新的那类记录洗掉
                 console.warn('服务器与本地各有更新的部分，已跳过自动同步', { server: sv, local: lv });
             }
-        } catch (e) { /* 后端未启动时静默 */ }
+        } catch (e) { this._serverStateConfirmed = false; }
     },
 
     // 从服务器整库恢复（仅 http:// 后端托管模式,手动入口）：
@@ -285,11 +296,22 @@ const App = {
             this.showToast('仅在后端托管(http://)模式下可用', 'warning');
             return;
         }
+        if (this._mirrorInFlight) {
+            this.showToast('正在同步本地数据，请等待同步结束后再从服务器恢复', 'warning');
+            return;
+        }
         if (!window.confirm('将用服务器数据覆盖本地浏览器数据（本地未同步到服务器的改动会丢失），是否继续？')) return;
         try {
+            const before = JSON.stringify(this.store);
+            const pendingBefore = this._readPendingSlot();
             const st = await window.Api.getState();
             if (!st || !Array.isArray(st.coarseCoal)) throw new Error('服务器 state 结构异常');
-            this._applyServerState(st);
+            const pendingNow = this._readPendingSlot();
+            if (this._mirrorInFlight || JSON.stringify(this.store) !== before || (pendingBefore && pendingBefore.stamp) !== (pendingNow && pendingNow.stamp)) {
+                this.showToast('下载期间本地或其他标签页有新修改，已保留数据并取消覆盖。请核对后重试', 'warning');
+                return;
+            }
+            this._applyServerState(st, pendingBefore && pendingBefore.stamp);
             this.showToast(`已从服务器恢复：粗精煤泥 ${this.store.coarseCoal.length} 条 / 浮精 ${this.store.floatCoal.length} 条 / 灰分密度 ${(this.store.calcLogs || []).length} 条`, 'success');
         } catch (e) {
             console.warn('pullFromServer 失败:', e);
@@ -510,9 +532,8 @@ const App = {
         // 写在这里的语义是"本地已保存、服务器尚未确认"，成功或被守卫拒绝后再清掉。
         const wall = Date.now();
         const stamp = wall + '-' + Math.random().toString(36).slice(2, 8);
-        const hadSlot = !!slot;
-        const wrote = this._writePendingSlot(body, wall, stamp);
-        if (wrote || hadSlot) this.mirrorStatus.pending = true;
+        this._writePendingSlot(body, wall, stamp);
+        this.mirrorStatus.pending = true;  // 内存/在途快照也是未确认数据，不能仅看持久槽。
         this._mirrorInFlight = true;
         let res;
         try {
@@ -523,6 +544,7 @@ const App = {
         this._mirrorRequest = Promise.resolve(res).then(r => {
             this._mirrorInFlight = false;
             if (r && r.ok) {
+                this._serverStateConfirmed = true;
                 const oldRevision = JSON.parse(body)._revision;
                 const advance = raw => {
                     if (!raw || !r.revision) return raw;
@@ -536,7 +558,7 @@ const App = {
                 this._clearPendingSlot(stamp);          // 只清自己写的那一份
                 if (this._mirrorPending) this._writePendingSlot(this._mirrorPending, Date.now(), Date.now() + '-queued');
                 this.saveStore(true);
-                this.mirrorStatus.pending = !!this._readPendingSlot();
+                this.mirrorStatus.pending = !!(this._mirrorPending || this._readPendingSlot());
                 this.mirrorStatus.lastOkAt = Date.now();
                 this.mirrorStatus.lastError = null;
                 if (this.mirrorStatus.failures) {
@@ -556,6 +578,8 @@ const App = {
             //    超时）：待发副本已在发送前写好，留着重试。
             this.mirrorStatus.lastError = (r && (r.reason || r.error)) || 'unknown';
             this.mirrorStatus.failures++;
+            // 配额不足时持久槽可能根本没写入。留住发送失败的内容，且不覆盖更新的排队内容。
+            if (!this._mirrorPending) this._mirrorPending = body;
             if (r && (r.conflict || r.rejected)) {
                 this._mirrorConflict = true;
                 this.mirrorStatus.pending = true;
@@ -579,7 +603,12 @@ const App = {
             if (this.mirrorStatus.failures === 1) {
                 this.showToast('本地数据未能同步到服务器，将在网络恢复或切回页面时自动重试', 'warning');
             }
-        }).catch(() => { this._mirrorInFlight = false; });
+        }).catch(() => {
+            this._mirrorInFlight = false;
+            if (!this._mirrorPending) this._mirrorPending = body;
+            this.mirrorStatus.pending = true;
+            this.mirrorStatus.lastError = '同步响应处理失败';
+        });
         return this._mirrorRequest;
     },
 
@@ -587,7 +616,7 @@ const App = {
         this.saveStore();
         await this._flushMirror(false);
         while (this._mirrorInFlight) await this._mirrorRequest;
-        return {ok: !this._mirrorConflict && !this._readPendingSlot(), revision: this.store._revision};
+        return {ok: !this._mirrorConflict && !this._mirrorInFlight && !this._mirrorPending && !this._readPendingSlot(), revision: this.store._revision};
     },
 
     // 失败后的重试入口（断网恢复 / 切回前台 / 下次保存时都会调用）。

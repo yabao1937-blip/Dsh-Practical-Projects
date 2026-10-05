@@ -1,8 +1,7 @@
 name: CI
 
 # 目的：把回归防线放进流水线。
-# 现状是 76 个 pytest + 8 个 headless 回归脚本全靠手跑（依赖个人自觉），
-# 本工作流只跑能在此环境里稳定运行的 pytest（见下方说明），先让"每次 push 都有一道自动防线"。
+# 全量 pytest 包含采集、迁移和前端同步回归；浏览器 E2E 单独运行。
 #
 # 说明：需要 Edge 的浏览器回归脚本（scripts/verify_*.js、dump_*.js）现在**部分进 CI** 了：
 # e2e 作业跑在 windows-latest（GitHub 的 Windows 镜像自带 Edge，路径与开发机一致），
@@ -10,7 +9,7 @@ name: CI
 # 同步静默死掉）本可以被 verify_mirror_e2e.js 的用例0 当场抓住，但当时脚本只在个人机器上
 # 手跑，于是长期无人执行、慢慢腐烂。跑不动的部分（依赖真实生产库数据的 dump_* 对拍）
 # 仍留在本地按需执行。
-# 依赖用 requirements.lock.txt（冻结自"76 测试全绿"的环境），避免上游发新版把 CI 打挂。
+# 核心与可选采集依赖均锁定，避免协议验证因缺依赖而被跳过。
 
 on:
   push:
@@ -41,7 +40,7 @@ jobs:
       - name: 安装 Python 依赖
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.lock.txt
+          pip install -r requirements-kepserver.lock.txt
 
       - name: 依赖自检（版本冲突会在这里暴露）
         run: pip check
@@ -54,6 +53,7 @@ jobs:
           node scripts/verify_api_errors.js
           node scripts/verify_total_ash_workflow.js
           node scripts/verify_coarse_models.js
+          node scripts/verify_operations.js
 
       - name: 静态检查（不阻塞：先只做信号，等基线干净后再转为强制）
         continue-on-error: true
@@ -134,6 +134,13 @@ jobs:
       - name: 起后端 → 跑七个 E2E 脚本 → 停后端（完整输出，不截断）
         shell: pwsh
         run: |
+          if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) {
+            throw "8000 已占用，拒绝连接已有服务执行写入测试"
+          }
+          $testDb = Join-Path $env:TEMP ("dmcs-ci-" + [Guid]::NewGuid().ToString('N') + ".db")
+          $env:DMCS_DATABASE_URL = "sqlite:///" + $testDb.Replace('\', '/')
+          $env:DMCS_WRITE_AUTH = 'off'
+          $env:PYTHONUTF8 = '1'
           $srvOut = "$env:TEMP\ci-server.log"
           $srvErr = "$env:TEMP\ci-server.err.log"
           $server = Start-Process -FilePath "python" `
@@ -206,21 +213,4 @@ jobs:
           Write-Host "---- server.log ----"; Get-Content "$env:TEMP\ci-server.log" -ErrorAction SilentlyContinue
           Write-Host "---- server.err.log ----"; Get-Content "$env:TEMP\ci-server.err.log" -ErrorAction SilentlyContinue
 
-      # 兜底收尾：自托管 runner 上若还有残留的 8000 监听进程，会让下一次运行以
-      # "端口被占"的假红开始。（正常路径已在上一个 step 的 finally 里停掉；
-      # 而且 GitHub 运行器本身在 step 结束时会回收进程树，这里只是双保险。）
-      - name: 收尾：确保没有残留的后端占着 8000（无论成败）
-        if: always()
-        shell: pwsh
-        run: |
-          $conns = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
-          if (-not $conns) { Write-Host "8000 无监听进程"; exit 0 }
-          foreach ($c in $conns) {
-            $proc = Get-Process -Id $c.OwningProcess -ErrorAction SilentlyContinue
-            if ($proc -and $proc.ProcessName -like "python*") {
-              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-              Write-Host "已停止残留后端 PID $($proc.Id)"
-            } else {
-              Write-Host "8000 被非 python 进程占用: $($proc.ProcessName) (PID $($c.OwningProcess))，未处理"
-            }
-          }
+      # 仅通过上一步 finally 清理本作业创建的进程；不按端口杀其它 Python 服务。

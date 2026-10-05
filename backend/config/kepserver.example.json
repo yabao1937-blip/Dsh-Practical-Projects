@@ -1,0 +1,34 @@
+{
+  "enabled": false,
+  "source_id": "kepserver-main",
+  "name": "KEPServer 现场数据",
+  "endpoint": "opc.tcp://127.0.0.1:49320",
+  "poll_seconds": 5,
+  "timeout_seconds": 10,
+  "retry_min_seconds": 1,
+  "retry_max_seconds": 30,
+  "history_interval_seconds": 60,
+  "retention_days": 7,
+  "security": "Basic256Sha256",
+  "allow_insecure": false,
+  "application_uri": "urn:dmcs:collector",
+  "client_certificate": "certs/client.der",
+  "client_key": "certs/client-key.pem",
+  "server_certificate": "certs/kepserver.der",
+  "username_env": null,
+  "password_env": null,
+  "points": [
+    {
+      "key": "density",
+      "name": "在线密度（示例点位，需现场核对）",
+      "node_id": "ns=2;s=Channel.Device.Density",
+      "unit": "g/cm³",
+      "value_type": "number",
+      "scale": 1,
+      "offset": 0,
+      "minimum": 1.3,
+      "maximum": 1.65,
+      "max_age_seconds": 30
+    }
+  ]
+}

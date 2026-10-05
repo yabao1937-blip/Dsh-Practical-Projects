@@ -32,4 +32,5 @@ async def put_state(request: Request, store: dict,
     if force:
         await require_force_allowed(request)
     result = migrate.replace(store, force, require_revision=True)
-    return JSONResponse(result, status_code=409 if result.get('conflict') else 200)
+    status_code = 503 if result.get('backup_failed') else 409 if result.get('conflict') else 200
+    return JSONResponse(result, status_code=status_code)

@@ -27,7 +27,8 @@ function Say([string]$msg) {
 
 function Test-Up {
     try {
-        return (Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/v1/health" -UseBasicParsing -TimeoutSec 4).StatusCode -eq 200
+        # Liveness only: a database outage is reported by /health/ready and is not fixed by a restart loop.
+        return (Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/v1/health/live" -UseBasicParsing -TimeoutSec 4).StatusCode -eq 200
     } catch { return $false }
 }
 

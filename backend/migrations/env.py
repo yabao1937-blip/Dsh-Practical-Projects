@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import DATABASE_URL  # noqa: E402
 from app.database import Base  # noqa: E402
 from app import models  # noqa: E402,F401  注册全部模型供 autogenerate
+from app.telemetry import models as telemetry_models  # noqa: E402,F401
 
 target_metadata = Base.metadata
 config.set_main_option("sqlalchemy.url", DATABASE_URL)

@@ -80,7 +80,8 @@ const CollectPage = {
     refreshAll() {
         this.renderTable();
         this.loadHistory();
-        App.showToast('数据已刷新', 'success');
+        if (window.Operations) window.Operations.refresh();
+        App.showToast('已刷新业务输入，正在检查采集连接', 'info');
     },
 
     simulateUpdate() {

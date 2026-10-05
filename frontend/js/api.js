@@ -11,6 +11,19 @@
 window.Api = {
     base: '/api/v1',
 
+    async getHealth() {
+        const response = await fetch(this.base + '/health', {signal: AbortSignal.timeout(5000), cache: 'no-store'});
+        return {ok: response.ok, ...(await response.json())};
+    },
+
+    async getTelemetry() {
+        const response = await fetch(this.base + '/telemetry/latest', {signal: AbortSignal.timeout(5000), cache: 'no-store'});
+        if (!response.ok) throw new Error('telemetry ' + response.status);
+        const value = await response.json();
+        if (!value || !Array.isArray(value.sources) || !Array.isArray(value.items)) throw new Error('采集状态响应格式异常');
+        return value;
+    },
+
     async getState() {
         const r = await fetch(this.base + '/state', {signal: AbortSignal.timeout(20000)});
         if (!r.ok) throw new Error('state ' + r.status);

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # 依赖锁文件（2026-09 生成）
 #
 # 来源：在"76 个 pytest 全绿"的 Windows/CPython 3.11.9 虚拟环境上 pip freeze 得到，

@@ -164,7 +164,7 @@ a:hover { color: var(--accent-blue); }
 }
 
 /* 再窄一档：隐藏装饰性图标（保留文字），让 1280 这类现场屏幕也能一屏放下 7 个入口 */
-@media (max-width: 1364px) {
+@media (max-width: 1440px) {
     .nav-item {
         padding: 8px 9px;
         font-size: 12.5px;
@@ -204,6 +204,16 @@ a:hover { color: var(--accent-blue); }
     background: var(--accent-green);
     box-shadow: 0 0 6px var(--accent-green);
 }
+
+.status-dot.offline { background: var(--accent-red); }
+.ops-summary { display: flex; flex-wrap: wrap; gap: 12px 26px; padding-bottom: 12px; }
+.ops-summary strong { font-weight: 500; }
+.ops-tag { margin-left: 10px; font-size: 12px; color: var(--accent-blue); }
+.ops-help { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.ops-empty { text-align: center; color: var(--text-muted); padding: 24px !important; }
+.data-table tbody td.ops-good { color: var(--accent-green); }
+.data-table tbody td.ops-warning { color: var(--accent-orange); }
+.data-table tbody td.ops-unavailable { color: var(--text-muted); }
 
 .alert-badge {
     position: relative;

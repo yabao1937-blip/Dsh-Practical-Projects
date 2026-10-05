@@ -1,0 +1,107 @@
+// 纯内存回归：存储配额 + 断网、在途新修改、真实状态展示；没有网络或文件写入。
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const {App, ctx, elements} = require('./app_vm')();
+ctx.window.location.protocol = 'http:';
+App._syncReady = true;
+App.store._revision = 'base';
+ctx.localStorage = {getItem(){return null;}, setItem(){throw Error('quota');}, removeItem(){}};
+
+(async () => {
+    let calls = 0;
+    ctx.window.Api = {putStateBody: async () => {calls++; return {ok:false, error:'offline'};}};
+    const body = JSON.stringify(App.store);
+    App._scheduleMirror(body);
+    await App._flushMirror(false);
+    assert.equal(App._mirrorPending, body, '配额+断网仍须保留内存待发快照');
+    assert.equal((await App.flushMirrorNow()).ok, false, '没有持久槽不代表同步成功');
+    ctx.window.Api.putStateBody = async () => ({ok:true, revision:'next'});
+    await App._flushMirror(false);
+    assert.equal(App._mirrorPending, null);
+    assert.equal(App.store._revision, 'next');
+    assert.equal((await App.flushMirrorNow()).ok, true);
+
+    let release;
+    ctx.window.Api.putStateBody = () => new Promise(resolve => {release = resolve;});
+    App.store.ashTarget = 8.6;
+    App._scheduleMirror(JSON.stringify(App.store));
+    const first = App._flushMirror(false);
+    App.store.ashTarget = 8.7;
+    const newer = JSON.stringify(App.store);
+    App._scheduleMirror(newer);
+    release({ok:false, error:'offline'});
+    await first;
+    assert.equal(App._mirrorPending, newer, '失败旧快照不得覆盖在途新增修改');
+
+    ctx.window.confirm = () => true;
+    let getCalls = 0;
+    ctx.window.Api.getState = async () => {getCalls++; return {coarseCoal:[],ashTarget:8.5,_revision:'old'};};
+    const uploading = App._flushMirror(false);
+    await App.pullFromServer();
+    assert.equal(getCalls, 0, '在途上传时不能开始整库恢复');
+    assert.equal(App.store.ashTarget, 8.7);
+    assert.equal(App._applyServerState({ashTarget:8.5}), false, '内部恢复函数也必须拒绝在途上传');
+    release({ok:true, revision:'uploaded'});
+    await uploading;
+
+    let finishDownload;
+    ctx.window.Api.getState = () => new Promise(resolve => {finishDownload = resolve;});
+    App.store.ashTarget = 8.9;
+    App._scheduleMirror(JSON.stringify(App.store));
+    const downloading = App.pullFromServer();
+    const concurrentUpload = App._flushMirror(false);
+    finishDownload({coarseCoal:[],ashTarget:8.5,_revision:'old'});
+    await downloading;
+    assert.equal(App.store.ashTarget, 8.9, 'GET期间开始上传也不能覆盖本地');
+    release({ok:true, revision:'uploaded-again'});
+    await concurrentUpload;
+
+    ctx.window.Api.putStateBody = async () => ({ok:false, error:'offline'});
+    App.store.ashTarget = 9.0;
+    App._scheduleMirror(JSON.stringify(App.store));
+    await App._flushMirror(false);
+
+    vm.runInContext(fs.readFileSync(path.resolve(__dirname, '../../frontend/js/operations.js'), 'utf8'), ctx);
+    const ops = ctx.window.Operations;
+    for (const id of ['server-status-dot', 'server-status-label', 'ops-collector', 'ops-points', 'ops-message', 'telemetry-tbody', 'status-sync']) elements[id] = {};
+    ops.serverState = 'online';
+    ops.telemetry = {sources:[{name:'KEP',state:'connected'}],items:[{name:'<img onerror=bad>',key:'density',source_id:'kep',unit:'g/cm³',available:true,status:'good',sample:{value:0,quality:'good'}}]};
+    ops.render();
+    assert.match(elements['telemetry-tbody'].innerHTML, /&lt;img/);
+    assert.match(elements['telemetry-tbody'].innerHTML, />0<\/td>/);
+    assert.match(elements['server-status-dot'].className, /online/);
+    ops.telemetryFailed = true;
+    ops.serverState = 'offline';
+    ops.render();
+    assert.match(elements['server-status-dot'].className, /offline/);
+    assert.match(elements['telemetry-tbody'].innerHTML, /查询中断/);
+    assert.equal(elements['ops-points'].textContent, '0 / 1');
+    assert.match(elements['status-sync'].textContent, /失败/);
+    App._onExternalInput = App.refreshAllPages = () => {};
+    App._applyServerState({_revision:'restored',coarseCoal:[],heavySamples:[]});
+    ops.renderSync();
+    assert.equal(elements['status-sync'].textContent, '已同步', '服务器恢复成功后必须清掉旧的失败状态');
+
+    ctx.document.visibilityState = 'hidden';
+    let finishHealth, finishTelemetry, healthCalls = 0, telemetryCalls = 0;
+    ctx.window.Api.getHealth = () => {healthCalls++; return new Promise(resolve => {finishHealth = resolve;});};
+    ctx.window.Api.getTelemetry = () => {telemetryCalls++; return new Promise(resolve => {finishTelemetry = resolve;});};
+    const checking = ops.refresh();
+    assert.equal(ops.refresh(), checking, '重复刷新必须共用在途请求');
+    finishHealth({ok:false,status:'unavailable'}); finishTelemetry({sources:[],items:[]});
+    await checking;
+    assert.equal(ops.serverState, 'unavailable');
+    assert.equal(healthCalls, 1); assert.equal(telemetryCalls, 1);
+    assert.equal(ops._timer, null, '隐藏页面不能继续轮询');
+    ctx.window.Api.getHealth = async () => ({ok:true,status:'ok'});
+    ctx.window.Api.getTelemetry = async () => {throw Error('offline');};
+    await ops.refresh();
+    assert.equal(ops.telemetryFailed, true);
+    ctx.window.Api.getTelemetry = async () => ({sources:[],items:[]});
+    await ops.refresh();
+    assert.equal(ops.telemetryFailed, false); assert.equal(ops.serverState, 'online');
+    if (App._mirrorTimer) clearTimeout(App._mirrorTimer);
+    console.log('PASS: quota/offline recovery, concurrent edits, telemetry status and escaping');
+})().catch(error => {console.error(error); process.exitCode = 1;});

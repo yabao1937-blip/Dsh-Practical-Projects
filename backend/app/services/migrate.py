@@ -386,8 +386,8 @@ def backup_database(tag: str = "force") -> str | None:
         for f in olds[:-BACKUP_KEEP]:
             f.unlink(missing_ok=True)
         return str(dest)
-    except Exception as e:               # 备份失败不阻断写入，但要在返回值里说清楚
-        print(f"[migrate] 备份失败（不阻断 force 写入）: {e}")
+    except Exception as e:
+        print(f"[migrate] 备份失败，取消 force 写入: {type(e).__name__}")
         return None
 
 
@@ -416,6 +416,9 @@ def replace(store: dict, force: bool = False, require_revision: bool = False) ->
     """
     p = _plan(store)
     backup_path = backup_database("force") if force else None
+    if force and not backup_path:
+        return {"ok": False, "backup_failed": True,
+                "error": "覆盖前备份失败，已取消操作；现有数据未改动"}
     db: Session = SessionLocal()
     try:
         from sqlalchemy import text

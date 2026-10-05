@@ -20,8 +20,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('coarse_models', sa.Column('train_run_id', sa.String(length=36), nullable=True))
-    op.create_unique_constraint('uq_coarse_model_method', 'coarse_models', ['method'])
+    # SQLite 不支持 ALTER TABLE ADD CONSTRAINT，使用 Alembic batch 保留原数据。
+    with op.batch_alter_table('coarse_models') as batch:
+        batch.add_column(sa.Column('train_run_id', sa.String(length=36), nullable=True))
+        batch.create_unique_constraint('uq_coarse_model_method', ['method'])
     op.add_column('coarse_model_history', sa.Column('train_run_id', sa.String(length=36), nullable=True))
     op.add_column('coarse_model_history', sa.Column('detail', sa.JSON(), nullable=True))
 
@@ -29,5 +31,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_column('coarse_model_history', 'detail')
     op.drop_column('coarse_model_history', 'train_run_id')
-    op.drop_constraint('uq_coarse_model_method', 'coarse_models', type_='unique')
-    op.drop_column('coarse_models', 'train_run_id')
+    with op.batch_alter_table('coarse_models') as batch:
+        batch.drop_constraint('uq_coarse_model_method', type_='unique')
+        batch.drop_column('train_run_id')
