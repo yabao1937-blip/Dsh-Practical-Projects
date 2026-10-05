@@ -1,0 +1,21 @@
+{
+  "passed": true,
+  "animatedPaths": 9,
+  "staticEdges": 18,
+  "nodes": 19,
+  "measuredTraceAdvance": 9.480000000000004,
+  "checks": [
+    "blank closes left / right / below details",
+    "detail and controls do not dismiss",
+    "pause / resume",
+    "direction trace moves",
+    "reference edges static",
+    "refresh preserves motion state",
+    "inactive page pauses",
+    "system reduced motion",
+    "print static"
+  ],
+  "storeUnchanged": true,
+  "pageErrors": [],
+  "mutatingRequests": []
+}

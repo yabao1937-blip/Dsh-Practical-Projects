@@ -4,6 +4,7 @@ const DecisionOverviewPage = {
     pointChoices: {}, nodes: [], timer: null,
     sourceInteractionUntil: 0,
     inspectorFrame: null,
+    motionEnabled: true, motionReduced: false,
     escape(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
     number(value, digits = 2, unit = '') { return Number.isFinite(value) ? value.toFixed(digits) + (unit ? ' ' + unit : '') : '—'; },
     time(value) {
@@ -67,6 +68,13 @@ const DecisionOverviewPage = {
             const light = document.getElementById('decision-workspace').classList.toggle('is-light');
             event.currentTarget.textContent = light ? '深色视图' : '浅色视图';
         });
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+        this.motionReduced = reducedMotion.matches;
+        reducedMotion.addEventListener('change', event => { this.motionReduced = event.matches; this.syncMotion(); });
+        document.getElementById('decision-motion').addEventListener('click', () => {
+            this.motionEnabled = !this.motionEnabled; this.syncMotion();
+        });
+        document.addEventListener('visibilitychange', () => this.syncMotion());
         document.querySelectorAll('[data-decision-model]').forEach(button => button.addEventListener('click', () => {
             this.view = button.dataset.decisionModel;
             document.querySelectorAll('[data-decision-model]').forEach(b => {
@@ -78,9 +86,10 @@ const DecisionOverviewPage = {
         document.getElementById('decision-fit').addEventListener('click', () => { this.zoom = null; this.fit(); });
         document.getElementById('decision-zoom-in').addEventListener('click', () => this.changeZoom(.15));
         document.getElementById('decision-zoom-out').addEventListener('click', () => this.changeZoom(-.15));
-        document.getElementById('decision-board').addEventListener('click', event => {
+        document.getElementById('decision-canvas-scroll').addEventListener('click', event => {
             const node = event.target.closest('[data-decision-node]');
-            if (node) this.select(node.dataset.decisionNode);
+            if (node) { this.select(node.dataset.decisionNode); return; }
+            if (!event.target.closest('.decision-formula,button,a,input,select,textarea,label,[contenteditable="true"]')) this.closeInspector(false);
         });
         document.getElementById('decision-inspector').addEventListener('change', event => {
             if (event.target.id === 'decision-source-point') {
@@ -97,7 +106,7 @@ const DecisionOverviewPage = {
         document.getElementById('decision-inspector').addEventListener('click', event => {
             if (event.target.closest('[data-decision-close]')) { this.closeInspector(); return; }
             const link = event.target.closest('[data-decision-page]');
-            if (link) { this.closeInspector(false); App.goToPage(link.dataset.decisionPage); }
+            if (link) { this.closeInspector(false); App.goToPage(link.dataset.decisionPage); this.syncMotion(); }
         });
         document.addEventListener('keydown', event => {
             if (event.key === 'Escape' && this.active()) this.closeInspector();
@@ -108,6 +117,7 @@ const DecisionOverviewPage = {
         document.querySelector('.main-nav').addEventListener('click', event => {
             const page = event.target.closest('[data-page]')?.dataset.page;
             if (page && page !== 'page-decision') this.closeInspector(false);
+            this.syncMotion();
         });
         window.addEventListener('resize', () => { if (this.active()) this.fit(); });
         // Reuse Operations' existing polling snapshot; never start a second API poll.
@@ -118,6 +128,7 @@ const DecisionOverviewPage = {
     },
     refresh() {
         if (!this.initialized) return;
+        this.syncMotion();
         if (!this.active()) { this.closeInspector(false); return; }
         const focused = document.activeElement?.dataset?.decisionNode;
         const sourceFocused = document.activeElement?.id === 'decision-source-point';
@@ -221,6 +232,15 @@ const DecisionOverviewPage = {
         this.queueInspectorPosition(true);
     },
     changeZoom(delta) { this.zoom = Math.max(.65, Math.min(1.5, (this.actualZoom || 1) + delta)); this.fit(); },
+    syncMotion() {
+        const button = document.getElementById('decision-motion');
+        if (!button) return;
+        document.getElementById('decision-workspace').classList.toggle('is-motion-paused', !this.motionEnabled || this.motionReduced || document.hidden || !this.active());
+        button.disabled = this.motionReduced;
+        button.textContent = this.motionReduced ? '静态视图' : this.motionEnabled ? '暂停动效' : '开启动效';
+        button.setAttribute('aria-pressed',String(this.motionEnabled && !this.motionReduced));
+        button.title = this.motionReduced ? '已按系统的减少动态效果设置显示静态视图' : '动效示意计算方向，不代表实时采集正在更新';
+    },
 
     buildNodes(s) {
         const n = (id,title,value,source,description,extra = {}) => ({id,title,value,source,description,unit:'',sampleAt:null,enteredAt:null,...extra});
@@ -363,17 +383,24 @@ const DecisionOverviewPage = {
         const ancestorIds = new Set([this.selected]);
         let current = selected;
         while (current?.parent) { ancestorIds.add(current.parent); current = this.nodes.find(n => n.id === current.parent); }
-        const paths = this.routeConnections().map(({node,parent,path}) => {
+        const flowingIds = new Set(), now = Date.now()/1000;
+        const paths = this.routeConnections().map(({node,parent,path},index) => {
             const highlight = ancestorIds.has(node.id) && ancestorIds.has(parent.id);
-            return `<path class="decision-edge${node.reference ? ' is-reference' : ''}${highlight ? ' is-highlight' : ''}" data-decision-from="${node.id}" data-decision-to="${parent.id}" d="${path}" stroke="${colors[node.family]}" marker-end="url(#decision-arrow-${node.family})"/>`;
+            const flows = !node.reference && node.value !== '—' && parent.value !== '—';
+            if (flows) { flowingIds.add(node.id); flowingIds.add(parent.id); }
+            // Negative phase keeps motion continuous when the five-second snapshot rebuilds the graph.
+            const phase = -((now+index*.37)%4).toFixed(3);
+            const trace = flows ? `<path class="decision-flow${highlight ? ' is-highlight' : ''}" d="${path}" pathLength="100" style="--dm-flow-color:${colors[node.family]};animation-delay:${phase}s"/>` : '';
+            return `<path class="decision-edge${node.reference ? ' is-reference' : ''}${highlight ? ' is-highlight' : ''}" data-decision-from="${node.id}" data-decision-to="${parent.id}" d="${path}" stroke="${colors[node.family]}" marker-end="url(#decision-arrow-${node.family})"/>${trace}`;
         }).join('');
         const markers = Object.entries(colors).map(([key,color]) => `<marker id="decision-arrow-${key}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8" fill="${color}"/></marker>`).join('');
-        const cards = this.nodes.map(node => {
+        const cards = this.nodes.map((node,index) => {
             const active = node.id === this.selected;
             const preview = node.id === 'coarse' ? `<span>查看${this.view === 'gpt' ? ' GPT' : '生产'}预测 ${this.number(s.prediction,2,'%')}${!s.model ? ' · 未训练' : s.previewOnly ? ' · 对照' : ' · 未平滑'}</span>` : '';
             const unit = node.id === 'density' ? '<span class="decision-root-unit">g/cm³</span>' : '';
             const sub = node.id === 'density' ? `<span>当前 ${this.number(s.guide.rhoCur,3)} · 目标灰分 ${this.number(s.guide.targetTotal,2,'%')}</span>` : '';
-            return `<button type="button" class="decision-node${active ? ' is-selected' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px"><span class="decision-node-heading">${this.escape(node.title)}${node.reference ? '<span class="decision-badge">对照</span>' : ''}</span><span class="decision-node-value">${this.escape(node.value)}${unit}</span><span class="decision-node-source"><span>${this.escape(node.source)}</span>${sub}${preview}</span></button>`;
+            const phase = -((now+index*.41)%5).toFixed(3);
+            return `<button type="button" class="decision-node${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-pulse-delay:${phase}s"><span class="decision-node-heading">${this.escape(node.title)}${node.reference ? '<span class="decision-badge">对照</span>' : ''}</span><span class="decision-node-value">${this.escape(node.value)}${unit}</span><span class="decision-node-source"><span>${this.escape(node.source)}</span>${sub}${preview}</span></button>`;
         }).join('');
         document.getElementById('decision-board').innerHTML = `<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 970"><defs>${markers}</defs>${paths}</svg>${cards}<div class="decision-formula"><strong>三组分质量平衡</strong>总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量<br>公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}</div>`;
     },

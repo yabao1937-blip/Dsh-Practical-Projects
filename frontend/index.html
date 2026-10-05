@@ -6,7 +6,7 @@
     <title>重介密控系统 - 密度推荐与灰分监控平台</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css?v=11">
-    <link rel="stylesheet" href="css/decision-overview.css?v=3">
+    <link rel="stylesheet" href="css/decision-overview.css?v=4">
     <!-- 无外部依赖，图表使用纯Canvas 2D绘制 -->
     <script src="js/xlsx-lite.js?v=8"></script>
     <script src="js/chart-lite.js?v=7"></script>
@@ -91,6 +91,7 @@
                         <button type="button" data-decision-model="production" aria-pressed="false">当前生产链路</button>
                     </div>
                     <div class="decision-legend"><span class="decision-legend-solid"></span>当前计算链 <span class="decision-legend-dashed"></span>核算对照 / 待接入</div>
+                    <button type="button" class="decision-motion" id="decision-motion" aria-pressed="true" title="动效示意计算方向，不代表实时采集正在更新">暂停动效</button>
                     <div class="decision-zoom" role="group" aria-label="画布缩放">
                         <button type="button" id="decision-zoom-out" aria-label="缩小">−</button>
                         <button type="button" id="decision-fit">适应画布</button>
@@ -102,7 +103,7 @@
                     <div class="decision-canvas-space" id="decision-canvas-space"><div class="decision-board" id="decision-board"></div></div>
                 </div>
                 <div class="decision-inspector" id="decision-inspector" aria-label="节点详情"></div>
-                <p class="decision-footnote">点击任一节点查看数值、计算口径和来源。虚线不代表实时数据已参与计算；本页只读，密度建议由人工核对执行。</p>
+                <p class="decision-footnote">点击节点查看详情，点击画布空白处收起。动效仅示意计算方向；虚线不代表实时数据已参与计算。本页只读，密度建议由人工核对执行。</p>
             </div>
         </section>
 
@@ -877,7 +878,7 @@
     <script src="js/api.js?v=7"></script>
     <script src="js/app.js?v=86"></script>
     <script src="js/overview.js?v=46"></script>
-    <script src="js/decision-overview.js?v=3"></script>
+    <script src="js/decision-overview.js?v=4"></script>
     <script src="js/collect.js?v=25"></script>
     <script src="js/coarse.js?v=24"></script>
     <script src="js/float.js?v=15"></script>
