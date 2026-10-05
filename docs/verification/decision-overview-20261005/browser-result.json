@@ -1,0 +1,49 @@
+{
+  "passed": true,
+  "isolatedFileMode": true,
+  "layout": [
+    {
+      "width": 1600,
+      "documentOverflow": false,
+      "canvasClientWidth": 1550,
+      "canvasScrollWidth": 1550,
+      "overflow": [],
+      "overlap": []
+    },
+    {
+      "width": 1440,
+      "documentOverflow": false,
+      "canvasClientWidth": 1390,
+      "canvasScrollWidth": 1390,
+      "overflow": [],
+      "overlap": []
+    },
+    {
+      "width": 1280,
+      "documentOverflow": false,
+      "canvasClientWidth": 1230,
+      "canvasScrollWidth": 1230,
+      "overflow": [],
+      "overlap": []
+    },
+    {
+      "width": 800,
+      "documentOverflow": false,
+      "canvasClientWidth": 750,
+      "canvasScrollWidth": 1001,
+      "overflow": [],
+      "overlap": []
+    }
+  ],
+  "pageErrors": [],
+  "mutatingRequests": [],
+  "checks": [
+    "new and old navigation",
+    "node inspection",
+    "view isolation",
+    "dark/light themes",
+    "zoom and fit",
+    "quality/zero/failed telemetry",
+    "page switching"
+  ]
+}

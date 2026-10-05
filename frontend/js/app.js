@@ -197,6 +197,7 @@ const App = {
         this.checkAlerts();
         // 只初始化首页（当前可见页）
         this.initPage('page-overview');
+        if (window.location.hash === '#decision') this.goToPage('page-decision');
     },
 
     // 用服务器 state 覆盖本地数据集合(纯本地键保留),供手动/自动两条路径复用
@@ -816,6 +817,9 @@ const App = {
 
     // 刷新所有已初始化页面
     refreshAllPages() {
+        if (typeof DecisionOverviewPage !== 'undefined' && DecisionOverviewPage.initialized) {
+            DecisionOverviewPage.refresh();
+        }
         if (typeof OverviewPage !== 'undefined' && OverviewPage.chart) {
             OverviewPage.refresh();
         }
@@ -872,6 +876,9 @@ const App = {
         if (!this.pageInited[pageId]) {
             this.pageInited[pageId] = true;
             switch (pageId) {
+                case 'page-decision':
+                    if (typeof DecisionOverviewPage !== 'undefined') DecisionOverviewPage.init();
+                    break;
                 case 'page-overview':
                     if (typeof OverviewPage !== 'undefined') OverviewPage.init();
                     break;
@@ -897,6 +904,9 @@ const App = {
         } else {
             // 已初始化的页面，切换回来时重新加载数据并刷新图表
             switch (pageId) {
+                case 'page-decision':
+                    if (typeof DecisionOverviewPage !== 'undefined') DecisionOverviewPage.refresh();
+                    break;
                 case 'page-overview':
                     if (OverviewPage.chart) {
                         OverviewPage.refresh();

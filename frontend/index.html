@@ -6,6 +6,7 @@
     <title>重介密控系统 - 密度推荐与灰分监控平台</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css?v=11">
+    <link rel="stylesheet" href="css/decision-overview.css?v=1">
     <!-- 无外部依赖，图表使用纯Canvas 2D绘制 -->
     <script src="js/xlsx-lite.js?v=8"></script>
     <script src="js/chart-lite.js?v=7"></script>
@@ -21,6 +22,9 @@
         </div>
         <div class="top-bar-center">
             <nav class="main-nav">
+                <a href="#" class="nav-item" data-page="page-decision">
+                    <span class="nav-icon">&#9678;</span>决策总览
+                </a>
                 <a href="#" class="nav-item active" data-page="page-overview">
                     <span class="nav-icon">&#9634;</span>密度推荐总览
                 </a>
@@ -71,6 +75,36 @@
 
     <!-- 主内容区 -->
     <main class="main-content">
+
+        <section class="page" id="page-decision" aria-labelledby="decision-title">
+            <div class="page-header">
+                <div><h2 id="decision-title">决策总览</h2><p class="decision-intro">从建议密度追溯组分、计算因素与数据来源</p></div>
+                <div class="page-header-actions">
+                    <button class="btn" id="decision-theme" type="button">浅色视图</button>
+                    <button class="btn btn-primary" id="decision-refresh" type="button">刷新数据</button>
+                </div>
+            </div>
+            <div class="decision-workspace" id="decision-workspace">
+                <div class="decision-toolbar">
+                    <div class="decision-view-switch" role="group" aria-label="粗精煤泥分析链路">
+                        <button type="button" data-decision-model="gpt" class="is-active" aria-pressed="true">GPT 链路</button>
+                        <button type="button" data-decision-model="production" aria-pressed="false">当前生产链路</button>
+                    </div>
+                    <div class="decision-legend"><span class="decision-legend-solid"></span>当前计算链 <span class="decision-legend-dashed"></span>核算对照 / 待接入</div>
+                    <div class="decision-zoom" role="group" aria-label="画布缩放">
+                        <button type="button" id="decision-zoom-out" aria-label="缩小">−</button>
+                        <button type="button" id="decision-fit">适应画布</button>
+                        <button type="button" id="decision-zoom-in" aria-label="放大">＋</button>
+                    </div>
+                </div>
+                <div class="decision-context" id="decision-context" aria-live="polite"></div>
+                <div class="decision-canvas-scroll" id="decision-canvas-scroll" aria-label="建议密度因素关系图">
+                    <div class="decision-canvas-space" id="decision-canvas-space"><div class="decision-board" id="decision-board"></div></div>
+                </div>
+                <div class="decision-inspector" id="decision-inspector" aria-label="节点详情"></div>
+                <p class="decision-footnote">点击任一节点查看数值、计算口径和来源。虚线不代表实时数据已参与计算；本页只读，密度建议由人工核对执行。</p>
+            </div>
+        </section>
 
         <!-- ==================== 页面一：密度推荐总览 ==================== -->
         <section class="page active" id="page-overview">
@@ -843,6 +877,7 @@
     <script src="js/api.js?v=7"></script>
     <script src="js/app.js?v=86"></script>
     <script src="js/overview.js?v=46"></script>
+    <script src="js/decision-overview.js?v=1"></script>
     <script src="js/collect.js?v=25"></script>
     <script src="js/coarse.js?v=24"></script>
     <script src="js/float.js?v=15"></script>
