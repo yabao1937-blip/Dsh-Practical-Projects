@@ -1,0 +1,797 @@
+{
+  "passed": true,
+  "widths": [
+    1600,
+    1440,
+    1280,
+    800,
+    390
+  ],
+  "measurements": [
+    {
+      "width": 1600,
+      "height": 900,
+      "node": "heavy-ash",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 1076,
+        "y": 130,
+        "w": 500,
+        "h": 694.3125,
+        "right": 1576,
+        "bottom": 824.3125
+      },
+      "card": {
+        "x": 65,
+        "y": 314.1875,
+        "w": 255,
+        "h": 111,
+        "right": 320,
+        "bottom": 425.1875
+      },
+      "overlap": false
+    },
+    {
+      "width": 1600,
+      "height": 900,
+      "node": "heavy",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 1076,
+        "y": 130,
+        "w": 500,
+        "h": 746,
+        "right": 1576,
+        "bottom": 876
+      },
+      "card": {
+        "x": 410,
+        "y": 439.1875,
+        "w": 220,
+        "h": 148,
+        "right": 630,
+        "bottom": 587.1875
+      },
+      "overlap": false
+    },
+    {
+      "width": 1600,
+      "height": 900,
+      "node": "density-current",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 1076,
+        "y": 130,
+        "w": 500,
+        "h": 694.3125,
+        "right": 1576,
+        "bottom": 824.3125
+      },
+      "card": {
+        "x": 410,
+        "y": 663.6875,
+        "w": 220,
+        "h": 111,
+        "right": 630,
+        "bottom": 774.6875
+      },
+      "overlap": false
+    },
+    {
+      "width": 1600,
+      "height": 900,
+      "node": "raw-ash",
+      "placement": "left",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 24,
+        "y": 130,
+        "w": 500,
+        "h": 694.3125,
+        "right": 524,
+        "bottom": 824.3125
+      },
+      "card": {
+        "x": 1290,
+        "y": 294.1875,
+        "w": 255,
+        "h": 112,
+        "right": 1545,
+        "bottom": 406.1875
+      },
+      "overlap": false
+    },
+    {
+      "width": 1600,
+      "height": 900,
+      "node": "coarse",
+      "placement": "left",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 24,
+        "y": 130,
+        "w": 500,
+        "h": 746,
+        "right": 524,
+        "bottom": 876
+      },
+      "card": {
+        "x": 995,
+        "y": 627.6875,
+        "w": 220,
+        "h": 176,
+        "right": 1215,
+        "bottom": 803.6875
+      },
+      "overlap": false
+    },
+    {
+      "width": 1600,
+      "height": 900,
+      "node": "density",
+      "placement": "bottom",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 342.5,
+        "y": 616.1875,
+        "w": 960,
+        "h": 259.8125,
+        "right": 1302.5,
+        "bottom": 876
+      },
+      "card": {
+        "x": 700,
+        "y": 393.1875,
+        "w": 245,
+        "h": 207,
+        "right": 945,
+        "bottom": 600.1875
+      },
+      "overlap": false
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "node": "heavy-ash",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 916,
+        "y": 130,
+        "w": 500,
+        "h": 694.3125,
+        "right": 1416,
+        "bottom": 824.3125
+      },
+      "card": {
+        "x": 56.590911865234375,
+        "y": 309.80438232421875,
+        "w": 230.162353515625,
+        "h": 100.18832397460938,
+        "right": 286.7532653808594,
+        "bottom": 409.9927062988281
+      },
+      "overlap": false
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "node": "heavy",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 916,
+        "y": 130,
+        "w": 500,
+        "h": 746,
+        "right": 1416,
+        "bottom": 876
+      },
+      "card": {
+        "x": 367.9870300292969,
+        "y": 422.6290588378906,
+        "w": 198.57144165039062,
+        "h": 133.58444213867188,
+        "right": 566.5584716796875,
+        "bottom": 556.2135009765625
+      },
+      "overlap": false
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "node": "density-current",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 916,
+        "y": 130,
+        "w": 500,
+        "h": 694.3125,
+        "right": 1416,
+        "bottom": 824.3125
+      },
+      "card": {
+        "x": 367.9870300292969,
+        "y": 625.26220703125,
+        "w": 198.57144165039062,
+        "h": 100.18829345703125,
+        "right": 566.5584716796875,
+        "bottom": 725.4505004882812
+      },
+      "overlap": false
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "node": "raw-ash",
+      "placement": "left",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 24,
+        "y": 130,
+        "w": 500,
+        "h": 694.3125,
+        "right": 524,
+        "bottom": 824.3125
+      },
+      "card": {
+        "x": 1162.272705078125,
+        "y": 291.75244140625,
+        "w": 230.162353515625,
+        "h": 101.09091186523438,
+        "right": 1392.43505859375,
+        "bottom": 392.8433532714844
+      },
+      "overlap": false
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "node": "coarse",
+      "placement": "left",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 24,
+        "y": 130,
+        "w": 500,
+        "h": 746,
+        "right": 524,
+        "bottom": 876
+      },
+      "card": {
+        "x": 896.0065307617188,
+        "y": 592.7686767578125,
+        "w": 198.57147216796875,
+        "h": 158.857177734375,
+        "right": 1094.5780029296875,
+        "bottom": 751.6258544921875
+      },
+      "overlap": false
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "node": "density",
+      "placement": "bottom",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 260.296875,
+        "y": 615.609375,
+        "w": 960,
+        "h": 260.375,
+        "right": 1220.296875,
+        "bottom": 875.984375
+      },
+      "card": {
+        "x": 629.7402954101562,
+        "y": 412.7784118652344,
+        "w": 221.1363525390625,
+        "h": 186.83767700195312,
+        "right": 850.8766479492188,
+        "bottom": 599.6160888671875
+      },
+      "overlap": false
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "node": "heavy-ash",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 756,
+        "y": 130,
+        "w": 500,
+        "h": 694.3125,
+        "right": 1256,
+        "bottom": 824.3125
+      },
+      "card": {
+        "x": 52.95454406738281,
+        "y": 305.1290588378906,
+        "w": 203.66880798339844,
+        "h": 88.65585327148438,
+        "right": 256.62335205078125,
+        "bottom": 393.784912109375
+      },
+      "overlap": false
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "node": "heavy",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 756,
+        "y": 130,
+        "w": 500,
+        "h": 746,
+        "right": 1256,
+        "bottom": 876
+      },
+      "card": {
+        "x": 328.5065002441406,
+        "y": 404.96673583984375,
+        "w": 175.71426391601562,
+        "h": 118.207763671875,
+        "right": 504.22076416015625,
+        "bottom": 523.1744995117188
+      },
+      "overlap": false
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "node": "density-current",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 756,
+        "y": 130,
+        "w": 500,
+        "h": 694.3125,
+        "right": 1256,
+        "bottom": 824.3125
+      },
+      "card": {
+        "x": 328.5065002441406,
+        "y": 584.275146484375,
+        "w": 175.71426391601562,
+        "h": 88.6558837890625,
+        "right": 504.22076416015625,
+        "bottom": 672.9310302734375
+      },
+      "overlap": false
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "node": "raw-ash",
+      "placement": "left",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 24,
+        "y": 130,
+        "w": 500,
+        "h": 694.3125,
+        "right": 524,
+        "bottom": 824.3125
+      },
+      "card": {
+        "x": 1031.3636474609375,
+        "y": 289.155029296875,
+        "w": 203.6688232421875,
+        "h": 89.45452880859375,
+        "right": 1235.032470703125,
+        "bottom": 378.60955810546875
+      },
+      "overlap": false
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "node": "coarse",
+      "placement": "left",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 24,
+        "y": 130,
+        "w": 500,
+        "h": 746,
+        "right": 524,
+        "bottom": 876
+      },
+      "card": {
+        "x": 795.7467651367188,
+        "y": 555.5219116210938,
+        "w": 175.7142333984375,
+        "h": 140.5714111328125,
+        "right": 971.4609985351562,
+        "bottom": 696.0933227539062
+      },
+      "overlap": false
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "node": "density",
+      "placement": "bottom",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 177.96875,
+        "y": 616.46875,
+        "w": 960,
+        "h": 259.515625,
+        "right": 1137.96875,
+        "bottom": 875.984375
+      },
+      "card": {
+        "x": 560.1298828125,
+        "y": 435.14202880859375,
+        "w": 195.68182373046875,
+        "h": 165.3311767578125,
+        "right": 755.8117065429688,
+        "bottom": 600.4732055664062
+      },
+      "overlap": false
+    },
+    {
+      "width": 800,
+      "height": 900,
+      "node": "heavy-ash",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 276,
+        "y": 130,
+        "w": 500,
+        "h": 682.3125,
+        "right": 776,
+        "bottom": 812.3125
+      },
+      "card": {
+        "x": 47.75,
+        "y": 312.4375,
+        "w": 165.75,
+        "h": 72.14999389648438,
+        "right": 213.5,
+        "bottom": 384.5874938964844
+      },
+      "overlap": false
+    },
+    {
+      "width": 800,
+      "height": 900,
+      "node": "heavy",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 431,
+        "y": 130,
+        "w": 345,
+        "h": 741.90625,
+        "right": 776,
+        "bottom": 871.90625
+      },
+      "card": {
+        "x": 272,
+        "y": 393.6875,
+        "w": 143,
+        "h": 96.20001220703125,
+        "right": 415,
+        "bottom": 489.88751220703125
+      },
+      "overlap": false
+    },
+    {
+      "width": 800,
+      "height": 900,
+      "node": "density-current",
+      "placement": "right",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 431,
+        "y": 130,
+        "w": 345,
+        "h": 707,
+        "right": 776,
+        "bottom": 837
+      },
+      "card": {
+        "x": 272,
+        "y": 539.6124877929688,
+        "w": 143,
+        "h": 72.14996337890625,
+        "right": 415,
+        "bottom": 611.762451171875
+      },
+      "overlap": false
+    },
+    {
+      "width": 800,
+      "height": 900,
+      "node": "raw-ash",
+      "placement": "left",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 24,
+        "y": 130,
+        "w": 500,
+        "h": 682.3125,
+        "right": 524,
+        "bottom": 812.3125
+      },
+      "card": {
+        "x": 593,
+        "y": 299.4375,
+        "w": 165.74993896484375,
+        "h": 72.79998779296875,
+        "right": 758.7499389648438,
+        "bottom": 372.23748779296875
+      },
+      "overlap": false
+    },
+    {
+      "width": 800,
+      "height": 900,
+      "node": "coarse",
+      "placement": "left",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 24,
+        "y": 130,
+        "w": 361.25,
+        "h": 746,
+        "right": 385.25,
+        "bottom": 876
+      },
+      "card": {
+        "x": 401.25,
+        "y": 516.2125244140625,
+        "w": 143,
+        "h": 114.39996337890625,
+        "right": 544.25,
+        "bottom": 630.6124877929688
+      },
+      "overlap": false
+    },
+    {
+      "width": 800,
+      "height": 900,
+      "node": "density",
+      "placement": "bottom",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 24,
+        "y": 615.6875,
+        "w": 752,
+        "h": 260.3125,
+        "right": 776,
+        "bottom": 876
+      },
+      "card": {
+        "x": 209.49996948242188,
+        "y": 465.13751220703125,
+        "w": 159.25003051757812,
+        "h": 134.54998779296875,
+        "right": 368.75,
+        "bottom": 599.6875
+      },
+      "overlap": false
+    },
+    {
+      "width": 390,
+      "height": 900,
+      "node": "heavy-ash",
+      "placement": "bottom",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 12,
+        "y": 516.953125,
+        "w": 366,
+        "h": 371.03125,
+        "right": 378,
+        "bottom": 887.984375
+      },
+      "card": {
+        "x": 47.75,
+        "y": 428.8125,
+        "w": 165.75,
+        "h": 72.14999389648438,
+        "right": 213.5,
+        "bottom": 500.9624938964844
+      },
+      "overlap": false
+    },
+    {
+      "width": 390,
+      "height": 900,
+      "node": "heavy",
+      "placement": "bottom",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 12,
+        "y": 622.25,
+        "w": 366,
+        "h": 265.734375,
+        "right": 378,
+        "bottom": 887.984375
+      },
+      "card": {
+        "x": 221.99998474121094,
+        "y": 510.0625,
+        "w": 143.00001525878906,
+        "h": 96.20001220703125,
+        "right": 365,
+        "bottom": 606.2625122070312
+      },
+      "overlap": false
+    },
+    {
+      "width": 390,
+      "height": 900,
+      "node": "density-current",
+      "placement": "bottom",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 12,
+        "y": 628.125,
+        "w": 366,
+        "h": 259.859375,
+        "right": 378,
+        "bottom": 887.984375
+      },
+      "card": {
+        "x": 221.99998474121094,
+        "y": 539.9874877929688,
+        "w": 143.00001525878906,
+        "h": 72.14996337890625,
+        "right": 365,
+        "bottom": 612.137451171875
+      },
+      "overlap": false
+    },
+    {
+      "width": 390,
+      "height": 900,
+      "node": "raw-ash",
+      "placement": "bottom",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 12,
+        "y": 388.609375,
+        "w": 366,
+        "h": 499.375,
+        "right": 378,
+        "bottom": 887.984375
+      },
+      "card": {
+        "x": 183,
+        "y": 299.8125,
+        "w": 165.74993896484375,
+        "h": 72.79998779296875,
+        "right": 348.74993896484375,
+        "bottom": 372.61248779296875
+      },
+      "overlap": false
+    },
+    {
+      "width": 390,
+      "height": 900,
+      "node": "coarse",
+      "placement": "bottom",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 12,
+        "y": 627.984375,
+        "w": 366,
+        "h": 260,
+        "right": 378,
+        "bottom": 887.984375
+      },
+      "card": {
+        "x": 25.25,
+        "y": 497.5874938964844,
+        "w": 143,
+        "h": 114.39999389648438,
+        "right": 168.25,
+        "bottom": 611.9874877929688
+      },
+      "overlap": false
+    },
+    {
+      "width": 390,
+      "height": 900,
+      "node": "density",
+      "placement": "bottom",
+      "open": true,
+      "inline": false,
+      "panel": {
+        "x": 12,
+        "y": 628.0625,
+        "w": 366,
+        "h": 259.9375,
+        "right": 378,
+        "bottom": 888
+      },
+      "card": {
+        "x": 115.49996948242188,
+        "y": 477.51251220703125,
+        "w": 159.25003051757812,
+        "h": 134.54998779296875,
+        "right": 274.75,
+        "bottom": 612.0625
+      },
+      "overlap": false
+    }
+  ],
+  "shortWindow": {
+    "width": 1366,
+    "height": 160,
+    "node": "heavy-ash",
+    "placement": "inline",
+    "open": true,
+    "inline": true,
+    "panel": {
+      "x": 25,
+      "y": 56.09375,
+      "w": 1316,
+      "h": 410.46875,
+      "right": 1341,
+      "bottom": 466.5625
+    },
+    "card": {
+      "x": 54.90909194946289,
+      "y": -734.3579711914062,
+      "w": 217.90908813476562,
+      "h": 94.85455322265625,
+      "right": 272.8181800842285,
+      "bottom": -639.50341796875
+    },
+    "overlap": false
+  },
+  "checks": [
+    "zoom / refresh / canvas scrolling",
+    "narrow resize / reopen",
+    "short window fallback",
+    "refresh retains detail button focus",
+    "selected card scrolls out / dismiss",
+    "navigation closes inspector"
+  ],
+  "pageErrors": [],
+  "storeUnchanged": true
+}

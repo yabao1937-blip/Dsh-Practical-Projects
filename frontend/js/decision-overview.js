@@ -3,6 +3,7 @@ const DecisionOverviewPage = {
     initialized: false, view: 'gpt', selected: 'density', zoom: null, snapshot: null,
     pointChoices: {}, nodes: [], timer: null,
     sourceInteractionUntil: 0,
+    inspectorFrame: null,
     escape(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
     number(value, digits = 2, unit = '') { return Number.isFinite(value) ? value.toFixed(digits) + (unit ? ' ' + unit : '') : '—'; },
     time(value) {
@@ -96,10 +97,17 @@ const DecisionOverviewPage = {
         document.getElementById('decision-inspector').addEventListener('click', event => {
             if (event.target.closest('[data-decision-close]')) { this.closeInspector(); return; }
             const link = event.target.closest('[data-decision-page]');
-            if (link) { this.closeInspector(); App.goToPage(link.dataset.decisionPage); }
+            if (link) { this.closeInspector(false); App.goToPage(link.dataset.decisionPage); }
         });
         document.addEventListener('keydown', event => {
             if (event.key === 'Escape' && this.active()) this.closeInspector();
+        });
+        for (const container of [document.querySelector('.main-content'),document.getElementById('decision-canvas-scroll')]) {
+            container.addEventListener('scroll', () => this.queueInspectorPosition(), {passive:true});
+        }
+        document.querySelector('.main-nav').addEventListener('click', event => {
+            const page = event.target.closest('[data-page]')?.dataset.page;
+            if (page && page !== 'page-decision') this.closeInspector(false);
         });
         window.addEventListener('resize', () => { if (this.active()) this.fit(); });
         // Reuse Operations' existing polling snapshot; never start a second API poll.
@@ -109,25 +117,98 @@ const DecisionOverviewPage = {
         this.refresh();
     },
     refresh() {
-        if (!this.initialized || !this.active()) return;
+        if (!this.initialized) return;
+        if (!this.active()) { this.closeInspector(false); return; }
         const focused = document.activeElement?.dataset?.decisionNode;
         const sourceFocused = document.activeElement?.id === 'decision-source-point';
         const closeFocused = document.activeElement?.hasAttribute('data-decision-close');
+        const detailPageFocused = document.activeElement?.dataset?.decisionPage;
         this.snapshot = this.buildSnapshot();
         this.nodes = this.buildNodes(this.snapshot);
         this.renderGraph(); this.renderContext(); this.renderInspector(); this.fit();
         if (focused) document.querySelector(`[data-decision-node="${focused}"]`)?.focus({preventScroll:true});
         if (sourceFocused) document.getElementById('decision-source-point')?.focus({preventScroll:true});
         if (closeFocused) document.querySelector('[data-decision-close]')?.focus({preventScroll:true});
+        if (detailPageFocused) document.querySelector(`[data-decision-page="${detailPageFocused}"]`)?.focus({preventScroll:true});
     },
     select(id) {
         this.selected = id; this.renderGraph(); this.renderInspector();
         document.getElementById('decision-inspector').classList.add('is-open');
+        this.positionInspector(true);
         document.querySelector('[data-decision-close]')?.focus({preventScroll:true});
     },
-    closeInspector() {
-        document.getElementById('decision-inspector').classList.remove('is-open');
-        document.querySelector(`[data-decision-node="${this.selected}"]`)?.focus({preventScroll:true});
+    closeInspector(restoreFocus = true) {
+        const inspector = document.getElementById('decision-inspector');
+        if (!inspector?.classList?.contains('is-open')) return;
+        inspector.classList.remove('is-open','is-below','is-inline');
+        if (this.inspectorFrame) { cancelAnimationFrame(this.inspectorFrame); this.inspectorFrame = null; }
+        if (restoreFocus) document.querySelector(`[data-decision-node="${this.selected}"]`)?.focus({preventScroll:true});
+    },
+    queueInspectorPosition(reconsiderInline = false) {
+        const inspector = document.getElementById('decision-inspector');
+        if (!inspector?.classList?.contains('is-open')) return;
+        if (this.inspectorFrame) {
+            if (!reconsiderInline) return;
+            cancelAnimationFrame(this.inspectorFrame);
+        }
+        this.inspectorFrame = requestAnimationFrame(() => { this.inspectorFrame = null; this.positionInspector(false,reconsiderInline); });
+    },
+    positionInspector(ensureRoom = false, reconsiderInline = false) {
+        const inspector = document.getElementById('decision-inspector');
+        if (!inspector?.classList?.contains('is-open')) return;
+        const inline = inspector.classList.contains('is-inline');
+        if (inline && !ensureRoom && !reconsiderInline) return;
+        const card = document.querySelector(`[data-decision-node="${this.selected}"]`);
+        const node = this.nodes.find(n => n.id === this.selected), root = this.nodes.find(n => n.id === 'density');
+        if (!card || !node || !root || !this.active()) { this.closeInspector(false); return; }
+        let rect = card.getBoundingClientRect();
+        const canvas = document.getElementById('decision-canvas-scroll').getBoundingClientRect();
+        const topSafe = (document.querySelector('.top-bar')?.getBoundingClientRect().bottom || 56)+12;
+        // Dismiss when the selected card leaves the visible canvas, without moving focus/scroll back.
+        if (rect.bottom <= Math.max(topSafe,canvas.top) || rect.top >= Math.min(innerHeight,canvas.bottom) || rect.right <= canvas.left || rect.left >= Math.min(innerWidth,canvas.right)) {
+            if (inline && !ensureRoom) return;
+            this.closeInspector(false); return;
+        }
+        const margin = innerWidth < 800 ? 12 : 24, gap = 16;
+        const room = {left:rect.left-margin-gap,right:innerWidth-margin-rect.right-gap};
+        let placement = node.id === 'density' ? 'bottom' : node.x+node.w/2 < root.x+root.w/2 ? 'right' : 'left';
+        const minimumWidth = Math.min(280,innerWidth-2*margin);
+        if (placement !== 'bottom' && room[placement] < minimumWidth) {
+            const other = placement === 'left' ? 'right' : 'left';
+            placement = room[other] >= minimumWidth ? other : 'bottom';
+        }
+        inspector.classList.remove('is-inline');
+        inspector.classList.toggle('is-below',placement === 'bottom');
+        let width, left, top;
+        if (placement === 'bottom') {
+            width = Math.min(960,innerWidth-2*margin);
+            if (ensureRoom) {
+                const main = document.querySelector('.main-content');
+                const minimumHeight = Math.max(100,Math.min(260,innerHeight-topSafe-rect.height-gap-margin));
+                const shortage = Math.max(0,rect.bottom+gap+minimumHeight+margin-innerHeight);
+                const remaining = Math.max(0,main.scrollHeight-main.clientHeight-main.scrollTop);
+                main.scrollTop += Math.min(shortage,remaining,Math.max(0,rect.top-topSafe));
+                rect = card.getBoundingClientRect();
+            }
+            top = Math.max(topSafe,rect.bottom+gap);
+            left = Math.max(margin,Math.min((rect.left+rect.right-width)/2,innerWidth-margin-width));
+        } else {
+            width = Math.min(500,room[placement]);
+            left = placement === 'left' ? margin : innerWidth-margin-width;
+            top = Math.max(topSafe,Math.min(rect.top,130));
+        }
+        if (innerHeight-margin-top < 100) {
+            // Very short windows use the existing detail area below the canvas rather than cover a card.
+            inspector.classList.add('is-inline','is-below');
+            inspector.dataset.placement = 'inline';
+            if (ensureRoom) inspector.scrollIntoView({block:'nearest'});
+            return;
+        }
+        inspector.dataset.placement = placement;
+        inspector.style.setProperty('--di-left',`${left}px`);
+        inspector.style.setProperty('--di-top',`${top}px`);
+        inspector.style.setProperty('--di-width',`${width}px`);
+        inspector.style.setProperty('--di-height',`${innerHeight-margin-top}px`);
     },
     fit() {
         const viewport = document.getElementById('decision-canvas-scroll');
@@ -137,6 +218,7 @@ const DecisionOverviewPage = {
         const space = document.getElementById('decision-canvas-space');
         space.style.width = `${1540 * scale}px`; space.style.height = `${970 * scale}px`;
         document.getElementById('decision-fit').textContent = `适应画布 · ${Math.round(scale * 100)}%`;
+        this.queueInspectorPosition(true);
     },
     changeZoom(delta) { this.zoom = Math.max(.65, Math.min(1.5, (this.actualZoom || 1) + delta)); this.fit(); },
 
@@ -326,5 +408,6 @@ const DecisionOverviewPage = {
         const live = item ? `<dl class="decision-facts"><dt>最后读数</dt><dd class="${available ? '' : 'decision-unavailable'}">${this.escape(value)} ${this.escape(item.unit || '')}${available ? '' : '（不可用）'}</dd><dt>质量 / 时效</dt><dd>${this.escape(this.telemetryState(item))}</dd><dt>数据来源</dt><dd>${this.escape(item.source_id + '/' + item.key)}</dd><dt>源时间</dt><dd>${this.escape(this.time(sample.source_at))}</dd><dt>服务器时间</dt><dd>${this.escape(this.time(sample.server_at))}</dd><dt>接收时间</dt><dd>${this.escape(this.time(sample.received_at))}</dd></dl>` : '<p>尚未选择参考点位。这里可以核对采集读数，选择点位不会绑定业务字段或改变计算。</p>';
         const collector = window.Operations?.telemetryFailed ? '采集查询中断，最后读数不可用' : !items.length ? (window.Operations?.serverState === 'local' ? '单机模式 · 通过服务器地址查看采集' : '暂无点位 · 等待现场配置与联调') : `${items.filter(p => p.available).length} / ${items.length} 个点位可用`;
         document.getElementById('decision-inspector').innerHTML = `<div class="decision-inspector-header"><span>因素与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${node.reference ? '对照 / 预留' : '业务取值'}</span></div><p>${this.escape(node.description)}</p><dl class="decision-facts">${facts}</dl>${node.page ? `<button class="decision-detail-link" type="button" data-decision-page="${node.page}">查看对应业务页面 →</button>` : '<button class="decision-detail-link" type="button" data-decision-page="page-collect">查看数据采集与补录 →</button>'}</div><div class="decision-detail decision-source-panel"><h4>实时数据 → 采集来源</h4><p class="decision-live-state">${this.escape(collector)}。实时读数目前仅作来源核对，尚未参与本页计算。</p><label for="decision-source-point">查看采集点（仅核对）</label><select id="decision-source-point"><option value="">选择参考点位</option>${options}</select>${live}</div>`;
+        this.queueInspectorPosition();
     },
 };
