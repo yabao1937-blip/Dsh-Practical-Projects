@@ -20,7 +20,7 @@
 .decision-canvas-space { position: relative; margin: auto; overflow: hidden; }
 .decision-board { position: relative; width: 1540px; height: 970px; transform-origin: top left; }
 .decision-edges { position: absolute; inset: 0; width: 1540px; height: 970px; pointer-events: none; overflow: visible; }
-.decision-edge { fill: none; stroke-width: 2.2; opacity: .55; }
+.decision-edge { fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; opacity: .55; }
 .decision-edge.is-reference { stroke-dasharray: 6 6; opacity: .4; }
 .decision-edge.is-highlight { opacity: 1; stroke-width: 3; }
 .decision-edge-label { fill: var(--dm-muted); font-size: 12px; }

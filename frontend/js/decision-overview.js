@@ -192,7 +192,7 @@ const DecisionOverviewPage = {
                 return `${name}：记录 ${this.number(field.raw)}；模型采用 ${this.number(field.used)}${!s.model ? '（查看模型尚未训练）' : field.missing && Number.isFinite(field.used) ? '（缺失，按训练均值补齐）' : field.clipped ? '（超训练范围，已限幅）' : ''}`;
             }).join('；');
             return n(id,title,value,recordSource(s.coarse),`所查看的${this.view === 'gpt' ? ' GPT' : '当前生产'}模型输入。${details}。采集点位尚未绑定业务字段。`,
-                {...family('coarse',1240,y),parent:'coarse',sampleAt:s.coarse?.timestamp,reference:s.previewOnly || !s.model || coarseManual,fields,unit:keys.length === 1 ? (keys[0] === 'coal_amount' ? 't/h' : '%') : '状态'});
+                {...family('coarse',1260,y),parent:'coarse',sampleAt:s.coarse?.timestamp,reference:s.previewOnly || !s.model || coarseManual,fields,unit:keys.length === 1 ? (keys[0] === 'coal_amount' ? 't/h' : '%') : '状态'});
         };
         const flags = fields => fields.map(field => {
             const short = field.key.replace('sys','').replace('desliming','');
@@ -206,13 +206,13 @@ const DecisionOverviewPage = {
             n('float','浮精',ash(s.ashes.float),`煤量 ${rate(s.amounts.float)}`,`浮精灰分与煤量共同进入三组分质量平衡；压滤机状态为工况参考。`,
                 {...family('float',380,612,{w:220,h:148}),type:'component',parent:'density',reference:!s.componentFeeds,page:'page-float',sampleAt:s.floating?.timestamp}),
             n('coarse','粗精煤泥',ash(s.ashes.coarse),`煤量 ${rate(s.amounts.coarse)} · 生产 ${s.engineLabel}`,`${coarseSource}。当前生产采用值与下面的 GPT 原始预测分开显示；共享 EMA 不作为 GPT 预测值。`,
-                {...family('coarse',965,354,{w:220,h:176}),type:'component',parent:'density',reference:!s.componentFeeds,page:'page-coarse',sampleAt:coarseManual ? null : s.coarse?.timestamp,enteredAt:coarseManual ? s.store.coarseAshInput?.manualAt : null}),
+                {...family('coarse',965,358.5,{w:220,h:176}),type:'component',parent:'density',reference:!s.componentFeeds,page:'page-coarse',sampleAt:coarseManual ? null : s.coarse?.timestamp,enteredAt:coarseManual ? s.store.coarseAshInput?.manualAt : null}),
             n('heavy-ash','重介精煤灰分',ash(s.ashes.heavy),heavyMeasurement.source,'优先有效人工采样值，其次 502 灰分补录 / 导入记录；没有测量记录时使用默认值，不能视作现场实时读数。',
                 {...family('heavy',35,45),parent:'heavy',unit:'%',...heavyMeasurement}),
             n('heavy-amount','重介精煤量',rate(s.amounts.heavy),'人工输入 / 总量减浮精减粗泥','有效人工值优先；计算层：总精煤量 − 浮精量 − 粗精煤泥量。缺少组成量时无法计算；总量可能包含默认皮带秤值，需核对来源。',
                 {...family('heavy',35,183),parent:'heavy',unit:'t/h',...amountInfo('denseAmount','heavy')}),
             n('density-current','当前分选密度',this.number(s.guide.rhoCur,3,'g/cm³'),'人工输入 / 灰分密度记录 / 默认','建议是在当前密度上按灰分偏差修正，受每步钳制和物理范围约束。这里只显示现有业务取值，不向 PLC 写入。',
-                {...family('heavy',35,321),parent:'density',unit:'g/cm³',...densityInfo}),
+                {...family('heavy',380,394.5,{w:220}),parent:'density',unit:'g/cm³',...densityInfo}),
             n('float-ash','浮精灰分',ash(s.ashes.float),floatManual ? '人工覆盖' : floatMeasured ? recordSource(s.floating) : '默认值 · 非实时测量','有效人工覆盖优先，其次时间最新的浮精记录；无数据时原计算链使用默认值。历史化验未记录出报告时刻，不能据采样时刻推断当时已知结果。',
                 {...family('float',35,463),parent:'float',unit:'%',...(floatManual ? manualInfo(s.store.floatAshInput) : {sampleAt:floatMeasured ? s.floating.timestamp : null})}),
             n('float-amount','浮精量',rate(s.amounts.float),'人工输入 / 最新浮精记录','有效人工值优先，其次最新浮精记录的 coal_amount。压滤机状态不会自动推导产量。',
@@ -229,9 +229,9 @@ const DecisionOverviewPage = {
             feature('stoppage','停机 / 低负荷',['is_stoppage'],600,fields => fields[0].raw == null ? '—' : fields[0].raw ? '是' : '否'),
             n('coarse-amount','粗精煤泥量',rate(s.amounts.coarse),s.reader.coarseAmountLayer() === '计算' ? '315 筛量 − 筛下水量' : s.reader.coarseAmountLayer(),
                 `量的计算：315 筛量 ${rate(s.store.coarseCalc?.screen315)} − 筛下水量 ${rate(s.store.coarseCalc?.waterUnder)}。这是组分产量，与“入洗原煤量”模型因素不同。`,
-                {...family('coarse',1240,715),parent:'coarse',unit:'t/h',...amountInfo('coarseAmount','coarse')}),
+                {...family('coarse',1260,715),parent:'coarse',unit:'t/h',...amountInfo('coarseAmount','coarse')}),
             n('coarse-slime','原煤煤泥含量','待补充','工艺因素 · 尚未进入模型','目前的粗精模型使用 10 个输入因素；原煤煤泥含量尚无独立输入字段，也未进入模型。后续需要人工采样或可验证的测量来源。',
-                {...family('coarse',1240,830),parent:'coarse',reference:true}),
+                {...family('coarse',1260,830),parent:'coarse',reference:true}),
         ];
     },
 
@@ -241,21 +241,49 @@ const DecisionOverviewPage = {
         document.getElementById('decision-context').innerHTML = `<span>指导口径 <strong>${s.guide.scheme === 'heavy' ? '重介精煤版' : '总灰分版'}</strong></span><span>生产模型 <strong>${this.escape(s.engineLabel)}</strong></span><span>总灰分来源 <strong>${this.escape(sources[s.total.source])}</strong></span><span>${message}</span><span>实时采集 <strong>尚未绑定业务计算</strong></span>`;
     },
 
+    // Short right-angle routes with small rounded corners; aligned nodes stay straight.
+    connectorPath(x1,y1,x2,y2,lane) {
+        if (Math.abs(y2-y1) < .5) return `M ${x1} ${y1} H ${x2}`;
+        const dx = Math.sign(x2-x1), dy = Math.sign(y2-y1);
+        const r = Math.min(10,Math.abs(lane-x1)/2,Math.abs(x2-lane)/2,Math.abs(y2-y1)/2);
+        return `M ${x1} ${y1} H ${lane-dx*r} Q ${lane} ${y1} ${lane} ${y1+dy*r} V ${y2-dy*r} Q ${lane} ${y2} ${lane+dx*r} ${y2} H ${x2}`;
+    },
+    routeConnections() {
+        return this.nodes.filter(node => node.parent).map(node => {
+            const parent = this.nodes.find(n => n.id === node.parent), left = node.x < parent.x;
+            const x1 = left ? node.x+node.w : node.x, x2 = left ? parent.x : parent.x+parent.w;
+            const y1 = node.y+node.h/2;
+            let y2, lane = (x1+x2)/2;
+            if (parent.id === 'density') {
+                // Keep three left entrances separate; coarse enters from the right.
+                y2 = node.id === 'heavy' ? parent.y+42 : node.id === 'float' ? parent.y+162 : parent.y+parent.h/2;
+            } else {
+                const siblings = this.nodes.filter(n => n.parent === parent.id).sort((a,b) => a.y-b.y);
+                const targets = siblings.map((n,i) => ({id:n.id,sourceY:n.y+n.h/2,targetY:parent.y+parent.h*(i+1)/(siblings.length+1)}));
+                const target = targets.find(n => n.id === node.id);
+                y2 = target.targetY;
+                // Nested lanes preserve source/port ordering and avoid crossing fan-in lines.
+                const upper = y1 <= y2;
+                const peers = targets.filter(n => (n.sourceY <= n.targetY) === upper);
+                const rank = peers.findIndex(n => n.id === node.id);
+                const gap = Math.abs(x2-x1), inset = Math.min(18,gap/3);
+                const step = peers.length > 1 ? Math.min(18,(gap-2*inset)/(peers.length-1)) : 0;
+                const distance = inset+(upper ? rank : peers.length-1-rank)*step;
+                lane = x2-Math.sign(x2-x1)*distance;
+            }
+            return {node,parent,path:this.connectorPath(x1,y1,x2,y2,lane)};
+        });
+    },
+
     renderGraph() {
         const s = this.snapshot, selected = this.nodes.find(n => n.id === this.selected);
         const colors = {heavy:'var(--dm-blue)',float:'var(--dm-orange)',coarse:'var(--dm-green)'};
         const ancestorIds = new Set([this.selected]);
         let current = selected;
         while (current?.parent) { ancestorIds.add(current.parent); current = this.nodes.find(n => n.id === current.parent); }
-        const paths = this.nodes.filter(node => node.parent).map(node => {
-            const parent = this.nodes.find(n => n.id === node.parent), left = node.x < parent.x;
-            const x1 = left ? node.x + node.w : node.x, x2 = left ? parent.x : parent.x + parent.w;
-            const y1 = node.y + node.h / 2, y2 = parent.y + parent.h / 2;
-            // The density measurement enters below the root rather than crossing the heavy branch.
-            const path = node.id === 'density-current' ? `M ${x1} ${y1} C 420 ${y1}, 610 400, 620 540 Q 620 568, 648 568 L 748 568 L 748 550` :
-                `M ${x1} ${y1} C ${(x1+x2)/2} ${y1}, ${(x1+x2)/2} ${y2}, ${x2} ${y2}`;
+        const paths = this.routeConnections().map(({node,parent,path}) => {
             const highlight = ancestorIds.has(node.id) && ancestorIds.has(parent.id);
-            return `<path class="decision-edge${node.reference ? ' is-reference' : ''}${highlight ? ' is-highlight' : ''}" d="${path}" stroke="${colors[node.family]}" marker-end="url(#decision-arrow-${node.family})"/>`;
+            return `<path class="decision-edge${node.reference ? ' is-reference' : ''}${highlight ? ' is-highlight' : ''}" data-decision-from="${node.id}" data-decision-to="${parent.id}" d="${path}" stroke="${colors[node.family]}" marker-end="url(#decision-arrow-${node.family})"/>`;
         }).join('');
         const markers = Object.entries(colors).map(([key,color]) => `<marker id="decision-arrow-${key}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8" fill="${color}"/></marker>`).join('');
         const cards = this.nodes.map(node => {
