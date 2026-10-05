@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-system-20261005-112338\\candidate.json",
+    "sha256": "aae1702ba995a41e4a71948683b865fc863e2daa4b35f1c078a108ed379a1bdf",
+    "bytes": 11481
+  },
+  "artifact": {
+    "path": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-system-20261005-112338\\system-architecture.html",
+    "sha256": "3398c8ce3fbfbc032fdba307e43e3cff4b31914da50088a397b44dd92ce6e911",
+    "bytes": 772274
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-system-20261005-112338\\system-architecture.finalize.json",
+    "summaryReceipt": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-system-20261005-112338\\system-architecture.finalize-summary.json",
+    "browserCheckReceipt": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-system-20261005-112338\\system-architecture.browser-check.json"
+  },
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "check-failed"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3528
+}

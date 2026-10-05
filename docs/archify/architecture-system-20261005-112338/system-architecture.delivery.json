@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "bb94c81e-eece-4526-8f02-f00859410da0",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-system-20261005-112338\\candidate.json",
+  "output": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-system-20261005-112338\\system-architecture.html",
+  "specification": {
+    "sha256": "aae1702ba995a41e4a71948683b865fc863e2daa4b35f1c078a108ed379a1bdf",
+    "bytes": 11481
+  },
+  "artifact": {
+    "sha256": "3398c8ce3fbfbc032fdba307e43e3cff4b31914da50088a397b44dd92ce6e911",
+    "bytes": 772274
+  }
+}

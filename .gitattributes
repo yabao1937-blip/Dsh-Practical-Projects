@@ -1,0 +1,5 @@
+# Preserve Archify artifact bytes so SHA-256 delivery receipts survive checkout.
+docs/archify/** -text
+
+# Archify's generated HTML includes blank lines with template indentation.
+docs/archify/**/*.html whitespace=-blank-at-eol

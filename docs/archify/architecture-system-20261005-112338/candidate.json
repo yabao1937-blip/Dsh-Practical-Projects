@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "重介密控系统 当前代码架构",
+    "locale": "zh-CN",
+    "output": "docs/archify/architecture-system-20261005-112338/system-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/yabao1937-blip/Dsh-Practical-Projects.git",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "7e54693c1e2f8ecbe4c84987bec119231f7300e4"
+    }
+  },
+  "components": [
+    {
+      "id": "business-ui",
+      "type": "frontend",
+      "label": "七个业务页面",
+      "sublabel": "App.store与浏览器计算",
+      "tag": "原生JS · DS/GPT",
+      "pos": [50, 80],
+      "size": [230, 100],
+      "sources": [
+        {"path": "frontend/index.html", "line": 24, "end_line": 44, "label": "七个板块导航"},
+        {"path": "frontend/js/app.js", "label": "业务store、公式与双轨训练"},
+        {"path": "frontend/js/coarse.js", "line": 896, "end_line": 927, "label": "粗灰模型重训入口"}
+      ]
+    },
+    {
+      "id": "http-client",
+      "type": "frontend",
+      "label": "HTTP接口客户端",
+      "sublabel": "api.js · 请求与错误分类",
+      "tag": "HTTP模式下启用",
+      "pos": [440, 80],
+      "size": [230, 100],
+      "sources": [
+        {"path": "frontend/js/api.js", "line": 12, "end_line": 133, "label": "状态、遥测、采样与训练接口"},
+        {"path": "frontend/js/app.js", "line": 499, "end_line": 619, "label": "业务快照队列与版本处理"}
+      ]
+    },
+    {
+      "id": "web-backend",
+      "type": "backend",
+      "label": "FastAPI网页服务",
+      "sublabel": "业务路由、服务与查询",
+      "tag": "同源托管 · /api/v1",
+      "pos": [870, 80],
+      "size": [250, 100],
+      "sources": [
+        {"path": "backend/app/main.py", "line": 6, "end_line": 66, "label": "后端装配与同源页面"},
+        {"path": "backend/app/routers/state.py", "line": 12, "end_line": 36, "label": "业务快照读写与保护"},
+        {"path": "backend/app/routers/telemetry.py", "line": 13, "end_line": 31, "label": "采集只读查询"}
+      ]
+    },
+    {
+      "id": "browser-storage",
+      "type": "database",
+      "label": "浏览器本机副本",
+      "sublabel": "localStorage与待发镜像",
+      "tag": "过渡期整库同步",
+      "pos": [50, 320],
+      "size": [230, 100],
+      "sources": [
+        {"path": "frontend/js/app.js", "line": 325, "end_line": 343, "label": "业务快照本机保存"},
+        {"path": "frontend/js/app.js", "line": 453, "end_line": 482, "label": "待发快照槽"},
+        {"path": "frontend/js/app.js", "line": 664, "end_line": 680, "label": "本机快照加载"}
+      ]
+    },
+    {
+      "id": "runtime-monitor",
+      "type": "frontend",
+      "label": "运行状态与采集监测",
+      "sublabel": "Operations · 只读展示",
+      "tag": "不写入业务store",
+      "pos": [440, 320],
+      "size": [230, 100],
+      "sources": [
+        {"path": "frontend/js/operations.js", "line": 1, "end_line": 46, "label": "五秒轮询与独立状态"},
+        {"path": "frontend/js/operations.js", "line": 67, "end_line": 122, "label": "同步、质量和时间显示"},
+        {"path": "frontend/index.html", "line": 245, "end_line": 263, "label": "KEPServer监测面板"}
+      ]
+    },
+    {
+      "id": "sqlite-store",
+      "type": "database",
+      "label": "同一个SQLite数据库",
+      "sublabel": "11张业务表 + 3张采集表",
+      "tag": "两个进程共用配置",
+      "pos": [870, 600],
+      "size": [250, 100],
+      "sources": [
+        {"path": "backend/app/config.py", "line": 8, "end_line": 12, "label": "默认本地数据库文件"},
+        {"path": "backend/app/models.py", "line": 22, "end_line": 215, "label": "十一张业务表"},
+        {"path": "backend/app/telemetry/models.py", "line": 8, "end_line": 43, "label": "三张采集表"}
+      ]
+    },
+    {
+      "id": "collector-runtime",
+      "type": "backend",
+      "label": "独立只读采集器",
+      "sublabel": "读取、质量、租约、入库",
+      "tag": "需配置并显式启用",
+      "pos": [440, 600],
+      "size": [230, 100],
+      "sources": [
+        {"path": "backend/collector.py", "line": 13, "end_line": 46, "label": "独立进程入口"},
+        {"path": "backend/app/telemetry/worker.py", "line": 31, "end_line": 112, "label": "读取、落盘、提交与重试"},
+        {"path": "backend/app/telemetry/repository.py", "line": 20, "end_line": 112, "label": "租约、幂等持久化与清理"}
+      ]
+    },
+    {
+      "id": "kepserver-endpoint",
+      "type": "external",
+      "label": "KEPServer服务器",
+      "sublabel": "外部OPC UA数据端点",
+      "tag": "待现场联调",
+      "pos": [50, 600],
+      "size": [230, 100],
+      "sources": [
+        {"path": "backend/config/kepserver.example.json", "line": 2, "end_line": 20, "label": "默认关闭的端点示例"},
+        {"path": "backend/app/telemetry/opcua.py", "line": 35, "end_line": 84, "label": "连接与Value只读请求"},
+        {"path": "docs/KEPServer接入与运行维护-20261005.md", "line": 3, "end_line": 5, "label": "现场尚未连接的边界"}
+      ]
+    },
+    {
+      "id": "disk-spool",
+      "type": "database",
+      "label": "磁盘批次缓存文件",
+      "sublabel": "JSON批次 · 提交后确认",
+      "tag": "重启重放已落盘批次",
+      "pos": [440, 870],
+      "size": [230, 100],
+      "sources": [
+        {"path": "backend/app/telemetry/spool.py", "line": 12, "end_line": 56, "label": "原子落盘、读取和确认"},
+        {"path": "backend/app/telemetry/worker.py", "line": 49, "end_line": 69, "label": "采集器控制先落盘再提交"}
+      ]
+    }
+  ],
+  "boundaries": [
+    {"kind": "region", "label": "浏览器侧", "wraps": ["business-ui", "http-client", "browser-storage", "runtime-monitor"], "pad": 25},
+    {"kind": "region", "label": "网页后端进程", "wraps": ["web-backend"], "pad": 25},
+    {"kind": "region", "label": "独立采集进程", "wraps": ["collector-runtime"], "pad": 25}
+  ],
+  "connections": [
+    {"id": "business-request", "from": "business-ui", "to": "http-client", "label": "业务请求", "variant": "emphasis"},
+    {"id": "same-origin-api", "from": "http-client", "to": "web-backend", "label": "同源HTTP", "variant": "emphasis"},
+    {"id": "local-snapshot", "from": "business-ui", "to": "browser-storage", "label": "保存与恢复"},
+    {"id": "readonly-monitoring", "from": "runtime-monitor", "to": "http-client", "label": "只读查询"},
+    {"id": "backend-database", "from": "web-backend", "to": "sqlite-store", "label": "SQLAlchemy读写", "variant": "emphasis"},
+    {"id": "collector-database", "from": "collector-runtime", "to": "sqlite-store", "label": "仅写采集表"},
+    {"id": "opcua-value-read", "from": "collector-runtime", "to": "kepserver-endpoint", "label": "OPC UA只读", "variant": "dashed"},
+    {"id": "durable-batch-io", "from": "collector-runtime", "to": "disk-spool", "label": "落盘与重放"}
+  ],
+  "cards": [
+    {"dot": "cyan", "title": "怎样阅读这张图", "items": ["上半部是浏览器业务与HTTP服务，下半部是独立采集及持久存储。箭头表示调用或读写控制，查询响应沿同一次请求返回。", "点击节点可查看已提交源码位置。源码固定在7e54693，采用本地路径证据，未假设该提交已经推送到远端。"]},
+    {"dot": "cyan", "title": "前端七个板块的职责", "items": ["密度推荐总览：目标、灰分、密度建议、系统与皮带筛选、趋势及运行状态。", "数据采集与补录：业务输入来源、人工补录、重介采样，以及独立的KEP实时监测表。", "粗精煤泥分析：DS/GPT切换、MLR/PLS、采样与日级模型、拟合和验证结果。", "浮精影响分析：筛选浮精数据，分析加入浮精前后的总灰分变化和异常工况。", "批量数据导入：浏览器解析Excel/CSV、预览、校验、去重覆盖及导入日志。", "推测简报：业务三表按小时对齐，生成软测量、来源说明及密度建议。", "历史数据查询：筛选本机业务store、分组展示和导出；尚未整合采集历史API。"]},
+    {"dot": "cyan", "title": "浏览器公共代码", "items": ["App管理业务store、取值链、浏览器公式、模型和同步队列；api.js封装请求、超时、失败分类和版本头。", "Operations只保存运行监测响应，约每5秒查询健康与最新遥测；页面隐藏时暂停续排，断网保留读数但标为不可用。", "chart-lite.js绘制Canvas图表，xlsx-lite.js解析文件；当前导出工具实际生成CSV。"]},
+    {"dot": "emerald", "title": "后端业务模块", "items": ["records、settings、inputs、samples、manual_entries处理记录、参数、输入、采样和补录；部分路由直接执行SQLAlchemy CRUD。", "overview、training、state等调用建议、训练、状态和迁移服务；训练区分DS/GPT并保存模型版本与历史。", "telemetry只查询当前值、来源状态和历史分页；health区分进程存活与数据库就绪；请求日志带关联编号。"]},
+    {"dot": "emerald", "title": "采集器负责的步骤", "items": ["collector.py读取配置，worker控制连接和重试；opcua适配器仅请求Value，并获取源时间与服务器时间。", "domain检查类型、换算、量程、质量和接收时效；repository负责来源租约、幂等写入和当前值防回退。", "采集器先原子写缓存，再入库，提交后才确认文件。数据库故障时暂停新采样，先重放已落盘批次；文件自身不会主动投递。"]},
+    {"dot": "emerald", "title": "同一个数据库中的两组表", "items": ["业务表：coal_records、calc_logs、manual_entries、heavy_samples、import_logs、alerts、coarse_models、coarse_model_history、regression_models、settings、auto_state。", "采集表：telemetry_sources、telemetry_points、telemetry_readings；不属于PUT /state业务镜像，也不参与业务快照版本计算。", "两个进程需使用相同数据库配置；SQLite文件应放在本机磁盘。缓存JSON文件与数据库文件是不同的持久存储。"]},
+    {"dot": "amber", "title": "当前边界与下一步", "items": ["KEPServer采集代码已实现并通过本机模拟验证，现场服务器尚未联调；示例配置默认enabled=false。", "实时采集值目前只展示，尚未自动进入业务取值链、粗灰模型、密度建议或简报；下一步先确认现场点表，再实施指标映射。", "密度自动执行目前修改软件输入层，没有PLC写入链路。独立采集进程也没有节点写入操作。", "DS训练、预测、聚合和基线冻结；GPT是专用数学模型流程，与可选LLM解读助手不同。首页当前没有启用解读助手。"]},
+    {"dot": "amber", "title": "同步与数据保护", "items": ["HTTP模式仍是localStorage加服务器整库镜像的过渡架构；版本冲突保留本地待发内容，手动恢复期间的新编辑和在途上传会阻止覆盖。", "配额不足时内存待发副本不能保证关页后恢复；强制业务覆盖必须先备份，备份失败即取消。", "网络断线期间未读取的PLC数据不能由磁盘缓存补出；缓存只保证已经读取并落盘的批次可重放。"]}
+  ]
+}
