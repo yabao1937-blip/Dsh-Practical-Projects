@@ -44,6 +44,9 @@
 .decision-node.is-telemetry .decision-node-source > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .decision-node.is-telemetry-unavailable:not(.decision-root) .decision-node-value { color: var(--dm-muted); }
 .decision-live-comparison { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.decision-node.is-state-group { padding: 10px 14px; gap: 4px; }
+.decision-node.is-state-group .decision-node-value { font-size: 13px; line-height: 1.3; white-space: normal; }
+.decision-state-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 3px 8px; }
 .decision-node[data-family="heavy"] { --dm-node-accent: var(--dm-blue); border-left: 3px solid var(--dm-blue); }
 .decision-node[data-family="float"] { --dm-node-accent: var(--dm-orange); border-left: 3px solid var(--dm-orange); }
 .decision-node[data-family="coarse"] { --dm-node-accent: var(--dm-green); border-left: 3px solid var(--dm-green); }

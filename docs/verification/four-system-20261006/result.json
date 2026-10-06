@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "physicalPoints": 54,
+  "derivedPoints": 1,
+  "labels": [
+    "401",
+    "402",
+    "A",
+    "B"
+  ],
+  "liveText": "401 关\n402 关\nA 关\nB 关",
+  "partialFailureShowsUnknown": true,
+  "storeUnchanged": true,
+  "geometry": [
+    {
+      "width": 1600,
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "width": 1280,
+      "overflow": false
+    },
+    {
+      "width": 800,
+      "overflow": false
+    }
+  ],
+  "pageErrors": [],
+  "apiMutationsBlocked": true
+}

@@ -7,6 +7,7 @@ from ..database import SessionLocal
 from .config import CollectorConfig
 from .domain import availability, definition_id, iso_time, parse_time, utc_now
 from .models import TelemetryPoint, TelemetryReading, TelemetrySource
+from .derived import system_status_points
 
 
 class CollectorBusy(RuntimeError):
@@ -136,4 +137,5 @@ def latest_view(db, source_id=None, now=None):
             "description": row.config.get("description", ""), "item_id": row.config.get("item_id", ""),
             "unit": row.config["unit"], "sample": row.latest, "available": usable, "status": reason})
     return {"checked_at": iso_time(now), "sources": sources, "items": items,
+            "derived_items": system_status_points(items),
             "summary": {"points": len(items), "available": sum(p["available"] for p in items)}}
