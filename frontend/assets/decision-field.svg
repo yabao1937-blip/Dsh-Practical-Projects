@@ -9,7 +9,7 @@
     <rect width="1600" height="800" fill="url(#blue)"/>
     <ellipse cx="1270" cy="170" rx="700" ry="440" fill="url(#light)"/>
     <ellipse cx="870" cy="760" rx="850" ry="500" fill="url(#light)" opacity=".5"/>
-    <g fill="none" stroke="#c9d8ff" stroke-width="1" opacity=".25">
+    <g fill="none" stroke="#c9d8ff" stroke-width="1" opacity=".10">
       <path d="M-100 180 C300 460 480-20 850 140 S1350 600 1700 240"/>
       <path d="M-100 198 C300 478 480-2 850 158 S1350 618 1700 258"/>
       <path d="M-100 216 C300 496 480 16 850 176 S1350 636 1700 276"/>

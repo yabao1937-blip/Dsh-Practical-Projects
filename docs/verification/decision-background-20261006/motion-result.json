@@ -1,0 +1,69 @@
+{
+  "passed": true,
+  "verifiedAt": "2026-10-06",
+  "isolatedFileMode": true,
+  "movingBefore": {
+    "time": 0.0025000000014900933,
+    "running": true,
+    "frame": 11,
+    "width": 1440,
+    "height": 955,
+    "hash": "96d6bcb6e05d729a98e970a58a52cd34c019e1b0387c1a31f5ec3277d89baf56"
+  },
+  "movingAfter": {
+    "time": 0.8608000000014921,
+    "running": true,
+    "frame": 209,
+    "width": 1440,
+    "height": 955,
+    "hash": "b02da580ec960aa1e6c2a8d83e3ee5beb558c39fa0acbeaa9b3a1332e659262e"
+  },
+  "pausedBefore": {
+    "time": 1.9108000000014933,
+    "running": false,
+    "frame": null,
+    "width": 1440,
+    "height": 955,
+    "hash": "9afb492edff3495635e67444a7a3ac8108cc5afe965dd6fb5fd79ce72ddd6f15"
+  },
+  "pausedAfter": {
+    "time": 1.9108000000014933,
+    "running": false,
+    "frame": null,
+    "width": 1440,
+    "height": 955,
+    "hash": "9afb492edff3495635e67444a7a3ac8108cc5afe965dd6fb5fd79ce72ddd6f15"
+  },
+  "reducedBefore": {
+    "time": 1.9192000000014933,
+    "running": false,
+    "frame": null,
+    "width": 1440,
+    "height": 955,
+    "hash": "9afb492edff3495635e67444a7a3ac8108cc5afe965dd6fb5fd79ce72ddd6f15"
+  },
+  "reducedAfter": {
+    "time": 1.9192000000014933,
+    "running": false,
+    "frame": null,
+    "width": 1440,
+    "height": 955,
+    "hash": "9afb492edff3495635e67444a7a3ac8108cc5afe965dd6fb5fd79ce72ddd6f15"
+  },
+  "printPaused": true,
+  "inactivePaused": true,
+  "mobile": {
+    "time": 2.1204000000059646,
+    "running": true,
+    "frame": 532,
+    "width": 422,
+    "height": 976,
+    "hash": "6e67d4499ce505f4c6d9b6167c8affca6cce89e25db4a1d1de503644e88e81cf"
+  },
+  "titleClear": true,
+  "staticFallback": true,
+  "coveredBackgroundPaused": true,
+  "storeUnchanged": true,
+  "pageErrors": [],
+  "externalRequests": []
+}

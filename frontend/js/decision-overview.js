@@ -4,8 +4,9 @@ const DecisionOverviewPage = {
     pointChoices: {}, nodes: [], timer: null,
     sourceInteractionUntil: 0,
     inspectorFrame: null,
-    motionEnabled: true, motionReduced: false,
+    motionEnabled: true, motionReduced: false, motionPrinting: false,
     revealFrame: null,
+    background: null,
     escape(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
     number(value, digits = 2, unit = '') { return Number.isFinite(value) ? value.toFixed(digits) + (unit ? ' ' + unit : '') : '—'; },
     time(value) {
@@ -61,6 +62,7 @@ const DecisionOverviewPage = {
     init() {
         if (this.initialized) { this.refresh(); return; }
         this.initialized = true;
+        if (typeof DecisionBackground !== 'undefined') this.background = new DecisionBackground(document.getElementById('decision-background-flow'));
         document.getElementById('decision-refresh').addEventListener('click', () => {
             this.refresh();
             if (window.Operations) window.Operations.refresh().then(() => this.renderInspector());
@@ -72,6 +74,12 @@ const DecisionOverviewPage = {
         const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
         this.motionReduced = reducedMotion.matches;
         reducedMotion.addEventListener('change', event => { this.motionReduced = event.matches; this.syncMotion(); });
+        const printing = window.matchMedia('print');
+        this.motionPrinting = printing.matches;
+        printing.addEventListener('change', event => { this.motionPrinting = event.matches; this.syncMotion(); });
+        // Also stop on programmatic navigation, which does not dispatch a nav click.
+        this.activityObserver = new MutationObserver(() => this.syncMotion());
+        this.activityObserver.observe(document.getElementById('page-decision'), {attributes:true, attributeFilter:['class']});
         document.getElementById('decision-motion').addEventListener('click', () => {
             this.motionEnabled = !this.motionEnabled; this.syncMotion();
         });
@@ -231,6 +239,7 @@ const DecisionOverviewPage = {
         document.getElementById('decision-board').style.transform = `scale(${scale})`;
         const space = document.getElementById('decision-canvas-space');
         space.style.width = `${1540 * scale}px`; space.style.height = `${970 * scale}px`;
+        this.background?.resize();
         document.getElementById('decision-fit').textContent = `适应画布 · ${Math.round(scale * 100)}%`;
         this.queueInspectorPosition(true);
         this.queueReveal();
@@ -239,6 +248,7 @@ const DecisionOverviewPage = {
     syncMotion() {
         const button = document.getElementById('decision-motion');
         if (!button) return;
+        if (!this.motionEnabled || this.motionReduced || this.motionPrinting || document.hidden || !this.active()) this.background?.setRunning(false);
         document.getElementById('decision-workspace').classList.toggle('is-motion-paused', !this.motionEnabled || this.motionReduced || document.hidden || !this.active());
         button.disabled = this.motionReduced;
         button.textContent = this.motionReduced ? '静态视图' : this.motionEnabled ? '暂停动效' : '开启动效';
@@ -255,7 +265,9 @@ const DecisionOverviewPage = {
             const foreground = document.querySelector('#page-decision .decision-foreground').getBoundingClientRect();
             const viewport = document.querySelector('.main-content').getBoundingClientRect();
             const height = reveal.querySelector('.decision-underlay').clientHeight;
+            if (!height) { this.background?.setRunning(false); return; }
             const progress = Math.max(0,Math.min(1,(viewport.bottom-foreground.bottom)/height));
+            this.background?.setRunning(this.motionEnabled && !this.motionReduced && !this.motionPrinting && !document.hidden && this.active() && progress > 0);
             reveal.style.setProperty('--dr-progress',this.motionReduced || !this.motionEnabled ? '1' : progress.toFixed(3));
             reveal.style.setProperty('--dr-lift',`${this.motionReduced || !this.motionEnabled ? 0 : (1-progress)*36}px`);
         });
