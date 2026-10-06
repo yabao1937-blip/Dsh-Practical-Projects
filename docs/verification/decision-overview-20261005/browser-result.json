@@ -5,34 +5,60 @@
     {
       "width": 1600,
       "documentOverflow": false,
-      "canvasClientWidth": 1550,
-      "canvasScrollWidth": 1550,
+      "canvasClientWidth": 1496,
+      "canvasScrollWidth": 1496,
       "overflow": [],
       "overlap": []
     },
     {
       "width": 1440,
       "documentOverflow": false,
-      "canvasClientWidth": 1390,
-      "canvasScrollWidth": 1390,
+      "canvasClientWidth": 1336,
+      "canvasScrollWidth": 1336,
       "overflow": [],
       "overlap": []
     },
     {
       "width": 1280,
       "documentOverflow": false,
-      "canvasClientWidth": 1230,
-      "canvasScrollWidth": 1230,
+      "canvasClientWidth": 1176,
+      "canvasScrollWidth": 1176,
       "overflow": [],
       "overlap": []
     },
     {
       "width": 800,
       "documentOverflow": false,
-      "canvasClientWidth": 750,
+      "canvasClientWidth": 724,
       "canvasScrollWidth": 1001,
       "overflow": [],
       "overlap": []
+    }
+  ],
+  "revealLayout": [
+    {
+      "width": 1440,
+      "height": 900,
+      "titleTop": 160.4375,
+      "titleBottom": 289.21875,
+      "visible": true,
+      "documentOverflow": false
+    },
+    {
+      "width": 390,
+      "height": 1000,
+      "titleTop": 154.546875,
+      "titleBottom": 238.546875,
+      "visible": true,
+      "documentOverflow": false
+    },
+    {
+      "width": 1600,
+      "height": 1850,
+      "titleTop": 160.234375,
+      "titleBottom": 289.015625,
+      "visible": true,
+      "documentOverflow": false
     }
   ],
   "pageErrors": [],
@@ -41,9 +67,10 @@
     "new and old navigation",
     "node inspection",
     "view isolation",
-    "dark/light themes",
+    "default paper and dark/light themes",
     "zoom and fit",
     "quality/zero/failed telemetry",
-    "page switching"
+    "page switching",
+    "footer title visible at 3 viewport sizes"
   ]
 }

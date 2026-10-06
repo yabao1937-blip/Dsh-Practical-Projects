@@ -5,6 +5,7 @@ const DecisionOverviewPage = {
     sourceInteractionUntil: 0,
     inspectorFrame: null,
     motionEnabled: true, motionReduced: false,
+    revealFrame: null,
     escape(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
     number(value, digits = 2, unit = '') { return Number.isFinite(value) ? value.toFixed(digits) + (unit ? ' ' + unit : '') : '—'; },
     time(value) {
@@ -112,7 +113,7 @@ const DecisionOverviewPage = {
             if (event.key === 'Escape' && this.active()) this.closeInspector();
         });
         for (const container of [document.querySelector('.main-content'),document.getElementById('decision-canvas-scroll')]) {
-            container.addEventListener('scroll', () => this.queueInspectorPosition(), {passive:true});
+            container.addEventListener('scroll', () => { this.queueInspectorPosition(); this.queueReveal(); }, {passive:true});
         }
         document.querySelector('.main-nav').addEventListener('click', event => {
             const page = event.target.closest('[data-page]')?.dataset.page;
@@ -152,6 +153,7 @@ const DecisionOverviewPage = {
         const inspector = document.getElementById('decision-inspector');
         if (!inspector?.classList?.contains('is-open')) return;
         inspector.classList.remove('is-open','is-below','is-inline');
+        this.queueReveal();
         if (this.inspectorFrame) { cancelAnimationFrame(this.inspectorFrame); this.inspectorFrame = null; }
         if (restoreFocus) document.querySelector(`[data-decision-node="${this.selected}"]`)?.focus({preventScroll:true});
     },
@@ -190,6 +192,7 @@ const DecisionOverviewPage = {
         }
         inspector.classList.remove('is-inline');
         inspector.classList.toggle('is-below',placement === 'bottom');
+        this.queueReveal();
         let width, left, top;
         if (placement === 'bottom') {
             width = Math.min(960,innerWidth-2*margin);
@@ -230,6 +233,7 @@ const DecisionOverviewPage = {
         space.style.width = `${1540 * scale}px`; space.style.height = `${970 * scale}px`;
         document.getElementById('decision-fit').textContent = `适应画布 · ${Math.round(scale * 100)}%`;
         this.queueInspectorPosition(true);
+        this.queueReveal();
     },
     changeZoom(delta) { this.zoom = Math.max(.65, Math.min(1.5, (this.actualZoom || 1) + delta)); this.fit(); },
     syncMotion() {
@@ -240,6 +244,21 @@ const DecisionOverviewPage = {
         button.textContent = this.motionReduced ? '静态视图' : this.motionEnabled ? '暂停动效' : '开启动效';
         button.setAttribute('aria-pressed',String(this.motionEnabled && !this.motionReduced));
         button.title = this.motionReduced ? '已按系统的减少动态效果设置显示静态视图' : '动效示意计算方向，不代表实时采集正在更新';
+        this.queueReveal();
+    },
+    queueReveal() {
+        const reveal = document.getElementById('decision-reveal');
+        if (!reveal || !this.active() || document.hidden || this.revealFrame) return;
+        this.revealFrame = requestAnimationFrame(() => {
+            this.revealFrame = null;
+            if (!this.active()) return;
+            const foreground = document.querySelector('#page-decision .decision-foreground').getBoundingClientRect();
+            const viewport = document.querySelector('.main-content').getBoundingClientRect();
+            const height = reveal.querySelector('.decision-underlay').clientHeight;
+            const progress = Math.max(0,Math.min(1,(viewport.bottom-foreground.bottom)/height));
+            reveal.style.setProperty('--dr-progress',this.motionReduced || !this.motionEnabled ? '1' : progress.toFixed(3));
+            reveal.style.setProperty('--dr-lift',`${this.motionReduced || !this.motionEnabled ? 0 : (1-progress)*36}px`);
+        });
     },
 
     buildNodes(s) {

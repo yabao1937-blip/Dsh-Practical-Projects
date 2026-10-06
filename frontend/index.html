@@ -6,7 +6,7 @@
     <title>重介密控系统 - 密度推荐与灰分监控平台</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css?v=11">
-    <link rel="stylesheet" href="css/decision-overview.css?v=4">
+    <link rel="stylesheet" href="css/decision-overview.css?v=5">
     <!-- 无外部依赖，图表使用纯Canvas 2D绘制 -->
     <script src="js/xlsx-lite.js?v=8"></script>
     <script src="js/chart-lite.js?v=7"></script>
@@ -77,33 +77,47 @@
     <main class="main-content">
 
         <section class="page" id="page-decision" aria-labelledby="decision-title">
-            <div class="page-header">
-                <div><h2 id="decision-title">决策总览</h2><p class="decision-intro">从建议密度追溯组分、计算因素与数据来源</p></div>
-                <div class="page-header-actions">
-                    <button class="btn" id="decision-theme" type="button">浅色视图</button>
-                    <button class="btn btn-primary" id="decision-refresh" type="button">刷新数据</button>
+            <div class="decision-foreground">
+                <div class="page-header decision-masthead">
+                    <div><p class="decision-eyebrow">PROCESS INTELLIGENCE / 01</p><h2 id="decision-title">决策总览</h2><p class="decision-intro">从建议密度追溯组分、计算因素与数据来源</p></div>
+                    <div class="page-header-actions">
+                        <span class="decision-readonly">只读决策视图</span>
+                        <button class="btn" id="decision-theme" type="button">深色视图</button>
+                        <button class="btn btn-primary" id="decision-refresh" type="button">刷新数据</button>
+                    </div>
+                </div>
+                <div class="decision-workspace is-light" id="decision-workspace">
+                    <div class="decision-toolbar">
+                        <div class="decision-view-switch" role="group" aria-label="粗精煤泥分析链路">
+                            <button type="button" data-decision-model="gpt" class="is-active" aria-pressed="true">GPT 链路</button>
+                            <button type="button" data-decision-model="production" aria-pressed="false">当前生产链路</button>
+                        </div>
+                        <div class="decision-legend"><span class="decision-legend-solid"></span>当前计算链 <span class="decision-legend-dashed"></span>核算对照 / 待接入</div>
+                        <button type="button" class="decision-motion" id="decision-motion" aria-pressed="true" title="动效示意计算方向，不代表实时采集正在更新">暂停动效</button>
+                        <div class="decision-zoom" role="group" aria-label="画布缩放">
+                            <button type="button" id="decision-zoom-out" aria-label="缩小">−</button>
+                            <button type="button" id="decision-fit">适应画布</button>
+                            <button type="button" id="decision-zoom-in" aria-label="放大">＋</button>
+                        </div>
+                    </div>
+                    <div class="decision-context" id="decision-context" aria-live="polite"></div>
+                    <div class="decision-canvas-scroll" id="decision-canvas-scroll" aria-label="建议密度因素关系图">
+                        <div class="decision-canvas-space" id="decision-canvas-space"><div class="decision-board" id="decision-board"></div></div>
+                    </div>
+                    <div class="decision-inspector" id="decision-inspector" aria-label="节点详情"></div>
+                    <p class="decision-footnote">点击节点查看详情，点击画布空白处收起。动效仅示意计算方向；虚线不代表实时数据已参与计算。本页只读，密度建议由人工核对执行。</p>
                 </div>
             </div>
-            <div class="decision-workspace" id="decision-workspace">
-                <div class="decision-toolbar">
-                    <div class="decision-view-switch" role="group" aria-label="粗精煤泥分析链路">
-                        <button type="button" data-decision-model="gpt" class="is-active" aria-pressed="true">GPT 链路</button>
-                        <button type="button" data-decision-model="production" aria-pressed="false">当前生产链路</button>
-                    </div>
-                    <div class="decision-legend"><span class="decision-legend-solid"></span>当前计算链 <span class="decision-legend-dashed"></span>核算对照 / 待接入</div>
-                    <button type="button" class="decision-motion" id="decision-motion" aria-pressed="true" title="动效示意计算方向，不代表实时采集正在更新">暂停动效</button>
-                    <div class="decision-zoom" role="group" aria-label="画布缩放">
-                        <button type="button" id="decision-zoom-out" aria-label="缩小">−</button>
-                        <button type="button" id="decision-fit">适应画布</button>
-                        <button type="button" id="decision-zoom-in" aria-label="放大">＋</button>
+            <div class="decision-reveal" id="decision-reveal">
+                <div class="decision-underlay">
+                    <div class="decision-underlay-art" aria-hidden="true"></div>
+                    <div class="decision-underlay-content">
+                        <p class="decision-eyebrow">DATA / MODEL / DECISION</p>
+                        <h3>数据有来源。<br>建议有依据。</h3>
+                        <div class="decision-underlay-notes"><span>01 · 来源核对</span><span>02 · 灰分核算</span><span>03 · 人工确认执行</span></div>
+                        <p class="decision-underlay-caption">沿计算链理解每一个数值，让密度建议可追溯、可核对。</p>
                     </div>
                 </div>
-                <div class="decision-context" id="decision-context" aria-live="polite"></div>
-                <div class="decision-canvas-scroll" id="decision-canvas-scroll" aria-label="建议密度因素关系图">
-                    <div class="decision-canvas-space" id="decision-canvas-space"><div class="decision-board" id="decision-board"></div></div>
-                </div>
-                <div class="decision-inspector" id="decision-inspector" aria-label="节点详情"></div>
-                <p class="decision-footnote">点击节点查看详情，点击画布空白处收起。动效仅示意计算方向；虚线不代表实时数据已参与计算。本页只读，密度建议由人工核对执行。</p>
             </div>
         </section>
 
@@ -878,7 +892,7 @@
     <script src="js/api.js?v=7"></script>
     <script src="js/app.js?v=86"></script>
     <script src="js/overview.js?v=46"></script>
-    <script src="js/decision-overview.js?v=4"></script>
+    <script src="js/decision-overview.js?v=5"></script>
     <script src="js/collect.js?v=25"></script>
     <script src="js/coarse.js?v=24"></script>
     <script src="js/float.js?v=15"></script>

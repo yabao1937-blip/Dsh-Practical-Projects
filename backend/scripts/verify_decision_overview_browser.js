@@ -35,8 +35,9 @@ const output = path.join(root,'docs/verification/decision-overview-20261005');
         await page.locator('[data-decision-model="gpt"]').click();
         await page.locator('#decision-refresh').click();
         assert.equal(await page.evaluate(() => JSON.stringify(App.store)),storeBefore);
+        assert.equal(await page.locator('.decision-workspace.is-light').count(),1,'Paper theme is the default');
         await page.locator('#decision-theme').click();
-        assert.equal(await page.locator('.decision-workspace.is-light').count(),1);
+        assert.equal(await page.locator('.decision-workspace.is-light').count(),0);
         await page.locator('#decision-theme').click();
         await page.locator('#decision-zoom-in').click();
         await page.locator('#decision-fit').click();
@@ -44,8 +45,12 @@ const output = path.join(root,'docs/verification/decision-overview-20261005');
         await page.locator('[data-decision-close]').click();
         await page.setViewportSize({width:1600,height:1850});
         await page.locator('#decision-fit').click();
+        await page.evaluate(() => { document.querySelector('.main-content').scrollTop = 0; });
+        await page.locator('#decision-theme').click();
+        await page.waitForTimeout(250); // Let the existing control/theme transitions settle for the artifact.
         await page.screenshot({path:path.join(output,'decision-overview-dark.png')});
         await page.locator('#decision-theme').click();
+        await page.waitForTimeout(250);
         await page.screenshot({path:path.join(output,'decision-overview-light.png')});
 
         const layout = [];
@@ -89,9 +94,26 @@ const output = path.join(root,'docs/verification/decision-overview-20261005');
         assert.equal(await page.locator('#page-overview.active').count(),1);
         await page.locator('[data-page="page-decision"]').click();
         await page.waitForFunction(() => document.querySelector('#page-decision.active'));
+        const revealLayout = [];
+        for (const viewport of [{width:1440,height:900},{width:390,height:1000},{width:1600,height:1850}]) {
+            await page.setViewportSize(viewport);
+            await page.evaluate(() => { DecisionOverviewPage.fit(); });
+            await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+            await page.evaluate(() => { document.querySelector('.main-content').scrollTop = 1e6; });
+            await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+            revealLayout.push(await page.evaluate(() => {
+                const title = document.querySelector('.decision-underlay h3').getBoundingClientRect();
+                const hit = document.elementFromPoint(title.left+10,title.top+10);
+                return {width:innerWidth,height:innerHeight,titleTop:title.top,titleBottom:title.bottom,visible:!!hit?.closest('.decision-underlay'),documentOverflow:document.documentElement.scrollWidth>innerWidth};
+            }));
+        }
+        for (const result of revealLayout) {
+            assert.ok(result.visible && result.titleTop>=56 && result.titleBottom<=result.height,JSON.stringify(result));
+            assert.equal(result.documentOverflow,false,JSON.stringify(result));
+        }
         assert.deepEqual(errors,[]);
         assert.deepEqual(mutations,[]);
-        fs.writeFileSync(path.join(output,'browser-result.json'),JSON.stringify({passed:true,isolatedFileMode:true,layout,pageErrors:errors,mutatingRequests:mutations,checks:['new and old navigation','node inspection','view isolation','dark/light themes','zoom and fit','quality/zero/failed telemetry','page switching']},null,2)+'\n');
-        console.log('Decision overview browser acceptance passed: 4 widths, themes, sources, isolation and navigation.');
+        fs.writeFileSync(path.join(output,'browser-result.json'),JSON.stringify({passed:true,isolatedFileMode:true,layout,revealLayout,pageErrors:errors,mutatingRequests:mutations,checks:['new and old navigation','node inspection','view isolation','default paper and dark/light themes','zoom and fit','quality/zero/failed telemetry','page switching','footer title visible at 3 viewport sizes']},null,2)+'\n');
+        console.log('Decision overview browser acceptance passed: 4 widths, themes, sources, isolation, navigation and footer reveal.');
     } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

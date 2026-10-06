@@ -1,0 +1,193 @@
+{
+  "passed": true,
+  "verifiedAt": "2026-10-06",
+  "isolatedFileMode": true,
+  "popupCases": [
+    {
+      "width": 1600,
+      "node": "heavy-ash",
+      "placement": "right",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 1600,
+      "node": "raw-ash",
+      "placement": "left",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 1600,
+      "node": "density",
+      "placement": "bottom",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 1440,
+      "node": "heavy-ash",
+      "placement": "right",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 1440,
+      "node": "raw-ash",
+      "placement": "left",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 1440,
+      "node": "density",
+      "placement": "bottom",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 1280,
+      "node": "heavy-ash",
+      "placement": "right",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 1280,
+      "node": "raw-ash",
+      "placement": "left",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 1280,
+      "node": "density",
+      "placement": "bottom",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 800,
+      "node": "heavy-ash",
+      "placement": "right",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 800,
+      "node": "raw-ash",
+      "placement": "left",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 800,
+      "node": "density",
+      "placement": "bottom",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 390,
+      "node": "heavy-ash",
+      "placement": "bottom",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 390,
+      "node": "raw-ash",
+      "placement": "bottom",
+      "open": true,
+      "overlap": false
+    },
+    {
+      "width": 390,
+      "node": "density",
+      "placement": "bottom",
+      "open": true,
+      "overlap": false
+    }
+  ],
+  "reveal": {
+    "top": {
+      "scroll": 0,
+      "progress": 0,
+      "frontBottom": 1607.25,
+      "underlayTop": 711.25,
+      "underlayBottom": 1607.25,
+      "titleTop": 787.75,
+      "titleBottom": 916.53125,
+      "titleVisible": false,
+      "viewBottom": 1000
+    },
+    "middle": {
+      "scroll": 1055,
+      "progress": 0.5,
+      "frontBottom": 552.25,
+      "underlayTop": 148,
+      "underlayBottom": 1044,
+      "titleTop": 224.5,
+      "titleBottom": 353.28125,
+      "titleVisible": false,
+      "viewBottom": 1000
+    },
+    "bottom": {
+      "scroll": 1523,
+      "progress": 1,
+      "frontBottom": 84.25,
+      "underlayTop": 84.25,
+      "underlayBottom": 980.25,
+      "titleTop": 160.75,
+      "titleBottom": 289.53125,
+      "titleVisible": true,
+      "viewBottom": 1000
+    }
+  },
+  "inspectorContainingBlockChanges": [],
+  "selectThemes": {
+    "light": {
+      "background": "rgb(255, 254, 251)",
+      "scheme": "light"
+    },
+    "dark": {
+      "background": "rgb(21, 31, 63)",
+      "scheme": "dark"
+    }
+  },
+  "pausedTransform": "matrix(1, 0, 0, 1, 0, 0)",
+  "reducedTransform": "none",
+  "printRevealHidden": true,
+  "legacyTheme": {
+    "bg": "#0a1628",
+    "frame": "none"
+  },
+  "pageErrors": [],
+  "externalRequests": [],
+  "storeUnchanged": true,
+  "blankCanvasDismisses": true,
+  "revealHeightSync": {
+    "before": {
+      "expected": 0.030113473654066438,
+      "actual": 0.03
+    },
+    "opened": {
+      "expected": 0.2786010882016037,
+      "actual": 0.279
+    },
+    "closed": {
+      "expected": 0.030113473654066438,
+      "actual": 0.03
+    }
+  },
+  "pausedArtStable": {
+    "before": {
+      "opacity": "1",
+      "transform": "matrix(1, 0, 0, 1, 0, 0)"
+    },
+    "after": {
+      "opacity": "1",
+      "transform": "matrix(1, 0, 0, 1, 0, 0)"
+    }
+  }
+}

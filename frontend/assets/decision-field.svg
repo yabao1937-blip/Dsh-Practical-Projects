@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 800" width="1600" height="800">
+  <!-- Original fluid contours and grain for the density-control workspace. -->
+  <defs>
+    <linearGradient id="blue" x2="1" y2="1"><stop stop-color="#2027c9"/><stop offset=".5" stop-color="#354bee"/><stop offset="1" stop-color="#102c8d"/></linearGradient>
+    <radialGradient id="light"><stop stop-color="#dce9ff" stop-opacity=".45"/><stop offset="1" stop-color="#c9d8ff" stop-opacity="0"/></radialGradient>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".6" numOctaves="3" seed="29" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="linear" slope=".08"/></feComponentTransfer><feBlend in="SourceGraphic" mode="soft-light"/></filter>
+  </defs>
+  <g filter="url(#grain)">
+    <rect width="1600" height="800" fill="url(#blue)"/>
+    <ellipse cx="1270" cy="170" rx="700" ry="440" fill="url(#light)"/>
+    <ellipse cx="870" cy="760" rx="850" ry="500" fill="url(#light)" opacity=".5"/>
+    <g fill="none" stroke="#c9d8ff" stroke-width="1" opacity=".25">
+      <path d="M-100 180 C300 460 480-20 850 140 S1350 600 1700 240"/>
+      <path d="M-100 198 C300 478 480-2 850 158 S1350 618 1700 258"/>
+      <path d="M-100 216 C300 496 480 16 850 176 S1350 636 1700 276"/>
+      <path d="M-100 234 C300 514 480 34 850 194 S1350 654 1700 294"/>
+      <path d="M-100 252 C300 532 480 52 850 212 S1350 672 1700 312"/>
+      <path d="M-100 270 C300 550 480 70 850 230 S1350 690 1700 330"/>
+      <path d="M-100 288 C300 568 480 88 850 248 S1350 708 1700 348"/>
+      <path d="M-100 306 C300 586 480 106 850 266 S1350 726 1700 366"/>
+      <path d="M-100 324 C300 604 480 124 850 284 S1350 744 1700 384"/>
+      <path d="M-100 342 C300 622 480 142 850 302 S1350 762 1700 402"/>
+      <path d="M-100 360 C300 640 480 160 850 320 S1350 780 1700 420"/>
+      <path d="M-100 378 C300 658 480 178 850 338 S1350 798 1700 438"/>
+      <path d="M-100 396 C300 676 480 196 850 356 S1350 816 1700 456"/>
+      <path d="M-100 414 C300 694 480 214 850 374 S1350 834 1700 474"/>
+      <path d="M-100 432 C300 712 480 232 850 392 S1350 852 1700 492"/>
+      <path d="M-100 450 C300 730 480 250 850 410 S1350 870 1700 510"/>
+      <path d="M-100 468 C300 748 480 268 850 428 S1350 888 1700 528"/>
+      <path d="M-100 486 C300 766 480 286 850 446 S1350 906 1700 546"/>
+      <path d="M-100 504 C300 784 480 304 850 464 S1350 924 1700 564"/>
+      <path d="M-100 522 C300 802 480 322 850 482 S1350 942 1700 582"/>
+      <path d="M-100 540 C300 820 480 340 850 500 S1350 960 1700 600"/>
+      <path d="M-100 558 C300 838 480 358 850 518 S1350 978 1700 618"/>
+      <path d="M-100 576 C300 856 480 376 850 536 S1350 996 1700 636"/>
+      <path d="M-100 594 C300 874 480 394 850 554 S1350 1014 1700 654"/>
+    </g>
+  </g>
+</svg>

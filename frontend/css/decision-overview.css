@@ -1,4 +1,4 @@
-/* Scoped live decision map, inspired by Archify's cards and curved connectors. */
+/* Read-only decision diagram; the paper visual skin below preserves graph geometry. */
 .decision-intro { margin-top: 6px; color: var(--text-muted); font-size: 13px; }
 #page-decision { min-width: 0; }
 .decision-workspace { --dm-bg: #101a2d; --dm-card: #18243a; --dm-text: #eef3fa; --dm-muted: #a1b0c5; --dm-border: #32415b; --dm-grid: #28354b; --dm-blue: #7bb3ff; --dm-orange: #ffc078; --dm-green: #7dd9b0; --dm-cyan: #75d5e8; background: var(--dm-bg); color: var(--dm-text); border: 1px solid var(--dm-border); border-radius: 16px; overflow: hidden; }
@@ -98,3 +98,62 @@
     .decision-inspector.is-open.is-below { grid-template-columns: 1fr; }
     .decision-inspector.is-open.is-below .decision-source-panel { border-left: 0; padding: 20px 0 0; border-top: 1px solid var(--dm-border); }
 }
+
+/* Original paper/blue skin. Avoid transforms and filters on inspector ancestors. */
+#page-decision { --ds-paper: #101831; --ds-ink: #e2e7ff; --ds-muted: #a2acce; --ds-rule: #34416c; --ds-accent: #98a7ff; }
+#page-decision:has(.decision-workspace.is-light) { --ds-paper: #f5f4f0; --ds-ink: #2637bb; --ds-muted: #69718b; --ds-rule: #d6d8e3; --ds-accent: #293be3; }
+/* The shared chrome changes only while this view is active. */
+body:has(#page-decision.active) { --bg-primary: #0d142c; --bg-secondary: #111a37; --bg-input: #151f3f; --border-color: #34416c; --text-primary: #e2e7ff; --text-secondary: #abb6df; --text-muted: #9ca9cc; --accent-blue-light: #98a7ff; }
+body:has(#page-decision.active .decision-workspace.is-light) { --bg-primary: #eeedf0; --bg-secondary: #eeedf3; --bg-input: #fffefb; --border-color: #d6d8e3; --text-primary: #2637bb; --text-secondary: #69718b; --text-muted: #69718b; --accent-blue-light: #293be3; }
+body:has(#page-decision.active)::after { content: ''; position: fixed; inset: 0; border: 3px solid var(--accent-blue-light); pointer-events: none; z-index: 150; }
+body:has(#page-decision.active) .top-bar { background: var(--bg-primary); border-bottom: 1px solid var(--border-color); }
+body:has(#page-decision.active) .logo-icon { color: var(--accent-blue-light); }
+body:has(#page-decision.active) .nav-item { border-radius: 2px; }
+body:has(#page-decision.active) .nav-item.active { background: transparent; color: var(--accent-blue-light); box-shadow: inset 0 -2px var(--accent-blue-light); }
+.decision-foreground { position: relative; z-index: 1; background: var(--ds-paper); border: 1px solid var(--ds-rule); padding: 28px 26px 0; box-shadow: 0 16px 42px #1823470b; }
+.decision-foreground::before { content: ''; position: absolute; inset: 0; background: url('../assets/decision-paper.svg'); pointer-events: none; opacity: .7; }
+#page-decision .decision-masthead { position: relative; align-items: flex-end; margin-bottom: 26px; gap: 20px; }
+.decision-eyebrow { font: 11px/1.5 Consolas, 'Cascadia Code', monospace; letter-spacing: .16em; color: var(--ds-accent); margin-bottom: 10px; }
+#page-decision .decision-masthead h2 { color: var(--ds-ink); font-size: clamp(30px,3.5vw,48px); line-height: 1.25; font-weight: 400; letter-spacing: .06em; }
+.decision-intro { margin-top: 10px; color: var(--ds-muted); }
+.decision-readonly { color: var(--ds-muted); font-size: 11px; padding-right: 12px; border-right: 1px solid var(--ds-rule); white-space: nowrap; }
+#page-decision .decision-masthead .btn { color: var(--ds-accent); background: transparent; border: 1px solid var(--ds-rule); border-radius: 2px; }
+#page-decision .decision-masthead .btn-primary { background: #293be3; color: #fff; border-color: #293be3; }
+.decision-workspace { --dm-bg: #101934; --dm-card: #151f3f; --dm-text: #e4e9ff; --dm-muted: #a2acce; --dm-border: #34416c; --dm-grid: #2a365b; --dm-blue: #96afff; --dm-orange: #e5b281; --dm-green: #88c4ae; --dm-cyan: #98a7ff; --dm-root-bg: #283c9f; color-scheme: dark; position: relative; border-radius: 2px; }
+.decision-workspace.is-light { --dm-bg: #f5f4f0; --dm-card: #fffefb; --dm-text: #253154; --dm-muted: #68728c; --dm-border: #cfd3df; --dm-grid: #d6d9e5; --dm-blue: #3449ce; --dm-orange: #a97036; --dm-green: #3b7e6d; --dm-cyan: #293be3; --dm-root-bg: #293be3; color-scheme: light; }
+.decision-view-switch, .decision-zoom, .decision-motion, .decision-badge, .decision-formula, .decision-detail-link { border-radius: 2px; }
+.decision-view-switch button, .decision-zoom button { border-radius: 1px; }
+.decision-motion { background: transparent; }
+.decision-canvas-scroll { background-image: radial-gradient(var(--dm-grid) .8px, transparent .8px), url('../assets/decision-paper.svg'); background-size: 24px 24px, 180px 180px; }
+.decision-flow { filter: none; }
+.decision-node { border-radius: 3px; box-shadow: 3px 3px 0 color-mix(in srgb, var(--dm-border) 35%, transparent); }
+.decision-node.has-flow::after { box-shadow: inset 0 0 14px color-mix(in srgb, var(--dm-node-accent) 4%, transparent); }
+.decision-node .decision-node-value { font-family: Bahnschrift, 'DIN Alternate', 'Microsoft YaHei', sans-serif; }
+.decision-node.decision-root { border-color: var(--dm-root-bg); background: var(--dm-root-bg); color: #fff; }
+.decision-root .decision-node-heading { color: #fff; }
+.decision-root .decision-node-source { color: #ffffffcc; }
+.decision-root-unit { color: #ffffffb8; }
+.decision-inspector.is-open { border-top: 3px solid var(--dm-cyan); border-radius: 3px; box-shadow: 0 16px 50px #17215035; }
+.decision-workspace .decision-source-panel select, .decision-workspace .decision-source-panel select option { background: var(--dm-card); color: var(--dm-text); border-radius: 2px; }
+.decision-workspace .decision-source-panel select { transition: border-color .15s, box-shadow .15s; }
+
+/* A separate sticky stage is revealed as the opaque paper moves out of view. */
+.decision-reveal { --dr-stage-height: max(400px, calc(100vh - 104px)); height: calc(2 * var(--dr-stage-height)); margin-top: calc(-1 * var(--dr-stage-height)); --dr-progress: 0; --dr-lift: 36px; }
+.decision-underlay { height: var(--dr-stage-height); position: sticky; top: 72px; overflow: hidden; background: #2436d1; color: #fff; }
+.decision-underlay-art { position: absolute; inset: -40px; background: url('../assets/decision-field.svg') center / cover; transform: translateY(var(--dr-lift)); opacity: calc(.55 + .45 * var(--dr-progress)); pointer-events: none; }
+.decision-underlay-art::after { content: 'DENSITY'; position: absolute; right: 28px; bottom: -20px; font: 180px/1 Bahnschrift, Consolas, sans-serif; letter-spacing: -.04em; color: #ffffff0b; }
+.decision-underlay-content { position: relative; padding: 42px 56px; }
+.decision-underlay .decision-eyebrow { color: #dbe3ff; margin-bottom: 18px; }
+.decision-underlay h3 { font-size: clamp(30px,3.2vw,46px); font-weight: 400; line-height: 1.4; letter-spacing: .08em; }
+.decision-underlay-notes { display: flex; flex-wrap: wrap; gap: 16px 36px; margin-top: 26px; color: #e2e7ff; font-size: 12px; }
+.decision-underlay-caption { margin-top: 22px; color: #dbe3ff; font-size: 12px; line-height: 1.8; }
+@media (max-width: 800px) {
+    .decision-foreground { padding: 18px 12px 0; }
+    #page-decision .decision-masthead { align-items: flex-start; flex-direction: column; gap: 18px; }
+    .decision-readonly { display: none; }
+    .decision-underlay-content { padding: 36px 24px; }
+    .decision-underlay-notes { gap: 12px 20px; }
+    .decision-underlay-art::after { font-size: 110px; }
+}
+@media (prefers-reduced-motion: reduce) { .decision-underlay-art { transform: none; opacity: 1; } }
+@media print { .decision-reveal, body:has(#page-decision.active)::after { display: none; } }
