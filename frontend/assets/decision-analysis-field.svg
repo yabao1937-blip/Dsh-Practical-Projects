@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="320" viewBox="0 0 1440 320">
+  <defs>
+    <pattern id="dots" width="6" height="6" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r=".85" fill="white"/></pattern>
+    <linearGradient id="fade"><stop offset="0" stop-color="white" stop-opacity="0"/><stop offset=".6" stop-color="white" stop-opacity=".3"/><stop offset="1" stop-color="white" stop-opacity=".8"/></linearGradient>
+    <linearGradient id="vertical" x2="0" y2="1"><stop offset="0" stop-color="white"/><stop offset="1" stop-color="black"/></linearGradient>
+    <mask id="soft"><rect width="1440" height="320" fill="url(#vertical)"/></mask>
+  </defs>
+  <g mask="url(#soft)">
+    <path d="M520 70C720 260 950-110 1440 130V220C1010-10 840 350 520 70Z" fill="url(#dots)" opacity=".7"/>
+    <path d="M680 0C820 150 970 10 1150 50S1350 200 1440 180V0Z" fill="url(#dots)" opacity=".45"/>
+    <g fill="none" stroke="url(#fade)" stroke-width="1">
+      <path d="M350 30C700 200 850-90 1440 130"/><path d="M360 45C710 215 860-75 1440 145"/><path d="M370 60C720 230 870-60 1440 160"/><path d="M380 75C730 245 880-45 1440 175"/><path d="M390 90C740 260 890-30 1440 190"/>
+    </g>
+    <g fill="white" opacity=".7"><path d="m1300 24 2 9 9 2-9 2-2 9-2-9-9-2 9-2Z"/><path d="m1070 55 1 5 5 1-5 1-1 5-1-5-5-1 5-1Z"/><circle cx="1370" cy="75" r="1.3"/><circle cx="960" cy="18" r="1"/></g>
+  </g>
+</svg>

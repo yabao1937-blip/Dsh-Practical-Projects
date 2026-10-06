@@ -6,7 +6,7 @@
     <title>重介密控系统 - 密度推荐与灰分监控平台</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css?v=11">
-    <link rel="stylesheet" href="css/decision-overview.css?v=9">
+    <link rel="stylesheet" href="css/decision-overview.css?v=10">
     <!-- 无外部依赖，图表使用纯Canvas 2D绘制 -->
     <script src="js/xlsx-lite.js?v=8"></script>
     <script src="js/chart-lite.js?v=7"></script>
@@ -109,7 +109,7 @@
                 </div>
                 <section class="decision-coarse-analysis" id="decision-coarse-analysis" aria-labelledby="decision-coarse-title">
                     <div class="decision-analysis-header">
-                        <div><p class="decision-eyebrow">HISTORICAL ANALYSIS / GPT / 02</p><h3 id="decision-coarse-title">粗精煤泥灰分 · GPT 历史分析</h3><p>历史采样均值 · 固定 GPT 保存模型 · 非实时预测</p></div>
+                        <div class="decision-analysis-title"><p class="decision-eyebrow">GPT / HISTORICAL ANALYSIS</p><h3 id="decision-coarse-title">粗精煤泥灰分<span>从趋势到影响因素</span></h3><p>历史采样均值 · 固定 GPT 保存模型 · 非实时预测</p></div>
                         <div class="decision-period-switch" role="group" aria-label="GPT 历史图表统计周期">
                             <button type="button" data-decision-period="day" class="is-active" aria-pressed="true">按日</button>
                             <button type="button" data-decision-period="shift" aria-pressed="false">按班次</button>
@@ -118,17 +118,15 @@
                     <p class="decision-analysis-meta" id="decision-coarse-meta" aria-live="polite"></p>
                     <div class="decision-charts-grid">
                         <article class="decision-chart-card decision-chart-trend">
-                            <div class="decision-chart-heading"><h4>粗精煤泥灰分趋势</h4><div class="decision-chart-legend"><span class="is-actual">实测均值</span><span class="is-predicted">GPT 预测均值</span><span class="is-target">目标参考 13%</span></div></div>
+                            <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">01 / TREND</p><h4>粗精煤泥<br>灰分趋势</h4><p>沿时间观察实测与预测的变化，比较它们与目标参考线的距离。</p></div><div class="decision-chart-legend"><span class="is-actual">实测均值</span><span class="is-predicted">GPT 预测均值</span><span class="is-target">目标参考 13%</span></div></div>
                             <div class="decision-chart-plot"><canvas id="decision-coarse-trend" role="img" aria-label="历史实测灰分、GPT 预测灰分与13%参考线趋势，汇总数据见下方表格"></canvas><div class="decision-chart-tooltip" hidden></div></div>
                         </article>
-                        <article class="decision-chart-card">
-                            <div class="decision-chart-heading"><h4>多因素模型关联强度</h4><p>保存模型的标准化系数 · <span class="decision-factor-positive">正向</span> / <span class="decision-factor-negative">负向</span></p></div>
+                        <article class="decision-chart-card decision-chart-factors">
+                            <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">02 / FACTORS</p><h4>多因素模型<br>关联强度</h4><p>从保存模型的标准化系数查看关联强弱与方向；关联不代表因果。</p></div><p class="decision-factor-key"><span class="decision-factor-positive">正向关联</span><span class="decision-factor-negative">负向关联</span></p><p class="decision-chart-sr" id="decision-coarse-factor-list"></p></div>
                             <div class="decision-chart-plot"><canvas id="decision-coarse-factors" role="img" aria-label="GPT 保存模型的标准化系数关联强度，不代表因果或准确率"></canvas><div class="decision-chart-tooltip" hidden></div></div>
-                            <p class="decision-chart-sr" id="decision-coarse-factor-list"></p>
                         </article>
-                        <article class="decision-chart-card">
-                            <div class="decision-chart-heading"><h4>粗精煤泥灰分 vs 精磁尾液位</h4><div class="decision-chart-legend"><span class="is-actual">实测均值</span><span class="is-predicted">GPT 预测均值</span></div></div>
-                            <p class="decision-chart-metrics" id="decision-coarse-metrics"></p>
+                        <article class="decision-chart-card decision-chart-level">
+                            <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">03 / RELATIONSHIP</p><h4>灰分与<br>精磁尾液位</h4><p>在同组有效液位采样中，对照实测与预测灰分的分布。</p></div><div class="decision-chart-legend"><span class="is-actual">实测均值</span><span class="is-predicted">GPT 预测均值</span></div><p class="decision-chart-metrics" id="decision-coarse-metrics"></p></div>
                             <div class="decision-chart-plot"><canvas id="decision-coarse-level" role="img" aria-label="历史液位均值与实测和GPT预测灰分均值的散点对照，汇总数据见下方表格"></canvas><div class="decision-chart-tooltip" hidden></div></div>
                         </article>
                     </div>

@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {chromium}=require(process.env.DMCS_PLAYWRIGHT_MODULE || 'playwright');
 const url=process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000';
-const output=path.resolve(__dirname,'../../docs/verification/decision-gpt-charts-20261006');
+const output=path.resolve(__dirname,'../../docs/verification/decision-gpt-charts-style-20261006');
 (async()=> {
     const browser=await chromium.launch({channel:'chrome',headless:true});
     try {
@@ -27,17 +27,25 @@ const output=path.resolve(__dirname,'../../docs/verification/decision-gpt-charts
         // Abort of the app's initial auto-sync can create an unrelated warning toast in this isolated context.
         await page.evaluate(()=>{document.querySelector('.toast-container').textContent='';});
         const section=page.locator('#decision-coarse-analysis');
+        const lightBackground=await section.evaluate(el=>getComputedStyle(el).backgroundColor);
+        async function capture(name) {
+            // Fit the entire section inside the app's scrolling main panel for an unclipped artifact.
+            const height=await section.evaluate(el=>Math.ceil(el.getBoundingClientRect().height)+180);
+            await page.setViewportSize({width:page.viewportSize().width,height:Math.max(1300,height)});
+            await section.scrollIntoViewIfNeeded();
+            await section.screenshot({path:path.join(output,name)});
+        }
         await section.scrollIntoViewIfNeeded();
         const day=await page.evaluate(()=>({mode:DecisionCoarseCharts.mode,count:DecisionCoarseCharts.snapshot.count,groups:DecisionCoarseCharts.snapshot.rows.length,
             factors:DecisionCoarseCharts.snapshot.factors,model:DecisionCoarseCharts.snapshot.which,hits:Object.fromEntries(Object.entries(DecisionCoarseCharts.hits).map(([k,v])=>[k,v.length]))}));
         assert.equal(day.mode,'day');assert.ok(day.groups>0);assert.equal(day.hits.trend,day.groups);assert.equal(day.factors.length,10);
-        await section.screenshot({path:path.join(output,'gpt-day-light.png')});
+        await capture('gpt-day-light.png');
         await page.locator('[data-decision-period="shift"]').click();
         const shift=await page.evaluate(()=>({mode:DecisionCoarseCharts.mode,groups:DecisionCoarseCharts.snapshot.rows.length,factors:DecisionCoarseCharts.snapshot.factors,rows:DecisionCoarseCharts.snapshot.rows}));
         assert.equal(shift.mode,'shift');assert.ok(shift.groups>=day.groups);assert.deepEqual(shift.factors,day.factors);
         assert.equal(await page.locator('[data-decision-period="shift"]').getAttribute('aria-pressed'),'true');
         assert.ok(shift.rows.every(r=>r.label.endsWith('白班') || r.label.endsWith('夜班')));
-        await section.screenshot({path:path.join(output,'gpt-shift-light.png')});
+        await capture('gpt-shift-light.png');
         await page.locator('.decision-analysis-data summary').click();
         assert.equal(await page.locator('#decision-coarse-table tr').count(),shift.groups);
         await page.locator('.decision-analysis-data summary').click();
@@ -49,22 +57,29 @@ const output=path.resolve(__dirname,'../../docs/verification/decision-gpt-charts
             assert.ok((await canvas.locator('..').locator('.decision-chart-tooltip').innerText()).length>0);
         }
         await page.locator('#decision-theme').click();await section.scrollIntoViewIfNeeded();
-        assert.equal(await page.evaluate(()=>DecisionCoarseCharts.palette().blue),'#7b9fff');
-        await section.screenshot({path:path.join(output,'gpt-shift-dark.png')});
+        assert.equal(await page.evaluate(()=>DecisionCoarseCharts.palette().blue),'#ffffff');
+        assert.notEqual(await section.evaluate(el=>getComputedStyle(el).backgroundColor),lightBackground);
+        await capture('gpt-shift-dark.png');
         const geometry=[];
-        for(const width of [1600,1440,1024,800,390]) {
+        for(const width of [1600,1440,1024,801,800,390]) {
             await page.setViewportSize({width,height:1300});await section.scrollIntoViewIfNeeded();
             await page.waitForFunction(()=>['trend','factors','level'].every(id=> {
                 const c=document.getElementById('decision-coarse-'+id),r=c.getBoundingClientRect();
                 return Math.abs(c.width-r.width*Math.min(devicePixelRatio || 1,2))<2;
             }));
             geometry.push(await section.evaluate(el=>({width:innerWidth,overflow:el.scrollWidth>el.clientWidth+2,
-                cards:[...el.querySelectorAll('.decision-chart-card')].map(c=>({width:c.clientWidth,overflow:c.scrollWidth>c.clientWidth+2}))})));
+                cards:[...el.querySelectorAll('.decision-chart-card')].map(c=> {
+                    const copy=c.querySelector('.decision-chart-copy').getBoundingClientRect(),plot=c.querySelector('.decision-chart-plot').getBoundingClientRect();
+                    return {width:c.clientWidth,plotWidth:plot.width,overflow:c.scrollWidth>c.clientWidth+2,
+                        layout:plot.top>=copy.bottom?'stacked':plot.left<copy.left?'plot-left':'plot-right'};
+                })})));
         }
         assert.ok(geometry.every(g=>!g.overflow && g.cards.every(c=>!c.overflow && c.width>200)));
+        assert.ok(geometry.filter(g=>g.width>800).every(g=>g.cards.map(c=>c.layout).join(',')==='plot-right,plot-left,plot-right'));
+        assert.ok(geometry.filter(g=>g.width<=800).every(g=>g.cards.every(c=>c.layout==='stacked')));
         await page.setViewportSize({width:390,height:2400});
         await section.scrollIntoViewIfNeeded();
-        await section.screenshot({path:path.join(output,'gpt-shift-mobile.png')});
+        await capture('gpt-shift-mobile.png');
         assert.ok(await page.evaluate(before=>JSON.stringify(App.store)===before,before),'Period, hover, resize and theme must not mutate store');
         // Current production is changed only in this isolated browser memory to exercise GPT-bank selection.
         await page.evaluate(()=> {
@@ -92,7 +107,8 @@ const output=path.resolve(__dirname,'../../docs/verification/decision-gpt-charts
         assert.ok(await page.evaluate(before=>JSON.stringify(App.store)===before,before),'Decision re-entry must not mutate store');
         assert.deepEqual(errors,[]);
         const result={passed:true,day:{...day,factors:day.factors.length},shift:{groups:shift.groups},geometry,
-            tooltips:true,themes:true,gptWhileDsSelected:true,emptyHistoryKeepsFactors:true,noDsFallback:true,storeUnchanged:true,apiMutationsBlocked:true,blockedRequests:blocked,pageErrors:errors};
+            tooltips:true,themes:true,unifiedBlueSection:true,alternatingDesktopLayout:true,stackedNarrowLayout:true,
+            gptWhileDsSelected:true,emptyHistoryKeepsFactors:true,noDsFallback:true,storeUnchanged:true,apiMutationsBlocked:true,blockedRequests:blocked,pageErrors:errors};
         fs.writeFileSync(path.join(output,'result.json'),JSON.stringify(result,null,2)+'\n');
         console.log(JSON.stringify(result));
     } finally {await browser.close();}
