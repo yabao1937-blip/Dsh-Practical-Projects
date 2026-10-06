@@ -132,6 +132,7 @@ const DecisionOverviewPage = {
         document.getElementById('decision-theme').addEventListener('click', event => {
             const light = document.getElementById('decision-workspace').classList.toggle('is-light');
             event.currentTarget.textContent = light ? '深色视图' : '浅色视图';
+            if (typeof DecisionCoarseCharts !== 'undefined') DecisionCoarseCharts.refresh();
         });
         const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
         this.motionReduced = reducedMotion.matches;
@@ -211,6 +212,7 @@ const DecisionOverviewPage = {
         this.snapshot = this.buildSnapshot();
         this.nodes = this.buildNodes(this.snapshot);
         this.renderGraph(); this.renderContext(); this.renderInspector(); this.fit();
+        if (typeof DecisionCoarseCharts !== 'undefined') DecisionCoarseCharts.refresh();
         if (focused) document.querySelector(`[data-decision-node="${focused}"]`)?.focus({preventScroll:true});
         if (sourceFocused) document.getElementById('decision-source-point')?.focus({preventScroll:true});
         if (closeFocused) document.querySelector('[data-decision-close]')?.focus({preventScroll:true});

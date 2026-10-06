@@ -1,0 +1,128 @@
+{
+  "passed": true,
+  "day": {
+    "mode": "day",
+    "count": 205,
+    "groups": 52,
+    "factors": 10,
+    "model": "mlr",
+    "hits": {
+      "trend": 52,
+      "factors": 10,
+      "level": 104
+    }
+  },
+  "shift": {
+    "groups": 91
+  },
+  "geometry": [
+    {
+      "width": 1600,
+      "overflow": false,
+      "cards": [
+        {
+          "width": 1496,
+          "overflow": false
+        },
+        {
+          "width": 527,
+          "overflow": false
+        },
+        {
+          "width": 949,
+          "overflow": false
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "overflow": false,
+      "cards": [
+        {
+          "width": 1336,
+          "overflow": false
+        },
+        {
+          "width": 469,
+          "overflow": false
+        },
+        {
+          "width": 847,
+          "overflow": false
+        }
+      ]
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "cards": [
+        {
+          "width": 920,
+          "overflow": false
+        },
+        {
+          "width": 920,
+          "overflow": false
+        },
+        {
+          "width": 920,
+          "overflow": false
+        }
+      ]
+    },
+    {
+      "width": 800,
+      "overflow": false,
+      "cards": [
+        {
+          "width": 724,
+          "overflow": false
+        },
+        {
+          "width": 724,
+          "overflow": false
+        },
+        {
+          "width": 724,
+          "overflow": false
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "overflow": false,
+      "cards": [
+        {
+          "width": 314,
+          "overflow": false
+        },
+        {
+          "width": 314,
+          "overflow": false
+        },
+        {
+          "width": 314,
+          "overflow": false
+        }
+      ]
+    }
+  ],
+  "tooltips": true,
+  "themes": true,
+  "gptWhileDsSelected": true,
+  "emptyHistoryKeepsFactors": true,
+  "noDsFallback": true,
+  "storeUnchanged": true,
+  "apiMutationsBlocked": true,
+  "blockedRequests": [
+    {
+      "method": "PUT",
+      "url": "http://127.0.0.1:8000/api/v1/state"
+    },
+    {
+      "method": "PUT",
+      "url": "http://127.0.0.1:8000/api/v1/state"
+    }
+  ],
+  "pageErrors": []
+}

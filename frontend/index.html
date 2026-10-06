@@ -6,7 +6,7 @@
     <title>重介密控系统 - 密度推荐与灰分监控平台</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css?v=11">
-    <link rel="stylesheet" href="css/decision-overview.css?v=8">
+    <link rel="stylesheet" href="css/decision-overview.css?v=9">
     <!-- 无外部依赖，图表使用纯Canvas 2D绘制 -->
     <script src="js/xlsx-lite.js?v=8"></script>
     <script src="js/chart-lite.js?v=7"></script>
@@ -107,6 +107,34 @@
                     <div class="decision-inspector" id="decision-inspector" aria-label="节点详情"></div>
                     <p class="decision-footnote">点击节点选择采集点，卡片随读数更新；点击画布空白处收起。采集显示不改变建议计算，相关连线作为虚线对照。建议密度保留计算值，点位显示为采集对照。</p>
                 </div>
+                <section class="decision-coarse-analysis" id="decision-coarse-analysis" aria-labelledby="decision-coarse-title">
+                    <div class="decision-analysis-header">
+                        <div><p class="decision-eyebrow">HISTORICAL ANALYSIS / GPT / 02</p><h3 id="decision-coarse-title">粗精煤泥灰分 · GPT 历史分析</h3><p>历史采样均值 · 固定 GPT 保存模型 · 非实时预测</p></div>
+                        <div class="decision-period-switch" role="group" aria-label="GPT 历史图表统计周期">
+                            <button type="button" data-decision-period="day" class="is-active" aria-pressed="true">按日</button>
+                            <button type="button" data-decision-period="shift" aria-pressed="false">按班次</button>
+                        </div>
+                    </div>
+                    <p class="decision-analysis-meta" id="decision-coarse-meta" aria-live="polite"></p>
+                    <div class="decision-charts-grid">
+                        <article class="decision-chart-card decision-chart-trend">
+                            <div class="decision-chart-heading"><h4>粗精煤泥灰分趋势</h4><div class="decision-chart-legend"><span class="is-actual">实测均值</span><span class="is-predicted">GPT 预测均值</span><span class="is-target">目标参考 13%</span></div></div>
+                            <div class="decision-chart-plot"><canvas id="decision-coarse-trend" role="img" aria-label="历史实测灰分、GPT 预测灰分与13%参考线趋势，汇总数据见下方表格"></canvas><div class="decision-chart-tooltip" hidden></div></div>
+                        </article>
+                        <article class="decision-chart-card">
+                            <div class="decision-chart-heading"><h4>多因素模型关联强度</h4><p>保存模型的标准化系数 · <span class="decision-factor-positive">正向</span> / <span class="decision-factor-negative">负向</span></p></div>
+                            <div class="decision-chart-plot"><canvas id="decision-coarse-factors" role="img" aria-label="GPT 保存模型的标准化系数关联强度，不代表因果或准确率"></canvas><div class="decision-chart-tooltip" hidden></div></div>
+                            <p class="decision-chart-sr" id="decision-coarse-factor-list"></p>
+                        </article>
+                        <article class="decision-chart-card">
+                            <div class="decision-chart-heading"><h4>粗精煤泥灰分 vs 精磁尾液位</h4><div class="decision-chart-legend"><span class="is-actual">实测均值</span><span class="is-predicted">GPT 预测均值</span></div></div>
+                            <p class="decision-chart-metrics" id="decision-coarse-metrics"></p>
+                            <div class="decision-chart-plot"><canvas id="decision-coarse-level" role="img" aria-label="历史液位均值与实测和GPT预测灰分均值的散点对照，汇总数据见下方表格"></canvas><div class="decision-chart-tooltip" hidden></div></div>
+                        </article>
+                    </div>
+                    <p class="decision-analysis-note">按日为自然日；白班 08:00–20:00，夜班 20:00–次日 08:00，夜班归入起始日期。先用保存模型预测各采样点，再按组取均值，不使用待确认的 KEPServer 累计灰分或煤量。液位图只汇总同组中有有效液位的配对采样；开关采样比例不代表运行时长。历史回算不是新的独立验证，化验报告时间尚未记录。</p>
+                    <details class="decision-analysis-data"><summary>查看汇总数据</summary><div class="decision-analysis-table-wrap"><table><thead><tr><th>日期 / 班次</th><th>采样数</th><th>实测均值 (%)</th><th>GPT 预测均值 (%)</th><th>配对液位均值 (%)</th><th>液位配对数</th><th>配对实测均值 (%)</th><th>配对预测均值 (%)</th></tr></thead><tbody id="decision-coarse-table"></tbody></table></div></details>
+                </section>
             </div>
             <div class="decision-reveal" id="decision-reveal">
                 <div class="decision-underlay">
@@ -893,7 +921,8 @@
     <script src="js/app.js?v=86"></script>
     <script src="js/overview.js?v=46"></script>
     <script src="js/decision-background.js?v=1"></script>
-    <script src="js/decision-overview.js?v=11"></script>
+    <script src="js/decision-coarse-charts.js?v=1"></script>
+    <script src="js/decision-overview.js?v=12"></script>
     <script src="js/collect.js?v=25"></script>
     <script src="js/coarse.js?v=24"></script>
     <script src="js/float.js?v=15"></script>
