@@ -12,6 +12,8 @@
 
 查看本地 SQLite 数据库可在仓库根目录运行 `backend\.venv\Scripts\pythonw.exe backend\scripts\view_sqlite.py`，打开独立的只读浏览窗口。默认显示 `telemetry_points`，可切换历史表并执行只读查询；选中一行查看完整 JSON 字段，点击“刷新 / 执行查询”获取新读数。
 
+三张采集表的字段、关联、更新规则和查询示例见 [SQLite 采集表架构说明](docs/SQLite采集表架构说明-20261006.md)，配有 Archify 逻辑关系图。
+
 ## 目录结构
 
 ```

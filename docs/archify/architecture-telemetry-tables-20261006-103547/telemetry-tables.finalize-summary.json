@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-telemetry-tables-20261006-103547\\candidate.json",
+    "sha256": "cb81083d7d9cdb37a3df966219786cf0e88f9d2b671348699fef14aea41c9fe5",
+    "bytes": 4156
+  },
+  "artifact": {
+    "path": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-telemetry-tables-20261006-103547\\telemetry-tables.html",
+    "sha256": "122b7cba4636e2dd7d2aade85230c8a7a2def70e46ebc25016921fb192fea4d2",
+    "bytes": 748524
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-telemetry-tables-20261006-103547\\telemetry-tables.finalize.json",
+    "summaryReceipt": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-telemetry-tables-20261006-103547\\telemetry-tables.finalize-summary.json",
+    "browserCheckReceipt": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-telemetry-tables-20261006-103547\\telemetry-tables.browser-check.json"
+  },
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "check-failed"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3005
+}

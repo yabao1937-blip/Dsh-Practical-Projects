@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "SQLite 采集三表逻辑关系",
+    "locale": "zh-CN",
+    "output": "docs/archify/architecture-telemetry-tables-20261006-103547/telemetry-tables.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/yabao1937-blip/Dsh-Practical-Projects.git",
+      "revision": "af35f3acbcbe6c05211b99831d312241ff0f7d84",
+      "link_mode": "local-only"
+    }
+  },
+  "components": [
+    {
+      "id": "source-table",
+      "type": "database",
+      "label": "telemetry_sources",
+      "sublabel": "主键 source_id",
+      "tag": "来源状态 / 心跳 / 租约",
+      "pos": [
+        40,
+        100
+      ],
+      "size": [
+        250,
+        108
+      ],
+      "sources": [
+        {
+          "path": "backend/app/telemetry/models.py",
+          "line": 8,
+          "end_line": 18,
+          "label": "来源字段"
+        },
+        {
+          "path": "backend/app/telemetry/repository.py",
+          "line": 36,
+          "end_line": 72,
+          "label": "独占租约与状态"
+        }
+      ]
+    },
+    {
+      "id": "point-table",
+      "type": "database",
+      "label": "telemetry_points",
+      "sublabel": "联合主键 (source_id, key)",
+      "tag": "config 点表 / latest 最新样本",
+      "pos": [
+        490,
+        100
+      ],
+      "size": [
+        270,
+        108
+      ],
+      "sources": [
+        {
+          "path": "backend/app/telemetry/models.py",
+          "line": 21,
+          "end_line": 28,
+          "label": "点位字段"
+        },
+        {
+          "path": "backend/app/telemetry/repository.py",
+          "line": 36,
+          "end_line": 60,
+          "label": "点表同步"
+        },
+        {
+          "path": "backend/app/telemetry/repository.py",
+          "line": 74,
+          "end_line": 104,
+          "label": "快照与历史写入"
+        }
+      ]
+    },
+    {
+      "id": "reading-table",
+      "type": "database",
+      "label": "telemetry_readings",
+      "sublabel": "主键 id / received_at / sample",
+      "tag": "每批同点唯一 / 按点和时间索引",
+      "pos": [
+        980,
+        100
+      ],
+      "size": [
+        290,
+        108
+      ],
+      "sources": [
+        {
+          "path": "backend/app/telemetry/models.py",
+          "line": 31,
+          "end_line": 43,
+          "label": "历史字段与约束"
+        },
+        {
+          "path": "backend/app/telemetry/repository.py",
+          "line": 74,
+          "end_line": 113,
+          "label": "限频写入与保留清理"
+        },
+        {
+          "path": "backend/app/telemetry/worker.py",
+          "line": 64,
+          "end_line": 79,
+          "label": "正常采集及清理调用"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "SQLite 采集表 · dense_medium.db",
+      "wraps": [
+        "source-table",
+        "point-table",
+        "reading-table"
+      ],
+      "pad": 32
+    }
+  ],
+  "connections": [
+    {
+      "id": "source-has-points",
+      "from": "source-table",
+      "to": "point-table",
+      "label": "逻辑 1:N · source_id",
+      "variant": "dashed"
+    },
+    {
+      "id": "point-has-readings",
+      "from": "point-table",
+      "to": "reading-table",
+      "label": "逻辑 1:N · (source_id, key)",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "关系的实现",
+      "items": [
+        "关系由采集代码维护，数据库尚未声明外键。",
+        "历史 point_key 对应点表 key，需同时核对 source_id。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "最新样本与历史",
+      "items": [
+        "latest 随新批次更新，包括坏质量样本。",
+        "历史达到 60 秒间隔或质量 / issue 变化时写入。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "查询与保留",
+      "items": [
+        "当前可用性由质量、时效和来源在线状态动态判断。",
+        "默认历史保留 7 天，采集流程每分钟触发限量清理。"
+      ]
+    }
+  ]
+}

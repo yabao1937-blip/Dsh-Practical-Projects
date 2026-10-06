@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "a610c8b6-b730-49ed-bcd7-49e95dfd05b6",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-telemetry-tables-20261006-103547\\candidate.json",
+  "output": "D:\\dense-medium-density-control-system\\docs\\archify\\architecture-telemetry-tables-20261006-103547\\telemetry-tables.html",
+  "specification": {
+    "sha256": "cb81083d7d9cdb37a3df966219786cf0e88f9d2b671348699fef14aea41c9fe5",
+    "bytes": 4156
+  },
+  "artifact": {
+    "sha256": "122b7cba4636e2dd7d2aade85230c8a7a2def70e46ebc25016921fb192fea4d2",
+    "bytes": 748524
+  }
+}
