@@ -40,7 +40,7 @@ const DecisionOverviewPage = {
         const item = this.displayPoints().find(p => this.pointIdentity(p) === choice);
         const sample = item?.sample || {};
         const group = item?.kind === 'state_group';
-        const hasValue = group ? sample.components?.length === 4 && sample.value != null : typeof sample.value === 'boolean' || Number.isFinite(sample.value);
+        const hasValue = group ? item.member_count > 0 && sample.components?.length === item.member_count && sample.value != null : typeof sample.value === 'boolean' || Number.isFinite(sample.value);
         const available = !!item?.available && !window.Operations?.telemetryFailed && sample.quality === 'good' && !sample.issue && hasValue;
         let value = '—';
         if (group) value = this.groupValue(sample.components);
@@ -58,13 +58,17 @@ const DecisionOverviewPage = {
         const clock = received && Number.isFinite(received.getTime()) ? received.toLocaleTimeString('zh-CN', {hour12:false}) : '时间未记录';
         return {bound:true,item,available,value,components:group ? sample.components : null,sampleAt:sample.received_at || null,
             source:available ? `${group ? '组合' : 'KEP'} · ${item.tag_name || item.name} · ${clock}` : `不可用 · ${state}`,
-            title:`${group ? '本系统派生的四路运行状态组合' : item?.item_id || sample.node_id || choice}；${state}；${group ? '状态组合，无单位' : item?.unit ? '单位 '+item.unit : '单位未提供'}；接收时间 ${this.time(sample.received_at)}`};
+            title:`${group ? '本系统派生的'+item.name : item?.item_id || sample.node_id || choice}；${state}；${group ? '状态组合，无单位' : item?.unit ? '单位 '+item.unit : '单位未提供'}；接收时间 ${this.time(sample.received_at)}`};
     },
     telemetryUpdated() {
         if (!this.initialized || !this.active() || document.hidden || !this.snapshot) return;
-        const old = (window.Operations?.telemetry?.items || []).find(p => this.pointIdentity(p) === this.pointChoices['system-switches']);
-        const group = (window.Operations?.telemetry?.derived_items || []).find(p => p.kind === 'state_group' && p.source_id === old?.source_id && p.sample?.components?.some(c => c.point_key === old?.key));
-        if (group) { this.pointChoices['system-switches'] = this.pointIdentity(group); this.savePointChoices(); }
+        let migrated = false;
+        for (const [nodeId,groupKey] of [['system-switches','four_system_status'],['desliming','desliming_status']]) {
+            const old = (window.Operations?.telemetry?.items || []).find(p => this.pointIdentity(p) === this.pointChoices[nodeId]);
+            const group = (window.Operations?.telemetry?.derived_items || []).find(p => p.key === groupKey && p.source_id === old?.source_id && p.sample?.components?.some(c => c.point_key === old?.key));
+            if (group) { this.pointChoices[nodeId] = this.pointIdentity(group); migrated = true; }
+        }
+        if (migrated) this.savePointChoices();
         const focused = document.activeElement?.dataset?.decisionNode;
         this.renderGraph(); this.renderContext();
         if (document.activeElement?.id !== 'decision-source-point' || Date.now() > this.sourceInteractionUntil) this.renderInspector();
@@ -504,7 +508,7 @@ const DecisionOverviewPage = {
     },
 
     telemetryState(item, failed = window.Operations?.telemetryFailed) {
-        const labels = {good:'可用',no_data:'无数据',bad_quality:'坏质量',uncertain_quality:'质量不确定',stale:'接收超时',source_stale:'源时间过期',collector_offline:'采集离线',out_of_range:'超出量程',invalid_value_type:'类型不匹配',non_finite_value:'数值无效',future_source_time:'源时钟异常',incomplete_components:'四路数据未齐',member_unavailable:'部分系统不可用',mixed_batches:'四路接收批次不一致'};
+        const labels = {good:'可用',no_data:'无数据',bad_quality:'坏质量',uncertain_quality:'质量不确定',stale:'接收超时',source_stale:'源时间过期',collector_offline:'采集离线',out_of_range:'超出量程',invalid_value_type:'类型不匹配',non_finite_value:'数值无效',future_source_time:'源时钟异常',incomplete_components:'组合数据未齐',member_unavailable:'部分系统不可用',mixed_batches:'成员接收批次不一致'};
         return failed ? '查询中断 · 最后读数不可用' : `${item.sample?.quality || '无质量信息'} · ${labels[item.status] || '不可用'}`;
     },
     pointIdentity(item) { return JSON.stringify([item.source_id,item.key]); },

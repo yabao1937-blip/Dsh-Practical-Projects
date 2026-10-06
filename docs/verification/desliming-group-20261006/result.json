@@ -1,0 +1,39 @@
+{
+  "passed": true,
+  "physicalPoints": 50,
+  "derivedPoints": 2,
+  "memberLabels": [
+    "473",
+    "474"
+  ],
+  "liveText": "473 关\n474 关",
+  "migratedOld473": true,
+  "migratedOld474": true,
+  "unrelatedChoicePreserved": true,
+  "clearedChoicePreserved": true,
+  "reloadPreserved": true,
+  "allOffAvailable": true,
+  "partialFailureShowsUnknown": true,
+  "fourSystemCompatible": true,
+  "storeUnchanged": true,
+  "apiMutationsBlocked": true,
+  "geometry": [
+    {
+      "width": 1600,
+      "overflow": false
+    },
+    {
+      "width": 1440,
+      "overflow": false
+    },
+    {
+      "width": 1280,
+      "overflow": false
+    },
+    {
+      "width": 800,
+      "overflow": false
+    }
+  ],
+  "pageErrors": []
+}

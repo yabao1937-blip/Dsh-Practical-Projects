@@ -7,46 +7,60 @@ FOUR_SYSTEM_MEMBERS = (
     ("A", "TIA_4_2.TIA_4_2.A345/if_prod"),
     ("B", "TIA_4_2.TIA_4_2.A346/if_prod"),
 )
+DESLIMING_MEMBERS = (
+    ("473", "TIA_3_3.TIA_3_3.473/if_prod"),
+    ("474", "TIA_3_3.TIA_3_3.474/if_prod"),
+)
+STATUS_GROUPS = (
+    {"key":"four_system_status", "name":"四系统运行状态（组合）", "device":"四系统组合",
+     "tag_name":"四系统运行状态", "description":"401、402、A、B 四路状态组合", "members":FOUR_SYSTEM_MEMBERS},
+    {"key":"desliming_status", "name":"脱粉系统运行状态（组合）", "device":"脱粉系统组合",
+     "tag_name":"脱粉系统运行状态", "description":"473、474 两路状态组合", "members":DESLIMING_MEMBERS},
+)
 
 
 def system_status_points(items):
     result = []
     for source_id in sorted({item["source_id"] for item in items}):
         by_id = {item.get("item_id"):item for item in items if item["source_id"] == source_id}
-        if not any(item_id in by_id for _, item_id in FOUR_SYSTEM_MEMBERS):
-            continue
-        components = []
-        for label, item_id in FOUR_SYSTEM_MEMBERS:
-            item = by_id.get(item_id)
-            sample = (item.get("sample") or {}) if item else {}
-            value = sample.get("value")
-            boolean = isinstance(value, bool)
-            usable = bool(item and item.get("available") and boolean and sample.get("quality") == "good" and not sample.get("issue"))
-            components.append({"label":label, "item_id":item_id, "point_key":item.get("key") if item else None,
-                "value":value if boolean else None, "available":usable,
-                "status":item.get("status") if item and boolean else "invalid_value_type" if item else "no_data",
-                "quality":sample.get("quality"), "received_at":sample.get("received_at"),
-                "source_at":sample.get("source_at"), "server_at":sample.get("server_at")})
-        times = []
-        for component in components:
-            if not isinstance(component["received_at"], str):
-                continue
-            try:
-                times.append(parse_time(component["received_at"]))
-            except (TypeError, ValueError):
-                pass
-        complete = len(times) == 4 and all(c["point_key"] for c in components)
-        same_batch = complete and len(set(times)) == 1
-        available = same_batch and all(c["available"] for c in components)
-        issue = None if available else "incomplete_components" if not complete else "member_unavailable" if not all(c["available"] for c in components) else "mixed_batches"
-        qualities = [c["quality"] for c in components]
-        quality = "bad" if "bad" in qualities else "uncertain" if "uncertain" in qualities else "good" if all(q == "good" for q in qualities) else "unknown"
-        received_at = min(times).isoformat(timespec="milliseconds") if complete else None
-        sample = {"value":{c["label"]:c["value"] for c in components} if available else None,
-            "quality":quality, "issue":issue, "received_at":received_at, "source_at":None, "server_at":None,
-            "components":components}
-        result.append({"source_id":source_id, "key":"four_system_status", "name":"四系统运行状态（组合）",
-            "device":"四系统组合", "tag_name":"四系统运行状态", "description":"401、402、A、B 四路状态组合",
-            "item_id":"", "unit":"", "kind":"state_group", "available":available,
-            "status":"good" if available else issue, "sample":sample})
+        for group in STATUS_GROUPS:
+            if any(item_id in by_id for _, item_id in group["members"]):
+                result.append(_status_group(source_id, by_id, group))
     return result
+
+
+def _status_group(source_id, by_id, group):
+    members = group["members"]
+    components = []
+    for label, item_id in members:
+        item = by_id.get(item_id)
+        sample = (item.get("sample") or {}) if item else {}
+        value = sample.get("value")
+        boolean = isinstance(value, bool)
+        usable = bool(item and item.get("available") and boolean and sample.get("quality") == "good" and not sample.get("issue"))
+        components.append({"label":label, "item_id":item_id, "point_key":item.get("key") if item else None,
+            "value":value if boolean else None, "available":usable,
+            "status":item.get("status") if item and boolean else "invalid_value_type" if item else "no_data",
+            "quality":sample.get("quality"), "received_at":sample.get("received_at"),
+            "source_at":sample.get("source_at"), "server_at":sample.get("server_at")})
+    times = []
+    for component in components:
+        if not isinstance(component["received_at"], str):
+            continue
+        try:
+            times.append(parse_time(component["received_at"]))
+        except (TypeError, ValueError):
+            pass
+    complete = len(times) == len(members) and all(c["point_key"] for c in components)
+    same_batch = complete and len(set(times)) == 1
+    available = same_batch and all(c["available"] for c in components)
+    issue = None if available else "incomplete_components" if not complete else "member_unavailable" if not all(c["available"] for c in components) else "mixed_batches"
+    qualities = [c["quality"] for c in components]
+    quality = "bad" if "bad" in qualities else "uncertain" if "uncertain" in qualities else "good" if all(q == "good" for q in qualities) else "unknown"
+    received_at = min(times).isoformat(timespec="milliseconds") if complete else None
+    sample = {"value":{c["label"]:c["value"] for c in components} if available else None,
+        "quality":quality, "issue":issue, "received_at":received_at, "source_at":None, "server_at":None,
+        "components":components}
+    return {"source_id":source_id, **{key:group[key] for key in ("key", "name", "device", "tag_name", "description")},
+        "item_id":"", "unit":"", "kind":"state_group", "member_count":len(members), "available":available,
+        "status":"good" if available else issue, "sample":sample}
