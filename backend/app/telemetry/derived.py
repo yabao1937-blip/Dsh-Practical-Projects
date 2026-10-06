@@ -11,11 +11,17 @@ DESLIMING_MEMBERS = (
     ("473", "TIA_3_3.TIA_3_3.473/if_prod"),
     ("474", "TIA_3_3.TIA_3_3.474/if_prod"),
 )
+FLOAT_PRESS_MEMBERS = tuple(
+    (label, f"TIA_4_2.TIA_4_2.{label}/YL_STATE") for label in ("A415", "A416", "A417", "A418")
+)
 STATUS_GROUPS = (
     {"key":"four_system_status", "name":"四系统运行状态（组合）", "device":"四系统组合",
      "tag_name":"四系统运行状态", "description":"401、402、A、B 四路状态组合", "members":FOUR_SYSTEM_MEMBERS},
     {"key":"desliming_status", "name":"脱粉系统运行状态（组合）", "device":"脱粉系统组合",
      "tag_name":"脱粉系统运行状态", "description":"473、474 两路状态组合", "members":DESLIMING_MEMBERS},
+    {"key":"float_press_status", "name":"浮精压滤机运行状态（组合）", "device":"浮精压滤机组合",
+     "tag_name":"浮精压滤机运行状态", "description":"A415、A416、A417、A418 四台运行状态组合",
+     "member_label":"压滤机", "members":FLOAT_PRESS_MEMBERS},
 )
 
 
@@ -62,5 +68,6 @@ def _status_group(source_id, by_id, group):
         "quality":quality, "issue":issue, "received_at":received_at, "source_at":None, "server_at":None,
         "components":components}
     return {"source_id":source_id, **{key:group[key] for key in ("key", "name", "device", "tag_name", "description")},
-        "item_id":"", "unit":"", "kind":"state_group", "member_count":len(members), "available":available,
+        "item_id":"", "unit":"", "kind":"state_group", "member_count":len(members),
+        "member_label":group.get("member_label", "系统"), "available":available,
         "status":"good" if available else issue, "sample":sample}

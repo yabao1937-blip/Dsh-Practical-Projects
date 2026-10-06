@@ -1,7 +1,7 @@
 """Synthetic-only tests of the system and desliming read projections."""
 from copy import deepcopy
 import pytest
-from app.telemetry.derived import DESLIMING_MEMBERS, FOUR_SYSTEM_MEMBERS, system_status_points
+from app.telemetry.derived import DESLIMING_MEMBERS, FLOAT_PRESS_MEMBERS, FOUR_SYSTEM_MEMBERS, system_status_points
 
 
 def items(values=(True, False, False, True), members=FOUR_SYSTEM_MEMBERS, source_id="test"):
@@ -117,4 +117,28 @@ def test_desliming_and_four_system_groups_remain_separate():
     assert set(groups) == {"four_system_status", "desliming_status"}
     assert groups["four_system_status"]["member_count"] == 4
     assert groups["four_system_status"]["sample"]["value"] == {"401":True, "402":False, "A":False, "B":True}
+    assert groups["desliming_status"]["sample"]["value"] == {"473":False, "474":True}
+
+
+@pytest.mark.parametrize("values", [(True, False, True, False), (False,)*4])
+def test_float_press_preserves_each_machine_state(values):
+    original = items(values, FLOAT_PRESS_MEMBERS)
+    before = deepcopy(original)
+    group = system_status_points(original)[0]
+    assert group["key"] == "float_press_status" and group["member_count"] == 4
+    assert group["member_label"] == "压滤机" and group["available"]
+    assert group["sample"]["value"] == dict(zip(("A415", "A416", "A417", "A418"), values))
+    assert all(c["item_id"].endswith('/YL_STATE') for c in group["sample"]["components"])
+    assert original == before
+
+
+def test_float_press_does_not_derive_running_from_plate_counts():
+    plate_counts = items((145, 15, 0, 0), tuple((label, item_id.replace('/YL_STATE', '/PLATE_CNT')) for label, item_id in FLOAT_PRESS_MEMBERS))
+    for point in plate_counts:
+        point["key"] += "_plates"
+    assert system_status_points(plate_counts) == []
+    original = items() + items((False, True), DESLIMING_MEMBERS) + items((False,)*4, FLOAT_PRESS_MEMBERS) + plate_counts
+    groups = {g["key"]:g for g in system_status_points(original)}
+    assert set(groups) == {"four_system_status", "desliming_status", "float_press_status"}
+    assert groups["float_press_status"]["sample"]["value"] == dict.fromkeys(("A415", "A416", "A417", "A418"), False)
     assert groups["desliming_status"]["sample"]["value"] == {"473":False, "474":True}

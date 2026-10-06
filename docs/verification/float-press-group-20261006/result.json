@@ -1,0 +1,42 @@
+{
+  "passed": true,
+  "physicalPoints": 50,
+  "derivedPoints": 3,
+  "liveText": "A415 关\nA416 关\nA417 关\nA418 关",
+  "migratedMachineChoices": [
+    "A415",
+    "A416",
+    "A417",
+    "A418"
+  ],
+  "plateCountChoicesPreserved": true,
+  "reloadPreserved": true,
+  "allOffAvailable": true,
+  "partialFailureShowsUnknown": true,
+  "existingGroupsCompatible": true,
+  "storeUnchanged": true,
+  "apiMutationsBlocked": true,
+  "geometry": [
+    {
+      "width": 1600,
+      "overflow": false,
+      "overlap": false
+    },
+    {
+      "width": 1440,
+      "overflow": false,
+      "overlap": false
+    },
+    {
+      "width": 1280,
+      "overflow": false,
+      "overlap": false
+    },
+    {
+      "width": 800,
+      "overflow": false,
+      "overlap": false
+    }
+  ],
+  "pageErrors": []
+}
