@@ -11,6 +11,10 @@ class PointConfig(BaseModel):
     key: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     name: str = Field(min_length=1, max_length=128)
     node_id: str = Field(min_length=1, max_length=512)
+    device: str = Field(default="", max_length=256)
+    tag_name: str = Field(default="", max_length=256)
+    description: str = Field(default="", max_length=512)
+    item_id: str = Field(default="", max_length=512)
     unit: str = Field(default="", max_length=32)
     value_type: Literal["number", "boolean"] = "number"
     scale: float = 1

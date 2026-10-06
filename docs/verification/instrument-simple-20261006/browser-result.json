@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "headers": [
+    "设备",
+    "标签名",
+    "说明",
+    "ItemID",
+    "值",
+    "时间"
+  ],
+  "rows": 54,
+  "columns": 6,
+  "failedReadsRemainMarkedUnavailable": true,
+  "apiMutationsBlocked": true,
+  "pageErrors": [],
+  "sqlite_view": "online_instruments",
+  "sqlite_view_rows": 54,
+  "desktop_window_columns": 6,
+  "desktop_window_default": "在线仪表",
+  "metadata_matches_workbook": true,
+  "sample_definitions_unchanged": true,
+  "business_tables_unchanged": true,
+  "python_tests_passed": 51,
+  "migration_recheck_passed": 3
+}

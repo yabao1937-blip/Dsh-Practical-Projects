@@ -101,24 +101,28 @@ window.Operations = {
         this.text('ops-points', available + ' / ' + items.length);
         this.text('ops-message', this.serverState === 'local' ? '通过服务器地址打开页面，即可查看实时采集状态。' :
             this.telemetryFailed ? '采集查询失败，保留最后读数供核对；当前读数不可用。' :
-            sources.length ? '按质量和时效核对读数；时间按本机时区显示。' : '采集尚未启动。完成现场点表和连接配置后，这里将显示实时读数。');
+            sources.length ? '时间为本机接收时间，每 5 秒刷新；灰色值表示当前不可用，悬停可查看原因。' : '采集尚未启动。完成现场点表和连接配置后，这里将显示实时读数。');
         const body = document.getElementById('telemetry-tbody');
         if (!body) return;
-        if (!items.length) { body.innerHTML = '<tr><td colspan="7" class="ops-empty">暂无采集数据</td></tr>'; return; }
+        if (!items.length) { body.innerHTML = '<tr><td colspan="6" class="ops-empty">暂无采集数据</td></tr>'; return; }
         const reasons = {good:'可用', no_data:'暂无数据', bad_quality:'坏质量', uncertain_quality:'质量不确定',
             stale:'接收超时', source_stale:'源时间过期', collector_offline:'采集离线', out_of_range:'超出量程',
             invalid_value_type:'类型不匹配', non_finite_value:'数值无效', future_source_time:'源时钟异常'};
-        body.innerHTML = items.map(item => {
+        const sorted = items.slice().sort((a, b) => String(a.device || '').localeCompare(String(b.device || ''), 'zh-CN', {numeric:true}) ||
+            String(a.tag_name || a.name || '').localeCompare(String(b.tag_name || b.name || ''), 'zh-CN', {numeric:true}));
+        body.innerHTML = sorted.map(item => {
             const sample = item.sample || {};
             const valid = !this.telemetryFailed && item.available;
-            const value = sample.value == null ? '—' : typeof sample.value === 'boolean' ? (sample.value ? '开启' : '关闭') : String(sample.value);
+            const value = sample.value == null ? '—' : typeof sample.value === 'boolean' ? (sample.value ? '1' : '0') : String(sample.value);
             const quality = {good:'Good', uncertain:'Uncertain', bad:'Bad'}[sample.quality] || '—';
             const reason = this.telemetryFailed ? '查询中断' : reasons[item.status] || '不可用';
-            const timeCell = value => '<td title="' + this.escape(value || '') + '">' + this.escape(this.time(value)) + '</td>';
-            return '<tr><td>' + this.escape(item.name) + '<br><small class="ops-help">' + this.escape(item.source_id + '/' + item.key) + '</small></td>' +
-                '<td class="' + (valid ? '' : 'ops-unavailable') + '">' + this.escape(value) + '</td><td>' + this.escape(item.unit) + '</td>' +
-                '<td class="' + (valid ? 'ops-good' : 'ops-warning') + '">' + quality + ' / ' + reason + '</td>' +
-                timeCell(sample.source_at) + timeCell(sample.server_at) + timeCell(sample.received_at) + '</tr>';
+            const split = (item.name || '').indexOf(' · ');
+            const tag = item.tag_name || (split < 0 ? item.name : item.name.slice(0, split));
+            const description = item.description || (split < 0 ? '' : item.name.slice(split + 3));
+            return '<tr><td>' + this.escape(item.device || '—') + '</td><td>' + this.escape(tag || '—') + '</td>' +
+                '<td>' + this.escape(description || '—') + '</td><td>' + this.escape(item.item_id || sample.node_id || '—') + '</td>' +
+                '<td class="' + (valid ? '' : 'ops-unavailable') + '" title="' + this.escape(quality + ' / ' + reason) + '">' + this.escape(value) + '</td>' +
+                '<td title="' + this.escape(sample.received_at || '') + '">' + this.escape(this.time(sample.received_at)) + '</td></tr>';
         }).join('');
     },
 };

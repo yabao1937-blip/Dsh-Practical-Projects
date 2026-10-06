@@ -10,7 +10,7 @@
 
 本次现场地址、点表口径、数据库与后台运行方式见 [现场接入记录](docs/KEPServer现场接入记录-20261006.md)。
 
-查看本地 SQLite 数据库可在仓库根目录运行 `backend\.venv\Scripts\pythonw.exe backend\scripts\view_sqlite.py`，打开独立的只读浏览窗口。默认显示 `telemetry_points`，可切换历史表并执行只读查询；选中一行查看完整 JSON 字段，点击“刷新 / 执行查询”获取新读数。
+查看本地 SQLite 数据库可在仓库根目录运行 `backend\.venv\Scripts\pythonw.exe backend\scripts\view_sqlite.py`，打开独立的只读浏览窗口。默认只显示“在线仪表”六列：设备、标签名、说明、ItemID、值、时间，每 5 秒刷新。时间为本机接收时间，界面显示本机时区；布尔值显示 0/1。“高级查询”可展开原始表与 SQL。
 
 三张采集表的字段、关联、更新规则和查询示例见 [SQLite 采集表架构说明](docs/SQLite采集表架构说明-20261006.md)，配有 Archify 逻辑关系图。
 

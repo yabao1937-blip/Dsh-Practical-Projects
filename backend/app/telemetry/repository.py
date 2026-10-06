@@ -132,6 +132,8 @@ def latest_view(db, source_id=None, now=None):
     for row in db.scalars(points_query):
         usable, reason = availability(row.latest, row.config, online.get(row.source_id, False), now)
         items.append({"source_id": row.source_id, "key": row.key, "name": row.config["name"],
+            "device": row.config.get("device", ""), "tag_name": row.config.get("tag_name", ""),
+            "description": row.config.get("description", ""), "item_id": row.config.get("item_id", ""),
             "unit": row.config["unit"], "sample": row.latest, "available": usable, "status": reason})
     return {"checked_at": iso_time(now), "sources": sources, "items": items,
             "summary": {"points": len(items), "available": sum(p["available"] for p in items)}}

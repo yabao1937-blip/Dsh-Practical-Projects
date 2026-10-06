@@ -15,6 +15,8 @@ from .routers import (assistant, health, import_api, inputs, manual_entries, mig
 Base.metadata.create_all(bind=engine)
 from .schema_upgrade import upgrade_schema
 upgrade_schema(engine)
+from .telemetry.views import ensure_sqlite_views
+ensure_sqlite_views(engine)
 
 app = FastAPI(
     title="重介密控系统",

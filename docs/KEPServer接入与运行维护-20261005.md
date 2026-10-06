@@ -65,7 +65,7 @@ if (-not (Test-Path -LiteralPath config\kepserver.local.json)) {
 .\.venv\Scripts\python.exe -m alembic current
 ```
 
-当前 head 为 `c3a610050001`。0002 已改为 SQLite 可运行的批量表变更；0003 增加三张采集表。
+当前 head 为 `c3a610060001`。0002 已改为 SQLite 可运行的批量表变更；0003 增加三张采集表；0004 增加六列在线仪表视图。历史现场库没有迁移基线时，继续按下述兼容规则处理，不盲目 stamp 或全链升级。
 
 **已有且迁移版本为 `b7e2c4d9a001` 的库**，0003 能接纳新 HTTP/collector 自动创建的兼容采集表。迁移先核对列、主键、批次唯一约束与索引，不匹配就停止；不会以盲目 stamp 掩盖结构差异。已验证旧业务行和已有采集行保留。
 

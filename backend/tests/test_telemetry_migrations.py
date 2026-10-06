@@ -25,13 +25,15 @@ def test_migration_preserves_existing_business_and_telemetry(tmp_path, auto_crea
         run(env, "-c", "from app.main import app; from app.database import engine; from sqlalchemy import text; conn=engine.connect(); conn.execute(text(\"INSERT INTO telemetry_sources (source_id,name,state,retry_seconds) VALUES ('test','test','stopped',0)\")); conn.commit(); conn.close()")
     run(env, "-m", "alembic", "upgrade", "head")
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "c3a610050001"
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "c3a610060001"
+        assert [r[1] for r in db.execute("PRAGMA table_info(online_instruments)")] == ["设备", "标签名", "说明", "ItemID", "值", "时间"]
         assert db.execute("SELECT value FROM settings WHERE key='migration-test'").fetchone()[0] == 8.5
         assert db.execute("SELECT count(*) FROM telemetry_sources").fetchone()[0] == int(auto_created)
     run(env, "-m", "alembic", "downgrade", "b7e2c4d9a001")
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT value FROM settings WHERE key='migration-test'").fetchone()[0] == 8.5
         assert not db.execute("SELECT name FROM sqlite_master WHERE name LIKE 'telemetry_%'").fetchall()
+        assert not db.execute("SELECT name FROM sqlite_master WHERE name='online_instruments'").fetchall()
 
 
 def test_migration_refuses_incompatible_auto_created_table(tmp_path):

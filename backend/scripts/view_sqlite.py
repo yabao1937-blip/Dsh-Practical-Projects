@@ -5,6 +5,9 @@ from pathlib import Path
 import sqlite3
 import tkinter as tk
 from tkinter import ttk
+from datetime import datetime
+
+SIMPLE_VIEW = "online_instruments"
 
 
 def connect(path):
@@ -22,22 +25,23 @@ def main():
     path = args.database.resolve(strict=True)
     connection = connect(path)
     try:
-        tables = [r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        tables = [r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name")]
     finally:
         connection.close()
 
     root = tk.Tk()
-    root.title("项目 SQLite 数据库 · 只读")
+    root.title("在线仪表数据 · 只读")
     root.geometry("1280x820")
     root.minsize(800, 550)
     style = ttk.Style(root)
     style.configure("Treeview", rowheight=28)
     ttk.Label(root, text=str(path), font=("Microsoft YaHei", 11)).pack(anchor="w", padx=14, pady=(14, 4))
-    ttk.Label(root, text="只读连接 · 不修改数据库 · 查询最多显示 200 行，选中一行可查看完整字段").pack(anchor="w", padx=14)
+    ttk.Label(root, text="设备、标签名、说明、ItemID、值、时间 · 每 5 秒刷新 · 时间按本机接收时间显示").pack(anchor="w", padx=14)
     toolbar = ttk.Frame(root)
     toolbar.pack(fill="x", padx=14, pady=10)
     ttk.Label(toolbar, text="数据表").pack(side="left")
-    chosen = tk.StringVar(value="telemetry_points" if "telemetry_points" in tables else tables[0] if tables else "")
+    advanced = tk.BooleanVar(value=SIMPLE_VIEW not in tables)
+    chosen = tk.StringVar()
     picker = ttk.Combobox(toolbar, textvariable=chosen, values=tables, state="readonly", width=30)
     picker.pack(side="left", padx=10)
     status = tk.StringVar()
@@ -64,8 +68,13 @@ def main():
 
     def run():
         nonlocal visible, columns
-        connection = connect(path)
+        selected_item = None
+        selected = tree.selection()
+        if selected and "ItemID" in columns:
+            selected_item = visible[int(selected[0])][columns.index("ItemID")]
+        connection = None
         try:
+            connection = connect(path)
             cursor = connection.execute(query.get("1.0", "end").strip())
             rows = cursor.fetchmany(201)
             columns = [c[0] for c in cursor.description]
@@ -73,24 +82,40 @@ def main():
             status.set("查询失败：" + str(exc))
             return
         finally:
-            connection.close()
+            if connection:
+                connection.close()
         visible = rows[:200]
         tree.delete(*tree.get_children())
         tree.configure(columns=[str(i) for i in range(len(columns))])
         for i, name in enumerate(columns):
             tree.heading(str(i), text=name)
-            tree.column(str(i), width=190, minwidth=80, stretch=False)
+            widths = {"设备":120, "标签名":165, "说明":170, "ItemID":390, "值":170, "时间":185}
+            tree.column(str(i), width=widths.get(name,190), minwidth=80, stretch=False)
         for i, row in enumerate(visible):
-            tree.insert("", "end", iid=str(i), values=["NULL" if value is None else str(value)[:140] for value in row])
-        status.set(f"显示 {len(visible)} 行" + ("（还有更多）" if len(rows) > 200 else ""))
+            cells = []
+            for name, value in zip(columns, row):
+                display = "—" if value is None else str(value)
+                if name == "时间" and isinstance(value,str):
+                    try:
+                        display = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        pass
+                cells.append(display[:140])
+            tree.insert("", "end", iid=str(i), values=cells)
+            if selected_item is not None and "ItemID" in columns and row[columns.index("ItemID")] == selected_item:
+                tree.selection_set(str(i))
+        status.set(f"{len(visible)} 个点位" + ("（还有更多）" if len(rows) > 200 else ""))
 
     def table(_event=None):
         name = chosen.get()
+        if name == "在线仪表":
+            name = SIMPLE_VIEW
         if not name:
             return
         quoted = '"' + name.replace('"', '""') + '"'
         query.delete("1.0", "end")
-        query.insert("1.0", f"SELECT * FROM {quoted} ORDER BY rowid DESC LIMIT 201;")
+        order = '"设备", "标签名"' if name == SIMPLE_VIEW else "rowid DESC"
+        query.insert("1.0", f"SELECT * FROM {quoted} ORDER BY {order} LIMIT 201;")
         run()
 
     def selection(_event):
@@ -109,11 +134,30 @@ def main():
         details.insert("1.0", json.dumps(record, ensure_ascii=False, indent=2, default=str))
         details.configure(state="disabled")
 
-    ttk.Button(toolbar, text="刷新 / 执行查询", command=run).pack(side="left", padx=4)
+    def mode():
+        if advanced.get():
+            picker.configure(values=["在线仪表"] + [t for t in tables if t != SIMPLE_VIEW])
+            query.pack(fill="x", padx=14, before=panes)
+            panes.add(details, weight=1)
+        else:
+            picker.configure(values=["在线仪表"])
+            query.pack_forget()
+            panes.forget(details)
+        chosen.set("在线仪表" if SIMPLE_VIEW in tables else tables[0] if tables else "")
+        table()
+
+    def refresh():
+        if not advanced.get():
+            run()
+        root.after(5000, refresh)
+
+    ttk.Button(toolbar, text="刷新", command=run).pack(side="left", padx=4)
+    ttk.Checkbutton(toolbar, text="高级查询", variable=advanced, command=mode).pack(side="left", padx=12)
     picker.bind("<<ComboboxSelected>>", table)
     tree.bind("<<TreeviewSelect>>", selection)
-    table()
-    root.after(200, lambda: print(f"sqlite_window_ready mapped={root.winfo_ismapped()} table={chosen.get()} rows={len(visible)} read_only=True", flush=True))
+    mode()
+    root.after(5000, refresh)
+    root.after(200, lambda: print(f"sqlite_window_ready mapped={root.winfo_ismapped()} table={chosen.get()} rows={len(visible)} columns={len(columns)} read_only=True", flush=True))
     root.mainloop()
 
 
