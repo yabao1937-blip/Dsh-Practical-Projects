@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "freshBrowserContext": true,
+  "apiMutationsBlocked": true,
+  "pointRows": 54,
+  "available": 54,
+  "source": "KEPServer 现场在线仪表：采集中",
+  "pageErrors": [],
+  "blockedMutationRequests": [
+    {
+      "method": "PUT",
+      "path": "/api/v1/state"
+    }
+  ]
+}

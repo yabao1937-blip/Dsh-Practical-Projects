@@ -1,6 +1,6 @@
 # KEPServer 接入与运行维护
 
-本轮提供 OPC UA 只读采集基础，正式 KEPServer 尚未连接。以前的 `D:\kepTest` 可用于核对已测试的连接条件，本轮采集器独立实现，不复制自动降级安全策略或输出认证信息的调试流程。
+本轮提供 OPC UA 只读采集基础。2026-10-06 已按在线仪表清单接入正式 KEPServer，54 个标签精确匹配并开始持续入库，详见 [现场接入记录](KEPServer现场接入记录-20261006.md)。以前的 `D:\kepTest` 用于核对已测试的连接条件，采集器独立实现，不复制自动降级安全策略或输出认证信息的调试流程。
 
 首次现场目标是验证少量点位的正确读取和故障表现。设备值目前只显示在“数据采集与补录”的 KEPServer 面板，没有自动进入原有仪表输入、灰分模型或密度建议。
 
@@ -14,6 +14,8 @@
 | 证书和私钥 | `backend/config/certs/` | 加密连接；已忽略 Git，仍需设置操作系统访问权限 |
 | 批次缓存 | `backend/data/telemetry-spool/<source_id>/` | 已读取但尚未确认入库的批次；已忽略 Git |
 | 数据库 | 默认 `backend/data/dense_medium.db` | 原有业务表和三张新增采集表 |
+| 点表核对与首次入库记录 | `backend/data/telemetry-setup/` | 原始 NodeId、工作簿校验值、现场核对结果；忽略 Git |
+| 后台进程与日志 | `backend/data/telemetry-runtime/` | 来源对应 PID、启动配置路径及日志；忽略 Git |
 
 两个进程必须使用同一个 `DMCS_DATABASE_URL`。采集不会随 HTTP 服务自动启动；每个来源同时只运行一个采集进程。来源租约会拒绝重复启动，并阻止失去所有权的旧进程继续入库。
 
@@ -94,6 +96,14 @@ if (-not (Test-Path -LiteralPath config\kepserver.local.json)) {
 打开 `http://127.0.0.1:8000/` 的“数据采集与补录”页。后端在线与采集在线是不同状态；后端数据库正常时，也可能尚未配置采集、采集已停止或证书连接失败。
 
 现在是前台进程运行方式，尚未安装 Windows 服务或计划任务。正式长期运行前要配置进程托管、日志轮转和权限，两个进程分别监控。现有 `watchdog_server.ps1` 改用 `/health/live` 判断网页进程，不因数据库短时故障反复重启；数据库故障应通过 `/health/ready` 另行报警。
+
+需要在本机后台启动采集时，在 `backend` 目录运行：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\start_collector.py --config config\kepserver.local.json
+```
+
+此入口先检查启用配置和来源租约，已有采集进程时不会重复启动；输出 PID 与日志路径。采集作为独立后台进程运行，关闭启动终端和网页不会停止；没有安装开机自动运行的 Windows 服务或计划任务。启动后仍需检查采集 API 的 `connected` 状态及读数时间是否前进。
 
 ## 质量与时间口径
 

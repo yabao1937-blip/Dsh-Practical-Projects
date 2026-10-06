@@ -40,3 +40,6 @@ backend/data/telemetry-spool/
 # Local browser verification artifacts
 .playwright-cli/
 output/playwright/
+
+backend/data/telemetry-setup/
+backend/data/telemetry-runtime/
