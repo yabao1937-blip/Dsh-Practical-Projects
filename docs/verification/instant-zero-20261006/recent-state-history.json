@@ -1,0 +1,113 @@
+{
+  "checked_at": "2026-10-06T07:26:43.200655+00:00",
+  "limitation": "History is sampled every 60 seconds; these are sample boundaries, not exact PLC transition times. System-off flags do not prove physical plant state.",
+  "records": [
+    {
+      "tag_name": "A301/COAL_CAP",
+      "latest_value": 0.0,
+      "last_nonzero_or_running": {
+        "received_at": "2026-10-06T06:43:37.447+00:00",
+        "value": 11.574073791503906
+      },
+      "recent_zero_or_stopped_history_samples": 40,
+      "first_recent_zero_or_stopped_sample": "2026-10-06T06:44:38.767+00:00"
+    },
+    {
+      "tag_name": "501/COAL_CAP",
+      "latest_value": 0.40509259700775146,
+      "last_nonzero_or_running": {
+        "received_at": "2026-10-06T07:25:44.649+00:00",
+        "value": 0.40509259700775146
+      },
+      "recent_zero_or_stopped_history_samples": 0,
+      "first_recent_zero_or_stopped_sample": null
+    },
+    {
+      "tag_name": "A345/if_prod",
+      "latest_value": false,
+      "last_nonzero_or_running": null,
+      "recent_zero_or_stopped_history_samples": 322,
+      "first_recent_zero_or_stopped_sample": "2026-10-06T01:54:15.973+00:00"
+    },
+    {
+      "tag_name": "202/ASH_R_INS",
+      "latest_value": 0.0,
+      "last_nonzero_or_running": {
+        "received_at": "2026-10-06T06:39:31.621+00:00",
+        "value": 48.38192367553711
+      },
+      "recent_zero_or_stopped_history_samples": 44,
+      "first_recent_zero_or_stopped_sample": "2026-10-06T06:40:33.349+00:00"
+    },
+    {
+      "tag_name": "A346/if_prod",
+      "latest_value": false,
+      "last_nonzero_or_running": {
+        "received_at": "2026-10-06T06:43:37.447+00:00",
+        "value": 1
+      },
+      "recent_zero_or_stopped_history_samples": 40,
+      "first_recent_zero_or_stopped_sample": "2026-10-06T06:44:38.767+00:00"
+    },
+    {
+      "tag_name": "479/if_prod",
+      "latest_value": false,
+      "last_nonzero_or_running": {
+        "received_at": "2026-10-06T06:43:37.447+00:00",
+        "value": 1
+      },
+      "recent_zero_or_stopped_history_samples": 40,
+      "first_recent_zero_or_stopped_sample": "2026-10-06T06:44:38.767+00:00"
+    },
+    {
+      "tag_name": "478/if_prod",
+      "latest_value": false,
+      "last_nonzero_or_running": {
+        "received_at": "2026-10-06T06:43:37.447+00:00",
+        "value": 1
+      },
+      "recent_zero_or_stopped_history_samples": 40,
+      "first_recent_zero_or_stopped_sample": "2026-10-06T06:44:38.767+00:00"
+    },
+    {
+      "tag_name": "502/COAL_CAP",
+      "latest_value": 0.0,
+      "last_nonzero_or_running": {
+        "received_at": "2026-10-06T06:46:41.896+00:00",
+        "value": 2.8356480598449707
+      },
+      "recent_zero_or_stopped_history_samples": 37,
+      "first_recent_zero_or_stopped_sample": "2026-10-06T06:47:43.349+00:00"
+    },
+    {
+      "tag_name": "402/COAL_CAP",
+      "latest_value": 0.0,
+      "last_nonzero_or_running": {
+        "received_at": "2026-10-06T06:41:34.722+00:00",
+        "value": 151.90972900390625
+      },
+      "recent_zero_or_stopped_history_samples": 42,
+      "first_recent_zero_or_stopped_sample": "2026-10-06T06:42:36.103+00:00"
+    },
+    {
+      "tag_name": "401/COAL_CAP",
+      "latest_value": 0.0,
+      "last_nonzero_or_running": {
+        "received_at": "2026-10-06T06:41:34.722+00:00",
+        "value": 125.0
+      },
+      "recent_zero_or_stopped_history_samples": 42,
+      "first_recent_zero_or_stopped_sample": "2026-10-06T06:42:36.103+00:00"
+    },
+    {
+      "tag_name": "301/COAL_CAP",
+      "latest_value": 0.0,
+      "last_nonzero_or_running": {
+        "received_at": "2026-10-06T06:41:34.722+00:00",
+        "value": 665.5574340820312
+      },
+      "recent_zero_or_stopped_history_samples": 42,
+      "first_recent_zero_or_stopped_sample": "2026-10-06T06:42:36.103+00:00"
+    }
+  ]
+}

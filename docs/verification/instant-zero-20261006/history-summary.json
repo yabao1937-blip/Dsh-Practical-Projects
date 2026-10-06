@@ -1,0 +1,72 @@
+[
+  {
+    "tag_name": "A301/COAL_CAP",
+    "samples": 322,
+    "first_at": "2026-10-06T01:54:15.973+00:00",
+    "last_at": "2026-10-06T07:25:44.649+00:00",
+    "minimum": 0.0,
+    "maximum": 350.6944580078125,
+    "zero_samples": 40,
+    "distinct_values": 54
+  },
+  {
+    "tag_name": "501/COAL_CAP",
+    "samples": 322,
+    "first_at": "2026-10-06T01:54:15.973+00:00",
+    "last_at": "2026-10-06T07:25:44.649+00:00",
+    "minimum": 0.40509259700775146,
+    "maximum": 271.817138671875,
+    "zero_samples": 0,
+    "distinct_values": 81
+  },
+  {
+    "tag_name": "202/ASH_R_INS",
+    "samples": 322,
+    "first_at": "2026-10-06T01:54:15.973+00:00",
+    "last_at": "2026-10-06T07:25:44.649+00:00",
+    "minimum": 0.0,
+    "maximum": 51.473487854003906,
+    "zero_samples": 130,
+    "distinct_values": 193
+  },
+  {
+    "tag_name": "502/COAL_CAP",
+    "samples": 322,
+    "first_at": "2026-10-06T01:54:15.973+00:00",
+    "last_at": "2026-10-06T07:25:44.649+00:00",
+    "minimum": 0.0,
+    "maximum": 307.2627258300781,
+    "zero_samples": 37,
+    "distinct_values": 84
+  },
+  {
+    "tag_name": "402/COAL_CAP",
+    "samples": 322,
+    "first_at": "2026-10-06T01:54:15.973+00:00",
+    "last_at": "2026-10-06T07:25:44.649+00:00",
+    "minimum": 0.0,
+    "maximum": 416.6666564941406,
+    "zero_samples": 42,
+    "distinct_values": 168
+  },
+  {
+    "tag_name": "401/COAL_CAP",
+    "samples": 322,
+    "first_at": "2026-10-06T01:54:15.973+00:00",
+    "last_at": "2026-10-06T07:25:44.649+00:00",
+    "minimum": 0.0,
+    "maximum": 187.7893524169922,
+    "zero_samples": 44,
+    "distinct_values": 125
+  },
+  {
+    "tag_name": "301/COAL_CAP",
+    "samples": 322,
+    "first_at": "2026-10-06T01:54:15.973+00:00",
+    "last_at": "2026-10-06T07:25:44.649+00:00",
+    "minimum": 0.0,
+    "maximum": 818.1818237304688,
+    "zero_samples": 52,
+    "distinct_values": 99
+  }
+]
