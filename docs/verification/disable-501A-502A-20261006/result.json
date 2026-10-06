@@ -1,0 +1,49 @@
+{
+  "checked_at": "2026-10-06T07:18:02.615403+00:00",
+  "configuration_points": 50,
+  "api_summary": {
+    "points": 50,
+    "available": 50
+  },
+  "source_state": "connected",
+  "last_sample_at": "2026-10-06T07:18:01.485+00:00",
+  "online_instruments_rows": 50,
+  "derived_four_system_available": true,
+  "removed_points": [
+    {
+      "tag_name": "501A/COAL_CAP",
+      "enabled": false,
+      "latest_received_at": "2026-10-06T07:16:11.076+00:00",
+      "history_count": 313,
+      "last_history_received_at": "2026-10-06T07:15:30.177+00:00"
+    },
+    {
+      "tag_name": "501A/CT_C",
+      "enabled": false,
+      "latest_received_at": "2026-10-06T07:16:11.076+00:00",
+      "history_count": 313,
+      "last_history_received_at": "2026-10-06T07:15:30.177+00:00"
+    },
+    {
+      "tag_name": "502A/COAL_CAP",
+      "enabled": false,
+      "latest_received_at": "2026-10-06T07:16:11.076+00:00",
+      "history_count": 313,
+      "last_history_received_at": "2026-10-06T07:15:30.177+00:00"
+    },
+    {
+      "tag_name": "502A/CT_C",
+      "enabled": false,
+      "latest_received_at": "2026-10-06T07:16:11.076+00:00",
+      "history_count": 313,
+      "last_history_received_at": "2026-10-06T07:15:30.177+00:00"
+    }
+  ],
+  "removed_history_unchanged": true,
+  "pending_batches": 0,
+  "passed": true,
+  "second_checked_at": "2026-10-06T07:18:50.070084+00:00",
+  "second_last_sample_at": "2026-10-06T07:18:47.427+00:00",
+  "remaining_points_continue_updating": true,
+  "scope": "Local collector configuration; existing history retained; remote tags unchanged"
+}

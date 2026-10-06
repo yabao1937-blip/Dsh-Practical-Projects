@@ -67,6 +67,23 @@ Good 表示 OPC UA 质量码，不等于已经验证量程或标签业务定义�
 
 [网页核对截图](verification/kepserver-live-20261006/kepserver-live.png)及[浏览器验收记录](verification/kepserver-live-20261006/browser-result.json)确认 54 行点位和 54/54 可用。验收使用新的浏览器上下文，阻断全部 HTTP 修改请求，仅查询真实读数。`test_collector_cli.py` 与 DS 原版 `test_training.py` 共 12 项通过，DS 对拍基线未重新生成。
 
+## 2026-10-06 停用 501A、502A
+
+按用户要求，从现场采集配置中移除以下四个点位：
+
+| 标签名 | ItemID |
+|---|---|
+| `501A/COAL_CAP` | `TIA_3_3.TIA_3_3.501A/COAL_CAP` |
+| `501A/CT_C` | `TIA_3_3.TIA_3_3.501A/CT_C` |
+| `502A/COAL_CAP` | `TIA_3_4.TIA_3_4.502A/COAL_CAP` |
+| `502A/CT_C` | `TIA_3_4.TIA_3_4.502A/CT_C` |
+
+当前采集配置为 **50 个物理点位**。本记录前面的 54 点统计、截图及首次入库验收保留为接入时记录。重新启动采集器后，配置之外的四个点位由 `TelemetryRepository.acquire()` 标为禁用；它们不再进入 OPC 读取列表、实时 API 或 `online_instruments` 六列视图。历史表及最后快照保留，沿用原有 7 天历史保留策略，不删除远程 KEPServer 标签。
+
+变更前配置备份、被移除的完整点位定义和停采基准分别记录在忽略 Git 的 `backend/data/telemetry-setup/kepserver-before-disable-501A-502A-*.json`、`disabled-501A-502A.json` 与 `disabled-501A-502A-baseline.json`。复核结果见 [停采核对](verification/disable-501A-502A-20261006/result.json)。
+
+采集器重新连接后，连续两次实测实时接口为 `connected`、50/50 可用，采样时间继续前进；六列视图为 50 行，不含被移除的标签。四个停用点的最新接收时间、历史行数及最后历史记录均与停采基准一致。重启前待入库批次为零，未删除缓存或历史。401、402、A、B 的组合点仍可用。
+
 ## 远程服务器的历史存储
 
 本次从 OPC UA 读取的是实时标签值。54 个点的 `Historizing` 属性均为 false；这只表明这些节点没有通过当前 OPC UA 接口声明历史化，不能据此判断服务器没有另外保存历史。
