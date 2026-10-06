@@ -24,7 +24,7 @@ const output = path.join(root,'docs/verification/decision-overview-20261005');
         assert.ok(navigation.includes('决策总览') && navigation.includes('密度推荐总览'));
         await page.locator('[data-page="page-decision"]').click();
         await page.waitForFunction(() => typeof DecisionOverviewPage !== 'undefined' && DecisionOverviewPage.snapshot);
-        assert.equal(await page.locator('.decision-node').count(),19);
+        assert.equal(await page.locator('.decision-node').count(),18);
         const storeBefore = await page.evaluate(() => JSON.stringify(App.store));
         await page.locator('[data-decision-node="raw-ash"]').click();
         assert.match(await page.locator('#decision-inspector').innerText(),/原煤灰分/);

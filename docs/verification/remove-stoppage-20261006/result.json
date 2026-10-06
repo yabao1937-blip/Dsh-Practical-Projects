@@ -1,0 +1,33 @@
+{
+  "passed": true,
+  "nodes": 18,
+  "edges": 17,
+  "removedNodeAbsent": true,
+  "oldBindingIgnored": true,
+  "threeGroupsPreserved": true,
+  "geometry": [
+    {
+      "width": 1600,
+      "overflow": [],
+      "overlap": []
+    },
+    {
+      "width": 1440,
+      "overflow": [],
+      "overlap": []
+    },
+    {
+      "width": 1280,
+      "overflow": [],
+      "overlap": []
+    },
+    {
+      "width": 800,
+      "overflow": [],
+      "overlap": []
+    }
+  ],
+  "storeUnchanged": true,
+  "apiMutationsBlocked": true,
+  "pageErrors": []
+}

@@ -20,7 +20,7 @@ const DecisionOverviewPage = {
         try {
             const saved = JSON.parse(localStorage.getItem(this.choicesKey) || '{}'), choices = Object.create(null);
             if (saved && typeof saved === 'object' && !Array.isArray(saved)) for (const [id,value] of Object.entries(saved)) {
-                if (!/^[a-z][a-z0-9-]{0,63}$/.test(id) || typeof value !== 'string' || value.length > 160) continue;
+                if (id === 'stoppage' || !/^[a-z][a-z0-9-]{0,63}$/.test(id) || typeof value !== 'string' || value.length > 160) continue;
                 let identity;
                 try { identity = JSON.parse(value); } catch (_) { continue; }
                 if (Array.isArray(identity) && identity.length === 2 && identity.every(v => typeof v === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(v))) choices[id] = value;
@@ -424,12 +424,11 @@ const DecisionOverviewPage = {
             feature('system-switches','系统运行状态',['sysA','sysB','sys401','sys402'],255,flags),
             feature('desliming','脱粉系统状态',['desliming473','desliming474'],370,flags),
             feature('tail-level','精磁尾液位',['level'],485),
-            feature('stoppage','停机 / 低负荷',['is_stoppage'],600,fields => fields[0].raw == null ? '—' : fields[0].raw ? '是' : '否'),
             n('coarse-amount','粗精煤泥量',rate(s.amounts.coarse),s.reader.coarseAmountLayer() === '计算' ? '315 筛量 − 筛下水量' : s.reader.coarseAmountLayer(),
                 `量的计算：315 筛量 ${rate(s.store.coarseCalc?.screen315)} − 筛下水量 ${rate(s.store.coarseCalc?.waterUnder)}。这是组分产量，与“入洗原煤量”模型因素不同。`,
-                {...family('coarse',1260,715),parent:'coarse',unit:'t/h',...amountInfo('coarseAmount','coarse')}),
+                {...family('coarse',1260,600),parent:'coarse',unit:'t/h',...amountInfo('coarseAmount','coarse')}),
             n('coarse-slime','原煤煤泥含量','待补充','工艺因素 · 尚未进入模型','目前的粗精模型使用 10 个输入因素；原煤煤泥含量尚无独立输入字段，也未进入模型。后续需要人工采样或可验证的测量来源。',
-                {...family('coarse',1260,830),parent:'coarse',reference:true}),
+                {...family('coarse',1260,715),parent:'coarse',reference:true}),
         ];
     },
 
