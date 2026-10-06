@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "immediateSelection": true,
+  "automaticPollingDisplay": true,
+  "zeroAndFalse": true,
+  "unknownUnitNotBorrowed": true,
+  "failedAndBadQualityUnavailable": true,
+  "persistedAfterReload": true,
+  "missingPointChoicePreserved": true,
+  "clearRestoresBusiness": true,
+  "recommendationRemainsCalculated": true,
+  "storeUnchanged": true,
+  "livePoint": "TIA_3_2.TIA_3_2.403/MD",
+  "liveDisplayedValue": "1.501",
+  "geometry": [
+    {
+      "width": 1600,
+      "overflow": []
+    },
+    {
+      "width": 1440,
+      "overflow": []
+    },
+    {
+      "width": 1280,
+      "overflow": []
+    },
+    {
+      "width": 800,
+      "overflow": []
+    }
+  ],
+  "pageErrors": []
+}

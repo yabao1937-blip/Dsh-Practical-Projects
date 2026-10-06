@@ -102,6 +102,7 @@ window.Operations = {
         this.text('ops-message', this.serverState === 'local' ? '通过服务器地址打开页面，即可查看实时采集状态。' :
             this.telemetryFailed ? '采集查询失败，保留最后读数供核对；当前读数不可用。' :
             sources.length ? '时间为本机接收时间，每 5 秒刷新；灰色值表示当前不可用，悬停可查看原因。' : '采集尚未启动。完成现场点表和连接配置后，这里将显示实时读数。');
+        if (typeof DecisionOverviewPage !== 'undefined') DecisionOverviewPage.telemetryUpdated();
         const body = document.getElementById('telemetry-tbody');
         if (!body) return;
         if (!items.length) { body.innerHTML = '<tr><td colspan="6" class="ops-empty">暂无采集数据</td></tr>'; return; }

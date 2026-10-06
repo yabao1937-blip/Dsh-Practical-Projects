@@ -1,4 +1,4 @@
-/* Read-only decision map. Never switch/train models, save App.store, or bind telemetry. */
+/* Read-only decision map. Telemetry choices affect display only, never App.store or model inputs. */
 const DecisionOverviewPage = {
     initialized: false, view: 'gpt', selected: 'density', zoom: null, snapshot: null,
     pointChoices: {}, nodes: [], timer: null,
@@ -7,6 +7,7 @@ const DecisionOverviewPage = {
     motionEnabled: true, motionReduced: false, motionPrinting: false,
     revealFrame: null,
     background: null,
+    choicesKey: 'dmcs.decision-point-choices.v1',
     escape(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
     number(value, digits = 2, unit = '') { return Number.isFinite(value) ? value.toFixed(digits) + (unit ? ' ' + unit : '') : '—'; },
     time(value) {
@@ -15,6 +16,54 @@ const DecisionOverviewPage = {
         return Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', {hour12:false}) + (date.getTime() > Date.now() + 60000 ? '（未来时间，需核对）' : '') : '未记录';
     },
     active() { return !!document.getElementById('page-decision')?.classList.contains('active'); },
+    loadPointChoices() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(this.choicesKey) || '{}'), choices = Object.create(null);
+            if (saved && typeof saved === 'object' && !Array.isArray(saved)) for (const [id,value] of Object.entries(saved)) {
+                if (!/^[a-z][a-z0-9-]{0,63}$/.test(id) || typeof value !== 'string' || value.length > 160) continue;
+                let identity;
+                try { identity = JSON.parse(value); } catch (_) { continue; }
+                if (Array.isArray(identity) && identity.length === 2 && identity.every(v => typeof v === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(v))) choices[id] = value;
+            }
+            this.pointChoices = choices;
+        } catch (_) { /* An invalid or unavailable local preference does not alter business data. */ }
+    },
+    savePointChoices() {
+        try { localStorage.setItem(this.choicesKey, JSON.stringify(this.pointChoices)); }
+        catch (_) { /* Keep the current selection in memory if local storage is unavailable. */ }
+    },
+    pointDisplay(node) {
+        const choice = this.pointChoices[node.id];
+        if (!choice) return {bound:false,value:node.value,source:node.source,sampleAt:node.sampleAt};
+        const item = (window.Operations?.telemetry?.items || []).find(p => this.pointIdentity(p) === choice);
+        const sample = item?.sample || {};
+        const hasValue = typeof sample.value === 'boolean' || Number.isFinite(sample.value);
+        const available = !!item?.available && !window.Operations?.telemetryFailed && sample.quality === 'good' && !sample.issue && hasValue;
+        let value = '—';
+        if (available) {
+            if (typeof sample.value === 'boolean') value = sample.value ? '1' : '0';
+            else {
+                const magnitude = Math.abs(sample.value);
+                value = magnitude >= 1e7 || (magnitude > 0 && magnitude < .001) ? sample.value.toExponential(3) :
+                    new Intl.NumberFormat('zh-CN', {maximumFractionDigits:3, useGrouping:false}).format(sample.value);
+            }
+            if (item.unit) value += ' ' + item.unit;
+        }
+        const state = item ? this.telemetryState(item) : '已选点位未返回';
+        const received = sample.received_at ? new Date(sample.received_at) : null;
+        const clock = received && Number.isFinite(received.getTime()) ? received.toLocaleTimeString('zh-CN', {hour12:false}) : '时间未记录';
+        return {bound:true,item,available,value,sampleAt:sample.received_at || null,
+            source:available ? `KEP · ${item.tag_name || item.name} · ${clock}` : `不可用 · ${state}`,
+            title:`${item?.item_id || sample.node_id || choice}；${state}；${item?.unit ? '单位 '+item.unit : '单位未提供'}；接收时间 ${this.time(sample.received_at)}`};
+    },
+    telemetryUpdated() {
+        if (!this.initialized || !this.active() || document.hidden || !this.snapshot) return;
+        const focused = document.activeElement?.dataset?.decisionNode;
+        this.renderGraph(); this.renderContext();
+        if (document.activeElement?.id !== 'decision-source-point' || Date.now() > this.sourceInteractionUntil) this.renderInspector();
+        if (focused) document.querySelector(`[data-decision-node="${focused}"]`)?.focus({preventScroll:true});
+        this.queueInspectorPosition();
+    },
 
     // Existing resolvers write autoState/EMA. Run them on a private copy instead.
     readFacade() {
@@ -62,8 +111,10 @@ const DecisionOverviewPage = {
     init() {
         if (this.initialized) { this.refresh(); return; }
         this.initialized = true;
+        this.loadPointChoices();
         if (typeof DecisionBackground !== 'undefined') this.background = new DecisionBackground(document.getElementById('decision-background-flow'));
         document.getElementById('decision-refresh').addEventListener('click', () => {
+            this.sourceInteractionUntil = 0;
             this.refresh();
             if (window.Operations) window.Operations.refresh().then(() => this.renderInspector());
         });
@@ -103,7 +154,10 @@ const DecisionOverviewPage = {
         document.getElementById('decision-inspector').addEventListener('change', event => {
             if (event.target.id === 'decision-source-point') {
                 this.pointChoices[this.selected] = event.target.value;
-                this.renderInspector();
+                if (!event.target.value) delete this.pointChoices[this.selected];
+                this.savePointChoices();
+                this.sourceInteractionUntil = Date.now() + 500;
+                this.renderGraph(); this.renderContext(); this.renderInspector();
                 document.getElementById('decision-source-point').focus({preventScroll:true});
             }
         });
@@ -371,7 +425,8 @@ const DecisionOverviewPage = {
     renderContext() {
         const s = this.snapshot, sources = {manual:'人工总灰分',formula:'三组分公式',entry:'501 导入 / 录入',ash501:'501 灰分取值'};
         const message = s.componentFeeds ? '三组分参与当前建议计算' : '三组分显示公式核算对照，建议由所选总灰分驱动';
-        document.getElementById('decision-context').innerHTML = `<span>指导口径 <strong>${s.guide.scheme === 'heavy' ? '重介精煤版' : '总灰分版'}</strong></span><span>生产模型 <strong>${this.escape(s.engineLabel)}</strong></span><span>总灰分来源 <strong>${this.escape(sources[s.total.source])}</strong></span><span>${message}</span><span>实时采集 <strong>尚未绑定业务计算</strong></span>`;
+        const bound = this.nodes.filter(node => this.pointChoices[node.id]).length;
+        document.getElementById('decision-context').innerHTML = `<span>指导口径 <strong>${s.guide.scheme === 'heavy' ? '重介精煤版' : '总灰分版'}</strong></span><span>生产模型 <strong>${this.escape(s.engineLabel)}</strong></span><span>总灰分来源 <strong>${this.escape(sources[s.total.source])}</strong></span><span>${message}</span><span>实时采集 <strong>${bound ? bound+' 张卡片已选点' : '选择点位后更新卡片'}</strong> · 展示不改变建议计算</span>`;
     },
 
     // Short right-angle routes with small rounded corners; aligned nodes stay straight.
@@ -417,21 +472,25 @@ const DecisionOverviewPage = {
         const flowingIds = new Set(), now = Date.now()/1000;
         const paths = this.routeConnections().map(({node,parent,path},index) => {
             const highlight = ancestorIds.has(node.id) && ancestorIds.has(parent.id);
-            const flows = !node.reference && node.value !== '—' && parent.value !== '—';
+            const displayReference = node.reference || (node.id !== 'density' && !!this.pointChoices[node.id]) || (parent.id !== 'density' && !!this.pointChoices[parent.id]);
+            const flows = !displayReference && node.value !== '—' && parent.value !== '—';
             if (flows) { flowingIds.add(node.id); flowingIds.add(parent.id); }
             // Negative phase keeps motion continuous when the five-second snapshot rebuilds the graph.
             const phase = -((now+index*.37)%4).toFixed(3);
             const trace = flows ? `<path class="decision-flow${highlight ? ' is-highlight' : ''}" d="${path}" pathLength="100" style="--dm-flow-color:${colors[node.family]};animation-delay:${phase}s"/>` : '';
-            return `<path class="decision-edge${node.reference ? ' is-reference' : ''}${highlight ? ' is-highlight' : ''}" data-decision-from="${node.id}" data-decision-to="${parent.id}" d="${path}" stroke="${colors[node.family]}" marker-end="url(#decision-arrow-${node.family})"/>${trace}`;
+            return `<path class="decision-edge${displayReference ? ' is-reference' : ''}${highlight ? ' is-highlight' : ''}" data-decision-from="${node.id}" data-decision-to="${parent.id}" d="${path}" stroke="${colors[node.family]}" marker-end="url(#decision-arrow-${node.family})"/>${trace}`;
         }).join('');
         const markers = Object.entries(colors).map(([key,color]) => `<marker id="decision-arrow-${key}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8" fill="${color}"/></marker>`).join('');
         const cards = this.nodes.map((node,index) => {
             const active = node.id === this.selected;
+            const display = this.pointDisplay(node), root = node.id === 'density';
             const preview = node.id === 'coarse' ? `<span>查看${this.view === 'gpt' ? ' GPT' : '生产'}预测 ${this.number(s.prediction,2,'%')}${!s.model ? ' · 未训练' : s.previewOnly ? ' · 对照' : ' · 未平滑'}</span>` : '';
             const unit = node.id === 'density' ? '<span class="decision-root-unit">g/cm³</span>' : '';
             const sub = node.id === 'density' ? `<span>当前 ${this.number(s.guide.rhoCur,3)} · 目标灰分 ${this.number(s.guide.targetTotal,2,'%')}</span>` : '';
             const phase = -((now+index*.41)%5).toFixed(3);
-            return `<button type="button" class="decision-node${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-pulse-delay:${phase}s"><span class="decision-node-heading">${this.escape(node.title)}${node.reference ? '<span class="decision-badge">对照</span>' : ''}</span><span class="decision-node-value">${this.escape(node.value)}${unit}</span><span class="decision-node-source"><span>${this.escape(node.source)}</span>${sub}${preview}</span></button>`;
+            const badge = display.bound && !root ? `<span class="decision-badge">${display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
+            const compare = display.bound && root ? `<span class="decision-live-comparison">采集对照 ${this.escape(display.value)}${display.available ? '' : '（不可用）'}</span>` : '';
+            return `<button type="button" class="decision-node${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.bound && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}"${display.bound ? ` title="${this.escape(display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-pulse-delay:${phase}s"><span class="decision-node-heading">${this.escape(node.title)}${badge}</span><span class="decision-node-value">${this.escape(root ? node.value : display.value)}${unit}</span><span class="decision-node-source"><span>${this.escape(root ? node.source : display.source)}</span>${sub}${preview}${compare}</span></button>`;
         }).join('');
         document.getElementById('decision-board').innerHTML = `<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 970"><defs>${markers}</defs>${paths}</svg>${cards}<div class="decision-formula"><strong>三组分质量平衡</strong>总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量<br>公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}</div>`;
     },
@@ -443,8 +502,12 @@ const DecisionOverviewPage = {
     pointIdentity(item) { return JSON.stringify([item.source_id,item.key]); },
     renderInspector() {
         if (!this.snapshot) return;
+        const scrollTop = document.getElementById('decision-inspector').scrollTop || 0;
         const node = this.nodes.find(n => n.id === this.selected) || this.nodes[0], s = this.snapshot;
+        const display = this.pointDisplay(node);
         const pairs = [['当前业务值',node.value + (node.id === 'density' ? ' g/cm³' : '')],['当前来源',node.source],['采样 / 记录时间',this.time(node.sampleAt)],['人工录入时间',this.time(node.enteredAt)],['化验结果可用时间','未记录（不由采样时刻推断）'],['实时业务绑定','尚未接入']];
+        if (display.bound) pairs.unshift([node.id === 'density' ? '采集对照值' : '卡片显示值',display.value + (display.available ? '' : '（不可用）')],
+            ['卡片采集来源',display.item?.item_id || display.item?.name || '已选点位未返回'],['卡片接收时间',this.time(display.sampleAt)],['采集单位',display.item?.unit || '未提供 · 不沿用业务单位']);
         if (node.family && s.sum > 0 && node.type === 'component') {
             const contribution = Number.isFinite(s.ashes[node.family]) ? s.ashes[node.family] * s.amounts[node.family] / s.sum : null;
             pairs.push(['组分质量占比',this.number(s.amounts[node.family] / s.sum * 100,1,'%')],['加权灰分贡献',this.number(contribution,3,'百分点')]);
@@ -459,13 +522,15 @@ const DecisionOverviewPage = {
         const items = window.Operations?.telemetry?.items || [];
         const choice = this.pointChoices[node.id] || '';
         const item = items.find(p => this.pointIdentity(p) === choice);
-        const options = items.map(p => `<option value="${this.escape(this.pointIdentity(p))}"${this.pointIdentity(p) === choice ? ' selected' : ''}>${this.escape(`${p.name} · ${p.source_id}/${p.key}`)}</option>`).join('');
+        const missingOption = choice && !item ? `<option value="${this.escape(choice)}" selected>已选点位暂未返回</option>` : '';
+        const options = missingOption + items.slice().sort((a,b) => String(a.item_id || a.name).localeCompare(String(b.item_id || b.name),'zh-CN',{numeric:true})).map(p => `<option value="${this.escape(this.pointIdentity(p))}"${this.pointIdentity(p) === choice ? ' selected' : ''}>${this.escape(p.device && p.tag_name ? `${p.device} · ${p.tag_name} · ${p.description || ''}` : p.name)}</option>`).join('');
         const sample = item?.sample || {};
         const value = typeof sample.value === 'boolean' ? (sample.value ? '开' : '关') : sample.value ?? '—';
         const available = item && item.available && !window.Operations?.telemetryFailed;
-        const live = item ? `<dl class="decision-facts"><dt>最后读数</dt><dd class="${available ? '' : 'decision-unavailable'}">${this.escape(value)} ${this.escape(item.unit || '')}${available ? '' : '（不可用）'}</dd><dt>质量 / 时效</dt><dd>${this.escape(this.telemetryState(item))}</dd><dt>数据来源</dt><dd>${this.escape(item.source_id + '/' + item.key)}</dd><dt>源时间</dt><dd>${this.escape(this.time(sample.source_at))}</dd><dt>服务器时间</dt><dd>${this.escape(this.time(sample.server_at))}</dd><dt>接收时间</dt><dd>${this.escape(this.time(sample.received_at))}</dd></dl>` : '<p>尚未选择参考点位。这里可以核对采集读数，选择点位不会绑定业务字段或改变计算。</p>';
+        const live = item ? `<dl class="decision-facts"><dt>最后读数</dt><dd class="${available ? '' : 'decision-unavailable'}">${this.escape(value)} ${this.escape(item.unit || '')}${available ? '' : '（不可用）'}</dd><dt>质量 / 时效</dt><dd>${this.escape(this.telemetryState(item))}</dd><dt>数据来源</dt><dd>${this.escape(item.item_id || item.source_id + '/' + item.key)}</dd><dt>源时间</dt><dd>${this.escape(this.time(sample.source_at))}</dd><dt>服务器时间</dt><dd>${this.escape(this.time(sample.server_at))}</dd><dt>接收时间</dt><dd>${this.escape(this.time(sample.received_at))}</dd></dl>` : `<p>${choice ? '已选点位暂未返回，卡片保持不可用，等待采集恢复。' : '选择点位后，该卡片立即显示采集值；清空选择恢复原业务显示。建议密度只增加采集对照值。'}</p>`;
         const collector = window.Operations?.telemetryFailed ? '采集查询中断，最后读数不可用' : !items.length ? (window.Operations?.serverState === 'local' ? '单机模式 · 通过服务器地址查看采集' : '暂无点位 · 等待现场配置与联调') : `${items.filter(p => p.available).length} / ${items.length} 个点位可用`;
-        document.getElementById('decision-inspector').innerHTML = `<div class="decision-inspector-header"><span>因素与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${node.reference ? '对照 / 预留' : '业务取值'}</span></div><p>${this.escape(node.description)}</p><dl class="decision-facts">${facts}</dl>${node.page ? `<button class="decision-detail-link" type="button" data-decision-page="${node.page}">查看对应业务页面 →</button>` : '<button class="decision-detail-link" type="button" data-decision-page="page-collect">查看数据采集与补录 →</button>'}</div><div class="decision-detail decision-source-panel"><h4>实时数据 → 采集来源</h4><p class="decision-live-state">${this.escape(collector)}。实时读数目前仅作来源核对，尚未参与本页计算。</p><label for="decision-source-point">查看采集点（仅核对）</label><select id="decision-source-point"><option value="">选择参考点位</option>${options}</select>${live}</div>`;
+        document.getElementById('decision-inspector').innerHTML = `<div class="decision-inspector-header"><span>因素与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${node.reference ? '对照 / 预留' : '业务取值'}</span></div><p>${this.escape(node.description)}</p><dl class="decision-facts">${facts}</dl>${node.page ? `<button class="decision-detail-link" type="button" data-decision-page="${node.page}">查看对应业务页面 →</button>` : '<button class="decision-detail-link" type="button" data-decision-page="page-collect">查看数据采集与补录 →</button>'}</div><div class="decision-detail decision-source-panel"><h4>卡片数据 → 采集来源</h4><p class="decision-live-state">${this.escape(collector)}。所选读数用于卡片展示，尚未参与本页计算。</p><label for="decision-source-point">选择卡片显示点位${node.id === 'density' ? '（采集对照）' : ''}</label><select id="decision-source-point"><option value="">不使用采集值</option>${options}</select>${live}</div>`;
+        document.getElementById('decision-inspector').scrollTop = scrollTop;
         this.queueInspectorPosition();
     },
 };

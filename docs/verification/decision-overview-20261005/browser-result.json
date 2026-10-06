@@ -39,24 +39,24 @@
     {
       "width": 1440,
       "height": 900,
-      "titleTop": 160.4375,
-      "titleBottom": 289.21875,
+      "titleTop": 160.625,
+      "titleBottom": 289.40625,
       "visible": true,
       "documentOverflow": false
     },
     {
       "width": 390,
       "height": 1000,
-      "titleTop": 154.546875,
-      "titleBottom": 238.546875,
+      "titleTop": 154.734375,
+      "titleBottom": 238.734375,
       "visible": true,
       "documentOverflow": false
     },
     {
       "width": 1600,
       "height": 1850,
-      "titleTop": 160.234375,
-      "titleBottom": 289.015625,
+      "titleTop": 160.71875,
+      "titleBottom": 289.5,
       "visible": true,
       "documentOverflow": false
     }
