@@ -109,29 +109,29 @@
                 </div>
                 <section class="decision-coarse-analysis" id="decision-coarse-analysis" aria-labelledby="decision-coarse-title">
                     <div class="decision-analysis-header">
-                        <div class="decision-analysis-title"><p class="decision-eyebrow">GPT / HISTORICAL ANALYSIS</p><h3 id="decision-coarse-title">粗精煤泥灰分<span>从趋势到影响因素</span></h3><p>历史采样均值 · 固定 GPT 保存模型 · 非实时预测</p></div>
+                        <div class="decision-analysis-title"><p class="decision-eyebrow">GPT / HISTORICAL ANALYSIS</p><h3 id="decision-coarse-title">粗精煤泥灰分<span>从趋势到影响因素</span></h3><p>按日 / 按采样 · 对应 GPT 模型 · 历史分析</p></div>
                         <div class="decision-period-switch" role="group" aria-label="GPT 历史图表统计周期">
                             <button type="button" data-decision-period="day" class="is-active" aria-pressed="true">按日</button>
-                            <button type="button" data-decision-period="shift" aria-pressed="false">按班次</button>
+                            <button type="button" data-decision-period="sample" aria-pressed="false">按采样</button>
                         </div>
                     </div>
                     <p class="decision-analysis-meta" id="decision-coarse-meta" aria-live="polite"></p>
                     <div class="decision-charts-grid">
                         <article class="decision-chart-card decision-chart-trend">
-                            <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">01 / TREND</p><h4>粗精煤泥<br>灰分趋势</h4><p>沿时间观察实测与预测的变化，比较它们与目标参考线的距离。</p></div><div class="decision-chart-legend"><span class="is-actual">实测均值</span><span class="is-predicted">GPT 预测均值</span><span class="is-target">目标参考 13%</span></div></div>
+                            <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">01 / TREND</p><h4>粗精煤泥<br>灰分趋势</h4><p>沿时间观察实测与预测的变化，比较它们与目标参考线的距离。</p></div><div class="decision-chart-legend"><span class="is-actual" data-decision-series="actual">实测日均值</span><span class="is-predicted" data-decision-series="predicted">GPT 日级预测</span><span class="is-target">目标参考 13%</span></div></div>
                             <div class="decision-chart-plot"><canvas id="decision-coarse-trend" role="img" tabindex="0" aria-describedby="decision-trend-tooltip" aria-label="历史实测灰分、GPT 预测灰分与13%参考线趋势。方向键查看数据，Home和End跳到首尾，Escape收起提示；汇总数据见下方表格。"></canvas><div class="decision-chart-tooltip" id="decision-trend-tooltip" aria-live="off" hidden></div></div>
                         </article>
                         <article class="decision-chart-card decision-chart-factors">
-                            <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">02 / FACTORS</p><h4>多因素模型<br>关联强度</h4><p>从保存模型的标准化系数查看关联强弱与方向；关联不代表因果。</p></div><p class="decision-factor-key"><span class="decision-factor-positive">正向关联</span><span class="decision-factor-negative">负向关联</span></p><p class="decision-chart-sr" id="decision-coarse-factor-list"></p></div>
-                            <div class="decision-chart-plot"><canvas id="decision-coarse-factors" role="img" tabindex="0" aria-describedby="decision-factors-tooltip" aria-label="GPT 保存模型的标准化系数关联强度，不代表因果或准确率。方向键查看系数，Home和End跳到首尾，Escape收起提示。"></canvas><div class="decision-chart-tooltip" id="decision-factors-tooltip" aria-live="off" hidden></div></div>
+                            <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">02 / FACTORS</p><h4>多因素模型<br>关联强度</h4><p id="decision-coarse-factor-caption">日级分析模型的标准化系数，仅用于历史分析。</p><p>系数表示关联强弱与方向，不代表因果。</p></div><p class="decision-factor-key"><span class="decision-factor-positive">正向关联</span><span class="decision-factor-negative">负向关联</span></p><p class="decision-chart-sr" id="decision-coarse-factor-list"></p></div>
+                            <div class="decision-chart-plot"><canvas id="decision-coarse-factors" role="img" tabindex="0" aria-describedby="decision-factors-tooltip" aria-label="GPT 当前统计口径模型的标准化系数关联强度，不代表因果或准确率。方向键查看系数，Home和End跳到首尾，Escape收起提示。"></canvas><div class="decision-chart-tooltip" id="decision-factors-tooltip" aria-live="off" hidden></div></div>
                         </article>
                         <article class="decision-chart-card decision-chart-level">
-                            <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">03 / RELATIONSHIP</p><h4>灰分与<br>精磁尾液位</h4><p>在同组有效液位采样中，对照实测与预测灰分的分布。</p></div><div class="decision-chart-legend"><span class="is-actual">实测均值</span><span class="is-predicted">GPT 预测均值</span></div><p class="decision-chart-metrics" id="decision-coarse-metrics"></p></div>
-                            <div class="decision-chart-plot"><canvas id="decision-coarse-level" role="img" tabindex="0" aria-describedby="decision-level-tooltip" aria-label="历史液位均值与实测和GPT预测灰分均值的散点对照。方向键查看数据，Home和End跳到首尾，Escape收起提示；汇总数据见下方表格。"></canvas><div class="decision-chart-tooltip" id="decision-level-tooltip" aria-live="off" hidden></div></div>
+                            <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">03 / RELATIONSHIP</p><h4>灰分与<br>精磁尾液位</h4><p>按当前统计口径，对照实测与预测灰分的液位分布。</p></div><div class="decision-chart-legend"><span class="is-actual" data-decision-series="actual">实测日均值</span><span class="is-predicted" data-decision-series="predicted">GPT 日级预测</span></div><p class="decision-chart-metrics" id="decision-coarse-metrics"></p></div>
+                            <div class="decision-chart-plot"><canvas id="decision-coarse-level" role="img" tabindex="0" aria-describedby="decision-level-tooltip" aria-label="当前统计口径的历史液位与实测和GPT预测灰分散点对照。方向键查看数据，Home和End跳到首尾，Escape收起提示；图表数据见下方表格。"></canvas><div class="decision-chart-tooltip" id="decision-level-tooltip" aria-live="off" hidden></div></div>
                         </article>
                     </div>
-                    <p class="decision-analysis-note">按日为自然日；白班 08:00–20:00，夜班 20:00–次日 08:00，夜班归入起始日期。先用保存模型预测各采样点，再按组取均值，不使用待确认的 KEPServer 累计灰分或煤量。液位图只汇总同组中有有效液位的配对采样；开关采样比例不代表运行时长。历史回算不是新的独立验证，化验报告时间尚未记录。</p>
-                    <details class="decision-analysis-data"><summary>查看汇总数据</summary><div class="decision-analysis-table-wrap"><table><thead><tr><th>日期 / 班次</th><th>采样数</th><th>实测均值 (%)</th><th>GPT 预测均值 (%)</th><th>配对液位均值 (%)</th><th>液位配对数</th><th>配对实测均值 (%)</th><th>配对预测均值 (%)</th></tr></thead><tbody id="decision-coarse-table"></tbody></table></div></details>
+                    <p class="decision-analysis-note">按日：因子与实测灰分取自然日采样均值，使用独立缓存的 GPT 日级分析模型，每日一点；按采样：使用 GPT 采样保存模型，每条有效历史记录一点。三图随口径同步切换，日级模型不替换生产模型。液位缺失时不显示对应散点，日均开关比例不代表全天运行时长。历史回算不是新的独立验证，化验报告时间尚未记录；尚未接入 KEPServer 实时预测。</p>
+                    <details class="decision-analysis-data"><summary>查看图表数据</summary><div class="decision-analysis-table-wrap"><table><thead><tr><th>日期 / 采样时间</th><th>采样数</th><th>实测灰分 (%)</th><th>GPT 预测 (%)</th><th>液位 (%)</th><th>液位有值采样数</th><th>液位图实测 (%)</th><th>液位图预测 (%)</th></tr></thead><tbody id="decision-coarse-table"></tbody></table></div></details>
                 </section>
             </div>
             <div class="decision-reveal" id="decision-reveal">
@@ -919,7 +919,7 @@
     <script src="js/app.js?v=86"></script>
     <script src="js/overview.js?v=46"></script>
     <script src="js/decision-background.js?v=1"></script>
-    <script src="js/decision-coarse-charts.js?v=2"></script>
+    <script src="js/decision-coarse-charts.js?v=3"></script>
     <script src="js/decision-overview.js?v=13"></script>
     <script src="js/collect.js?v=25"></script>
     <script src="js/coarse.js?v=24"></script>

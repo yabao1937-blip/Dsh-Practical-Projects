@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {chromium}=require(process.env.DMCS_PLAYWRIGHT_MODULE || 'playwright');
 const url=process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000';
-const output=path.resolve(__dirname,'../../docs/verification/decision-hover-20261007');
+const output=path.resolve(__dirname,'../../docs/verification/decision-day-sample-20261007');
 (async()=> {
     const browser=await chromium.launch({channel:'chrome',headless:true});
     try {
@@ -44,14 +44,20 @@ const output=path.resolve(__dirname,'../../docs/verification/decision-hover-2026
             factors:DecisionCoarseCharts.snapshot.factors,model:DecisionCoarseCharts.snapshot.which,hits:Object.fromEntries(Object.entries(DecisionCoarseCharts.hits).map(([k,v])=>[k,v.length]))}));
         assert.equal(day.mode,'day');assert.ok(day.groups>0);assert.equal(day.hits.trend,day.groups);assert.equal(day.factors.length,10);
         await capture('gpt-day-light.png');
-        await page.locator('[data-decision-period="shift"]').click();
-        const shift=await page.evaluate(()=>({mode:DecisionCoarseCharts.mode,groups:DecisionCoarseCharts.snapshot.rows.length,factors:DecisionCoarseCharts.snapshot.factors,rows:DecisionCoarseCharts.snapshot.rows}));
-        assert.equal(shift.mode,'shift');assert.ok(shift.groups>=day.groups);assert.deepEqual(shift.factors,day.factors);
-        assert.equal(await page.locator('[data-decision-period="shift"]').getAttribute('aria-pressed'),'true');
-        assert.ok(shift.rows.every(r=>r.label.endsWith('白班') || r.label.endsWith('夜班')));
-        await capture('gpt-shift-light.png');
+        const dayCache=await page.evaluate(()=>JSON.stringify(DecisionCoarseCharts.dailyCache));
+        await page.locator('[data-decision-period="sample"]').click();
+        const sample=await page.evaluate(()=>({mode:DecisionCoarseCharts.mode,groups:DecisionCoarseCharts.snapshot.rows.length,factors:DecisionCoarseCharts.snapshot.factors,rows:DecisionCoarseCharts.snapshot.rows,hits:DecisionCoarseCharts.hits.level.length}));
+        assert.equal(sample.mode,'sample');assert.equal(sample.groups,day.count);assert.notDeepEqual(sample.factors,day.factors);
+        assert.equal(await page.locator('[data-decision-period="sample"]').getAttribute('aria-pressed'),'true');
+        assert.ok(sample.rows.every(r=>r.n===1 && r.label.length===19));
+        assert.ok(sample.hits>day.hits.level,'Scatter must switch from daily means to individual records');
+        await capture('gpt-sample-light.png');
+        await page.locator('[data-decision-period="day"]').click();
+        assert.equal(await page.evaluate(()=>JSON.stringify(DecisionCoarseCharts.dailyCache)),dayCache);
+        assert.deepEqual(await page.evaluate(()=>DecisionCoarseCharts.snapshot.factors),day.factors);
+        await page.locator('[data-decision-period="sample"]').click();
         await page.locator('.decision-analysis-data summary').click();
-        assert.equal(await page.locator('#decision-coarse-table tr').count(),shift.groups);
+        assert.equal(await page.locator('#decision-coarse-table tr').count(),sample.groups);
         await page.locator('.decision-analysis-data summary').click();
         await page.evaluate(()=> {
             window.__hoverSnapshot=JSON.stringify(DecisionCoarseCharts.snapshot);
@@ -80,7 +86,7 @@ const output=path.resolve(__dirname,'../../docs/verification/decision-hover-2026
             hoverChecks.push({id,canvasRecolored:true,restored:true,geometryStable:true});
         }
         assert.ok(await page.evaluate(()=>JSON.stringify(DecisionCoarseCharts.snapshot)===window.__hoverSnapshot));
-        await page.locator('[data-decision-period="shift"]').focus();
+        await page.locator('[data-decision-period="sample"]').focus();
         await page.keyboard.press('Tab');
         assert.equal(await page.evaluate(()=>document.activeElement.id),'decision-coarse-trend');
         assert.equal(await page.locator('.decision-chart-trend').evaluate(c=>c.classList.contains('is-engaged')),true);
@@ -88,20 +94,20 @@ const output=path.resolve(__dirname,'../../docs/verification/decision-hover-2026
         await page.keyboard.press('ArrowRight');
         assert.notEqual(await page.locator('#decision-trend-tooltip').innerText(),keyboardFirst);
         await page.keyboard.press('End');
-        assert.ok((await page.locator('#decision-trend-tooltip').innerText()).includes(shift.rows.at(-1).label));
+        assert.ok((await page.locator('#decision-trend-tooltip').innerText()).includes(sample.rows.at(-1).label));
         await page.keyboard.press('Escape');assert.equal(await page.locator('#decision-trend-tooltip').isVisible(),false);
         await page.locator('#decision-coarse-meta').hover();
         assert.equal(await page.locator('.decision-chart-trend').evaluate(c=>c.classList.contains('is-engaged')),true,'Keyboard focus survives pointer exit');
         await page.keyboard.press('Tab');
         assert.equal(await page.evaluate(()=>document.activeElement.id),'decision-coarse-factors');
         assert.equal(await page.locator('.decision-chart-trend').evaluate(c=>c.classList.contains('is-engaged')),false);
-        await page.locator('[data-decision-period="shift"]').focus();
+        await page.locator('[data-decision-period="sample"]').focus();
         await page.evaluate(()=>{DecisionCoarseCharts.build=window.__chartBuild;});
         await capture('gpt-trend-hover.png','trend');
         await page.locator('#decision-theme').click();await section.scrollIntoViewIfNeeded();
         assert.equal(await page.evaluate(()=>DecisionCoarseCharts.palette().blue),'#ffffff');
         assert.notEqual(await section.evaluate(el=>getComputedStyle(el).backgroundColor),lightBackground);
-        await capture('gpt-shift-dark.png');
+        await capture('gpt-sample-dark.png');
         await capture('gpt-level-hover-dark.png','level');
         await page.emulateMedia({reducedMotion:'reduce'});
         assert.equal(await page.locator('.decision-chart-level h4').evaluate(el=>getComputedStyle(el,'::after').transitionDuration),'0s');
@@ -126,7 +132,7 @@ const output=path.resolve(__dirname,'../../docs/verification/decision-hover-2026
         assert.ok(geometry.filter(g=>g.width<=800).every(g=>g.cards.every(c=>c.layout==='stacked')));
         await page.setViewportSize({width:390,height:2400});
         await section.scrollIntoViewIfNeeded();
-        await capture('gpt-shift-mobile.png');
+        await capture('gpt-sample-mobile.png');
         assert.ok(await page.evaluate(before=>JSON.stringify(App.store)===before,before),'Period, hover, resize and theme must not mutate store');
         // Current production is changed only in this isolated browser memory to exercise GPT-bank selection.
         await page.evaluate(()=> {
@@ -168,7 +174,17 @@ const output=path.resolve(__dirname,'../../docs/verification/decision-hover-2026
         await touchPage.evaluate(()=>document.getElementById('decision-coarse-trend').dispatchEvent(new PointerEvent('pointercancel',{pointerType:'touch'})));
         assert.equal(await touchPage.locator('#decision-trend-tooltip').isVisible(),false);
         await touchContext.close();assert.deepEqual(errors,[]);
-        const result={passed:true,day:{...day,factors:day.factors.length},shift:{groups:shift.groups},geometry,
+        const modelReport=await page.evaluate(()=> {
+            const group=DecisionCoarseCharts.dailyCache.result,m=group[group.production].metrics;
+            return {scope:'GPT temporary daily chart model',range:group.range,trainingDays:group.n,algorithm:group.production,
+                historicalFit:{r2:m.r2,rmse:m.rmse,mae:m.mae,passRate:m.passRate},
+                tuningValidation:{timeBlocks:m.selectionCv,leaveDayOut:m.groupCv},
+                forwardTimeReference:m.validation,
+                limitation:'Previously used historical development data; these are not new independent test results. Plot predictions follow the model input bounds.'};
+        });
+        fs.writeFileSync(path.join(output,'daily-model-report.json'),JSON.stringify(modelReport,null,2)+'\n');
+        const result={passed:true,day:{...day,factors:day.factors.length},sample:{groups:sample.groups,scatterPoints:sample.hits},
+            factorsChangeWithMode:true,scatterChangesWithMode:true,dailyCacheReused:true,geometry,
             tooltips:true,themes:true,hoverChecks,hoverDoesNotRecalculate:true,keyboardNavigation:true,keyboardFocusRetained:true,
             touchTapTooltip:true,noStickyTouchHover:true,nativeTouchScroll:true,reducedMotion:true,pageExitClearsTips:true,
             unifiedBlueSection:true,alternatingDesktopLayout:true,stackedNarrowLayout:true,

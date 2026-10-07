@@ -1,0 +1,213 @@
+{
+  "passed": true,
+  "day": {
+    "mode": "day",
+    "count": 205,
+    "groups": 52,
+    "factors": 10,
+    "model": "mlr",
+    "hits": {
+      "trend": 52,
+      "factors": 10,
+      "level": 104
+    }
+  },
+  "sample": {
+    "groups": 205,
+    "scatterPoints": 410
+  },
+  "factorsChangeWithMode": true,
+  "scatterChangesWithMode": true,
+  "dailyCacheReused": true,
+  "geometry": [
+    {
+      "width": 1600,
+      "overflow": false,
+      "cards": [
+        {
+          "width": 1486,
+          "plotWidth": 1010.890625,
+          "overflow": false,
+          "layout": "plot-right"
+        },
+        {
+          "width": 1486,
+          "plotWidth": 1010.875,
+          "overflow": false,
+          "layout": "plot-left"
+        },
+        {
+          "width": 1486,
+          "plotWidth": 1010.890625,
+          "overflow": false,
+          "layout": "plot-right"
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "overflow": false,
+      "cards": [
+        {
+          "width": 1326,
+          "plotWidth": 895.6875,
+          "overflow": false,
+          "layout": "plot-right"
+        },
+        {
+          "width": 1326,
+          "plotWidth": 895.671875,
+          "overflow": false,
+          "layout": "plot-left"
+        },
+        {
+          "width": 1326,
+          "plotWidth": 895.6875,
+          "overflow": false,
+          "layout": "plot-right"
+        }
+      ]
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "cards": [
+        {
+          "width": 954,
+          "plotWidth": 623,
+          "overflow": false,
+          "layout": "plot-right"
+        },
+        {
+          "width": 954,
+          "plotWidth": 623,
+          "overflow": false,
+          "layout": "plot-left"
+        },
+        {
+          "width": 954,
+          "plotWidth": 623,
+          "overflow": false,
+          "layout": "plot-right"
+        }
+      ]
+    },
+    {
+      "width": 801,
+      "overflow": false,
+      "cards": [
+        {
+          "width": 731,
+          "plotWidth": 466.90625,
+          "overflow": false,
+          "layout": "plot-right"
+        },
+        {
+          "width": 731,
+          "plotWidth": 466.890625,
+          "overflow": false,
+          "layout": "plot-left"
+        },
+        {
+          "width": 731,
+          "plotWidth": 466.90625,
+          "overflow": false,
+          "layout": "plot-right"
+        }
+      ]
+    },
+    {
+      "width": 800,
+      "overflow": false,
+      "cards": [
+        {
+          "width": 702,
+          "plotWidth": 702,
+          "overflow": false,
+          "layout": "stacked"
+        },
+        {
+          "width": 702,
+          "plotWidth": 702,
+          "overflow": false,
+          "layout": "stacked"
+        },
+        {
+          "width": 702,
+          "plotWidth": 702,
+          "overflow": false,
+          "layout": "stacked"
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "overflow": false,
+      "cards": [
+        {
+          "width": 312,
+          "plotWidth": 312,
+          "overflow": false,
+          "layout": "stacked"
+        },
+        {
+          "width": 312,
+          "plotWidth": 312,
+          "overflow": false,
+          "layout": "stacked"
+        },
+        {
+          "width": 312,
+          "plotWidth": 312,
+          "overflow": false,
+          "layout": "stacked"
+        }
+      ]
+    }
+  ],
+  "tooltips": true,
+  "themes": true,
+  "hoverChecks": [
+    {
+      "id": "trend",
+      "canvasRecolored": true,
+      "restored": true,
+      "geometryStable": true
+    },
+    {
+      "id": "factors",
+      "canvasRecolored": true,
+      "restored": true,
+      "geometryStable": true
+    },
+    {
+      "id": "level",
+      "canvasRecolored": true,
+      "restored": true,
+      "geometryStable": true
+    }
+  ],
+  "hoverDoesNotRecalculate": true,
+  "keyboardNavigation": true,
+  "keyboardFocusRetained": true,
+  "touchTapTooltip": true,
+  "noStickyTouchHover": true,
+  "nativeTouchScroll": true,
+  "reducedMotion": true,
+  "pageExitClearsTips": true,
+  "unifiedBlueSection": true,
+  "alternatingDesktopLayout": true,
+  "stackedNarrowLayout": true,
+  "gptWhileDsSelected": true,
+  "emptyHistoryKeepsFactors": true,
+  "noDsFallback": true,
+  "storeUnchanged": true,
+  "apiMutationsBlocked": true,
+  "blockedRequests": [
+    {
+      "method": "PUT",
+      "url": "http://127.0.0.1:8000/api/v1/state"
+    }
+  ],
+  "pageErrors": []
+}

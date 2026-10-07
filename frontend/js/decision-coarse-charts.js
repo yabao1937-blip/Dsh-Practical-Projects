@@ -1,4 +1,4 @@
-/* GPT-only historical charts. Grouping changes presentation, never training or live inputs. */
+/* GPT historical charts: private daily analysis model / saved sampling model; no production writes. */
 const DecisionCoarseCharts = {
     mode: 'day', initialized: false, snapshot: null, signature: null, hits: {},
     shortLabels: {raw_ash:'原煤灰分',coal_amount:'入洗煤量',sysA:'A 系统',sysB:'B 系统',sys401:'401 系统',sys402:'402 系统',desliming473:'473 脱粉',desliming474:'474 脱粉',is_stoppage:'停机 / 低负荷',level:'精磁尾液位'},
@@ -6,50 +6,62 @@ const DecisionCoarseCharts = {
     number(v, digits = 2) { return Number.isFinite(v) ? v.toFixed(digits) : '—'; },
     modelGroup(store) {
         const current = store.coarseModel, saved = store.coarseModelVariants?.gpt;
-        if (current && App.coarseEngine(current) === 'gpt') return current;
+        if (current && App.coarseEngine(current) === 'gpt') {
+            const identity=m=>JSON.stringify([m.production,m.trainedAt,m.n,m.range,m.tolerance,
+                ...['mlr','pls'].map(k=>[m[k]?.intercept,m[k]?.coefs,m[k]?.imputeMeans])]);
+            return saved && App.coarseEngine(saved)==='gpt' && identity(saved)===identity(current)?saved:current;
+        }
         return saved && App.coarseEngine(saved) === 'gpt' ? saved : null;
     },
-    period(timestamp, mode) {
-        const day = timestamp.slice(0,10), hour = Number(timestamp.slice(11,13));
-        if (mode === 'day') return {key:day,label:day,tick:day.slice(5),start:day+' 00:00',end:day+' 24:00'};
-        // UTC arithmetic is only a calendar operation: timestamps are historical plant wall time.
-        const date = new Date(day+'T00:00:00Z');
-        if (hour < 8) date.setUTCDate(date.getUTCDate()-1);
-        const shiftDay = date.toISOString().slice(0,10), night = hour >= 20 || hour < 8;
-        date.setUTCDate(date.getUTCDate()+1);
-        return {key:shiftDay+(night?' 20':' 08'),label:shiftDay+(night?' 夜班':' 白班'),tick:shiftDay.slice(5)+(night?' 夜':' 白'),
-            start:shiftDay+(night?' 20:00':' 08:00'),end:(night?date.toISOString().slice(0,10):shiftDay)+(night?' 08:00':' 20:00')};
+    validModel(group) {
+        const model=group?.[group.production];
+        return ['mlr','pls'].includes(group?.production) && Number.isFinite(model?.intercept) &&
+            model?.coefs?.length===App.MLR_FEATURES.length && model.coefs.every(Number.isFinite) &&
+            (!model.feature_names || JSON.stringify(model.feature_names)===JSON.stringify(App.MLR_FEATURES));
+    },
+    dailyModel(store,saved) {
+        // Pure GPT training uses a private facade for range/tolerance, never the DS/current production state.
+        const range=['all','jun_jul','30d'].includes(saved.range)?saved.range:'all';
+        const tolerance=Number.isFinite(saved.tolerance)?saved.tolerance:(store.coarseTolerance ?? .8);
+        const reader=Object.create(App);reader.store={...store,coarseTolerance:tolerance};
+        const trainingDays=reader._coarseDaily(reader.filterTrainRows(range));
+        const identity=[saved.trainedAt,saved.n,saved.production,...['mlr','pls'].map(k=>[saved[k]?.intercept,saved[k]?.coefs,saved[k]?.inputPolicy,saved[k]?.inputBounds])];
+        const key=JSON.stringify([identity,range,tolerance,trainingDays.map(d=>[d.timestamp,d.ash_content,...App.MLR_FEATURES.map(f=>d[f])])]);
+        if (key!==this.dailyCache?.key) {
+            const result=reader._trainCoarseRows(trainingDays);
+            this.dailyCache={key,result:result?{...result,range,tolerance}:null};
+        }
+        return this.dailyCache.result;
     },
     build(store = App.store, mode = this.mode) {
-        const group = this.modelGroup(store), which = group?.production, model = group?.[which];
-        const valid = ['mlr','pls'].includes(which) && Number.isFinite(model?.intercept) &&
-            model?.coefs?.length === App.MLR_FEATURES.length && model.coefs.every(Number.isFinite) &&
-            (!model.feature_names || JSON.stringify(model.feature_names) === JSON.stringify(App.MLR_FEATURES));
-        if (!valid) return {group,model:null,rows:[],factors:[],count:0,missing:0,excluded:0,mode};
-        const source = App._coarseRows(store.coarseCoal || []), periods = new Map();
+        const saved=this.modelGroup(store),empty=reason=>({group:null,model:null,rows:[],factors:[],count:0,missing:0,excluded:0,mode,reason});
+        if(!this.validModel(saved)) return empty('gpt-model-missing');
+        const group=mode==='day'?this.dailyModel(store,saved):saved;
+        if(!this.validModel(group)) return empty('daily-data-insufficient');
+        const which=group.production,model=group[which],source=App._coarseRows(store.coarseCoal || []);
+        const inputs=mode==='day'?App._coarseDaily(source):source,rows=[];
         let missing = 0, excluded = 0;
-        for (const record of source) {
+        for (const record of inputs) {
             const pred = App._coarsePredict(record,model);
             if (!Number.isFinite(pred)) { excluded++; continue; }
             if (App.MLR_FEATURES.some(f => !Number.isFinite(record[f]))) missing++;
-            const period = this.period(record.timestamp,mode);
-            if (!periods.has(period.key)) periods.set(period.key,{...period,records:[]});
-            periods.get(period.key).records.push({actual:record.ash_content,pred,level:record.level});
+            const day=record.timestamp.slice(0,10),daily=mode==='day';
+            const hasLevel=Number.isFinite(record.level) && record.level>0;
+            rows.push({key:record.timestamp,label:daily?day:record.timestamp,tick:daily?day.slice(5):record.timestamp.slice(5,16),
+                start:daily?day+' 00:00':record.timestamp,end:daily?day+' 24:00':record.timestamp,n:daily?record.n:1,
+                actual:record.ash_content,pred,level:hasLevel?record.level:null,
+                scatterActual:hasLevel?record.ash_content:null,scatterPred:hasLevel?pred:null,
+                paired:hasLevel?(daily?record.records.filter(r=>Number.isFinite(r.level)).length:1):0});
         }
-        const rows = [...periods.values()].map(period => {
-            const records = period.records, paired = records.filter(r => Number.isFinite(r.level) && r.level > 0);
-            return {...period,n:records.length,actual:this.mean(records.map(r=>r.actual)),pred:this.mean(records.map(r=>r.pred)),
-                level:this.mean(paired.map(r=>r.level)),scatterActual:this.mean(paired.map(r=>r.actual)),scatterPred:this.mean(paired.map(r=>r.pred)),paired:paired.length};
-        });
         const factors = App.MLR_FEATURES.map((key,index) => ({key,name:App.FEATURE_LABELS[key] || key,value:model.stdCoef?.[index]}))
             .filter(f=>Number.isFinite(f.value)).sort((a,b)=>Math.abs(b.value)-Math.abs(a.value));
-        return {group,model,which,rows,factors,count:source.length-excluded,missing,excluded,mode};
+        return {group,model,which,rows,factors,count:source.length,missing,excluded,mode};
     },
     init() {
         if (this.initialized) return;
         this.initialized = true;
         document.querySelectorAll('[data-decision-period]').forEach(button => button.addEventListener('click',()=> {
-            this.mode = button.dataset.decisionPeriod === 'shift' ? 'shift' : 'day';
+            this.mode = button.dataset.decisionPeriod === 'sample' ? 'sample' : 'day';
             this.refresh();
         }));
         this.hoverMedia = window.matchMedia('(hover: hover) and (pointer: fine)');
@@ -95,16 +107,19 @@ const DecisionCoarseCharts = {
             const selected = button.dataset.decisionPeriod === this.mode;
             button.classList.toggle('is-active',selected); button.setAttribute('aria-pressed',String(selected));
         });
-        const s = this.snapshot, mode = this.mode === 'day' ? '天' : '班次';
+        const s = this.snapshot,daily=this.mode==='day',mode=daily?'天':'采样点';
         const meta = document.getElementById('decision-coarse-meta');
-        meta.textContent = !s.model ? '尚未保存可用的 GPT 模型，请在粗精煤泥灰分预测页训练 GPT 版本。' :
-            `GPT · ${s.which.toUpperCase()} · 训练时间 ${s.group.trainedAt || '未记录'} · ${s.count} 条历史采样 → ${s.rows.length} 个${mode}`+
+        meta.textContent = !s.model ? (s.reason==='daily-data-insufficient'?'GPT 日级数据不足：训练范围内至少需要 12 个有效日。请切换按采样查看。':'尚未保存可用的 GPT 模型，请在粗精煤泥灰分预测页训练 GPT 版本。') :
+            `GPT · ${s.which.toUpperCase()} · ${daily?'日级分析模型（仅图表缓存） · '+s.group.n+' 个训练日':'采样保存模型 · 训练时间 '+(s.group.trainedAt || '未记录')} · ${s.count} 条历史采样 → ${s.rows.length} 个${mode}`+
             (s.rows.length ? ` · ${s.rows[0].label} 至 ${s.rows.at(-1).label}` : '')+
-            (s.missing ? ` · ${s.missing} 条记录的缺失因子按保存模型均值补齐` : '')+
+            (s.missing ? ` · ${s.missing} 个${mode}的缺失因子按对应模型均值补齐` : '')+
             (s.excluded ? ` · ${s.excluded} 条无法计算，已排除` : '');
         document.getElementById('decision-coarse-table').innerHTML = s.rows.map(r=>
             `<tr><td>${r.label}</td><td>${r.n}</td><td>${this.number(r.actual)}</td><td>${this.number(r.pred)}</td><td>${this.number(r.level)}</td><td>${r.paired}</td><td>${this.number(r.scatterActual)}</td><td>${this.number(r.scatterPred)}</td></tr>`).join('');
         document.getElementById('decision-coarse-factor-list').textContent = s.factors.map(f=>`${f.name}：${this.number(f.value,3)}`).join('；') || '暂无 GPT 标准化系数';
+        document.querySelectorAll('[data-decision-series="actual"]').forEach(el=>el.textContent=daily?'实测日均值':'实测灰分');
+        document.querySelectorAll('[data-decision-series="predicted"]').forEach(el=>el.textContent=daily?'GPT 日级预测':'GPT 采样预测');
+        document.getElementById('decision-coarse-factor-caption').textContent=daily?'日级分析模型的标准化系数，仅用于历史分析。':'采样保存模型的标准化系数，保留原生产模型。';
         this.draw();
     },
     syncEngagement(id) {
@@ -162,18 +177,19 @@ const DecisionCoarseCharts = {
         return {left,right,top,bottom,xWidth,yHeight,y};
     },
     draw() {
-        document.getElementById('decision-coarse-metrics').textContent = this.snapshot.model ? '暂无可配对的历史液位与灰分' : '暂无可用 GPT 模型';
+        document.getElementById('decision-coarse-metrics').textContent = this.snapshot.model ? '暂无可配对的历史液位与灰分' : this.emptyReason();
         for(const id of ['trend','factors','level']) this.drawCard(id);
     },
     drawCard(id,preserveTooltip = false) {
         const surface=this.surface(id,preserveTooltip); if (!surface) return;
-        if (!this.snapshot.model) { this.empty(surface,'暂无可用 GPT 模型'); return; }
+        if (!this.snapshot.model) { this.empty(surface,this.emptyReason()); return; }
         if (id !== 'factors' && !this.snapshot.rows.length) { this.empty(surface,'暂无有效历史采样数据'); return; }
         this[id](surface);
     },
+    emptyReason() { return this.snapshot.reason==='daily-data-insufficient'?'日级数据不足，请切换按采样':'暂无可用 GPT 模型'; },
     trend(surface) {
         const {ctx,w,h,c}=surface,rows=this.snapshot.rows,n=rows.length;
-        const a=this.axes(surface,rows.flatMap(r=>[r.actual,r.pred,13]),this.mode==='day'?'采样日期':'班次起始日期 · 白 / 夜');
+        const a=this.axes(surface,rows.flatMap(r=>[r.actual,r.pred,13]),this.mode==='day'?'采样日期 · 每日一点':'采样时间 · 每条记录一点');
         const x=i=>a.left+(n===1?.5:i/(n-1))*a.xWidth;
         const step=Math.max(1,Math.ceil(n/Math.max(2,Math.floor(a.xWidth/(this.mode==='day'?65:100)))));
         ctx.fillStyle=c.muted;ctx.textAlign='center';
@@ -184,7 +200,7 @@ const DecisionCoarseCharts = {
             rows.forEach((r,i)=>{ctx.beginPath();ctx.arc(x(i),a.y(r[field]),2.7,0,Math.PI*2);ctx.fill();});
         }
         ctx.strokeStyle=c.purple;ctx.setLineDash([4,5]);ctx.beginPath();ctx.moveTo(a.left,a.y(13));ctx.lineTo(w-a.right,a.y(13));ctx.stroke();ctx.setLineDash([]);
-        this.hits.trend=rows.map((r,i)=>({x:x(i),y:a.y(r.actual),text:`${r.label}\n${r.start} 至 ${r.end}\n${r.n} 条采样 · 实测均值 ${this.number(r.actual)}%\nGPT 预测均值 ${this.number(r.pred)}% · 参考线 13.00%`}));
+        this.hits.trend=rows.map((r,i)=>({x:x(i),y:a.y(r.actual),text:`${r.label}\n${this.mode==='day'?r.n+' 条采样 · 实测日均值':'实测灰分'} ${this.number(r.actual)}%\nGPT ${this.mode==='day'?'日级':'采样'}预测 ${this.number(r.pred)}% · 参考线 13.00%`}));
     },
     factors(surface) {
         const {ctx,w,h,c}=surface,items=this.snapshot.factors;
@@ -206,7 +222,7 @@ const DecisionCoarseCharts = {
         const {ctx,w,h,c}=surface,rows=this.snapshot.rows.filter(r=>r.paired>0);
         const caption=document.getElementById('decision-coarse-metrics');
         if(!rows.length) {caption.textContent='暂无可配对的历史液位与灰分';this.empty(surface,'暂无有效历史液位数据');return;}
-        const a=this.axes(surface,rows.flatMap(r=>[r.scatterActual,r.scatterPred]),'精磁尾液位 (%) · 同组有效液位采样均值');
+        const a=this.axes(surface,rows.flatMap(r=>[r.scatterActual,r.scatterPred]),this.mode==='day'?'精磁尾液位 (%) · 日均值':'精磁尾液位 (%) · 采样值');
         const min=Math.min(...rows.map(r=>r.level))-1,max=Math.max(...rows.map(r=>r.level))+1;
         const x=value=>a.left+(value-min)/(max-min)*a.xWidth;
         ctx.textAlign='center';ctx.fillStyle=c.muted;
@@ -216,13 +232,13 @@ const DecisionCoarseCharts = {
             ctx.fillStyle=color;
             rows.forEach(r=> {
                 const px=x(r.level),py=a.y(r[field]);ctx.beginPath();ctx.arc(px,py,3.3,0,Math.PI*2);ctx.fill();
-                hits.push({x:px,y:py,text:`${r.label} · ${label}\n${r.paired} 条液位配对采样 · 液位均值 ${this.number(r.level)}%\n实测均值 ${this.number(r.scatterActual)}%\nGPT 预测均值 ${this.number(r.scatterPred)}%`});
+                hits.push({x:px,y:py,text:`${r.label} · ${label}\n液位${this.mode==='day'?'日均值':'采样值'} ${this.number(r.level)}% · ${r.paired} 条有液位的采样\n实测${this.mode==='day'?'日均值':'灰分'} ${this.number(r.scatterActual)}%\nGPT ${this.mode==='day'?'日级':'采样'}预测 ${this.number(r.scatterPred)}%`});
             });
         }
         this.hits.level=hits;
         const errors=rows.map(r=>r.scatterPred-r.scatterActual),mean=this.mean(rows.map(r=>r.scatterActual));
         const ss=rows.reduce((sum,r)=>sum+(r.scatterActual-mean)**2,0),sse=errors.reduce((sum,e)=>sum+e*e,0);
-        caption.textContent=`历史汇总对照 · ${rows.length} 点 · MAE ${this.number(this.mean(errors.map(Math.abs)))} / RMSE ${this.number(Math.sqrt(sse/rows.length))} 百分点 · R² ${ss>0?this.number(1-sse/ss,3):'—'}`;
+        caption.textContent=`历史${this.mode==='day'?'日级':'采样'}回算对照 · ${rows.length} 点 · MAE ${this.number(this.mean(errors.map(Math.abs)))} / RMSE ${this.number(Math.sqrt(sse/rows.length))} 百分点 · R² ${ss>0?this.number(1-sse/ss,3):'—'}`;
     },
     hover(id,event) {
         const canvas=event.currentTarget,rect=canvas.getBoundingClientRect(),x=event.clientX-rect.left,y=event.clientY-rect.top;

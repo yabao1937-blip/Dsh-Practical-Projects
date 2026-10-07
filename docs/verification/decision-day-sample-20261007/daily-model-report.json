@@ -1,0 +1,66 @@
+{
+  "scope": "GPT temporary daily chart model",
+  "range": "all",
+  "trainingDays": 52,
+  "algorithm": "mlr",
+  "historicalFit": {
+    "r2": 0.29686076977448683,
+    "rmse": 1.3873055778899326,
+    "mae": 1.032572442909667,
+    "passRate": 46.15384615384615
+  },
+  "tuningValidation": {
+    "timeBlocks": {
+      "r2": 0.24327688060861996,
+      "adjR2": 0.24327688060862007,
+      "rmse": 1.1489405826792078,
+      "mae": 0.889110756153423,
+      "passRate": 57.692307692307686,
+      "passRate1": 61.53846153846154,
+      "passRate15": 76.92307692307693
+    },
+    "leaveDayOut": {
+      "r2": 0.1959067135449435,
+      "adjR2": 0.1959067135449435,
+      "rmse": 1.4835585331684744,
+      "mae": 1.1162194093865323,
+      "passRate": 44.230769230769226,
+      "passRate1": 53.84615384615385,
+      "passRate15": 75,
+      "n": 52,
+      "days": 52,
+      "method": "leave-one-day-out"
+    }
+  },
+  "forwardTimeReference": {
+    "r2": -0.5008100661446306,
+    "adjR2": -0.5008100661446306,
+    "rmse": 1.1120868642249877,
+    "mae": 0.9092899545375396,
+    "passRate": 56.25,
+    "passRate1": 56.25,
+    "passRate15": 68.75,
+    "n": 16,
+    "folds": [
+      {
+        "trainEnd": "2026-09-02 12:00:00",
+        "testStart": "2026-09-03 12:00:00",
+        "testEnd": "2026-09-11 12:00:00",
+        "n": 8,
+        "production": "mlr"
+      },
+      {
+        "trainEnd": "2026-09-11 12:00:00",
+        "testStart": "2026-09-12 12:00:00",
+        "testEnd": "2026-09-21 12:00:00",
+        "n": 8,
+        "production": "mlr"
+      }
+    ],
+    "baselineMae": 0.9870438762626278,
+    "baselineRmse": 1.251406672675858,
+    "beatsBaseline": true,
+    "method": "nested-day-walk-forward"
+  },
+  "limitation": "Previously used historical development data; these are not new independent test results. Plot predictions follow the model input bounds."
+}
