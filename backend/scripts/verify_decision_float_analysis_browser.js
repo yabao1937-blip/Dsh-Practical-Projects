@@ -22,7 +22,9 @@ const url=process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000',output=path.res
             await page.locator('#decision-float-meta').hover();await section.screenshot({path:path.join(output,name)});
         }
         const count=await page.evaluate(()=>DecisionFloatAnalysis.snapshot.rows.length);
-        assert.equal(await section.locator('canvas').count(),2);assert.equal(await section.locator('.decision-float-stats strong').count(),4);
+        assert.equal(await section.locator('canvas').count(),2);assert.equal(await section.locator('.decision-float-stats').count(),0);
+        assert.equal(await section.locator('#decision-float-open').count(),0);
+        assert.equal(await page.locator('#page-decision [data-decision-page]').count(),0);
         assert.equal(await page.locator('#decision-float-table tr').count(),count);
         const parity=await page.evaluate(()=>DecisionFloatAnalysis.snapshot.rows.every(r=> {
             const record=App.store.floatCoal.find(d=>d.timestamp===r.timestamp);return r.influence===App.influenceOfFloat(record);
@@ -46,11 +48,10 @@ const url=process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000',output=path.res
         await page.locator('#decision-float-linkage').hover({position:{x:hit.x,y:hit.y}});
         await section.screenshot({path:path.join(output,'float-hover-blue.png')});
         await page.locator('#decision-float-meta').hover();
-        await page.locator('#decision-float-open').focus();await page.keyboard.press('Tab');
-        assert.equal(await page.evaluate(()=>document.activeElement.id),'decision-float-linkage');
+        await page.locator('#decision-float-linkage').focus();
         await page.keyboard.press('End');assert.ok((await page.locator('#decision-float-linkage-tooltip').innerText()).includes(await page.evaluate(()=>DecisionFloatAnalysis.snapshot.latest.timestamp)));
         await page.keyboard.press('Escape');assert.equal(await page.locator('#decision-float-linkage-tooltip').isVisible(),false);
-        await page.locator('#decision-float-open').focus();await page.evaluate(()=>{DecisionFloatAnalysis.build=window.__floatBuild;});
+        await page.locator('#decision-float-linkage').focus();await page.evaluate(()=>{DecisionFloatAnalysis.build=window.__floatBuild;});
         await page.locator('#decision-theme').click();await capture('float-dark.png');
         assert.equal(await section.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)','Float remains white in the dark page theme');
         const geometry=[];
@@ -69,14 +70,14 @@ const url=process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000',output=path.res
         });
         assert.equal(await section.locator('img').count(),0);assert.ok((await page.locator('#decision-float-table').innerHTML()).includes('&lt;img'));
         await page.evaluate(()=>{App.store.floatCoal=[];DecisionFloatAnalysis.refresh();});
-        assert.equal(await page.locator('#decision-float-stat-ash').innerText(),'— %');assert.equal(await page.evaluate(()=>DecisionFloatAnalysis.hits.linkage.length),0);
+        assert.equal(await section.locator('.decision-float-stats').count(),0);assert.equal(await page.evaluate(()=>DecisionFloatAnalysis.hits.linkage.length),0);
         await page.evaluate(()=>{App.store=window.__floatStore;DecisionFloatAnalysis.refresh();});
         assert.ok(await page.evaluate(before=>JSON.stringify(App.store)===before,before));
         await page.locator('[data-decision-period="sample"]').click();await section.scrollIntoViewIfNeeded();
         assert.equal(await page.evaluate(()=>DecisionFloatAnalysis.snapshot.rows.length),count,'Coarse period switch must not filter float data');
         assert.equal(await section.locator('[data-decision-period]').count(),0);
         assert.ok(await page.evaluate(before=>JSON.stringify(App.store)===before,before));assert.deepEqual(errors,[]);
-        const result={passed:true,records:count,charts:2,metrics:4,originalFormulaParity:true,hoverKeyboard:true,themes:true,emptyState:true,
+        const result={passed:true,records:count,charts:2,metrics:0,detailLinkRemoved:true,originalFormulaParity:true,hoverKeyboard:true,themes:true,emptyState:true,
             defaultWhite:true,hoverBlue:true,whiteInBothThemes:true,coarsePalettePreserved:true,
             coarseSwitchIsolated:true,annotationsEscaped:true,storeUnchanged:true,apiMutationsBlocked:true,geometry,pageErrors:errors};
         fs.writeFileSync(path.join(output,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));

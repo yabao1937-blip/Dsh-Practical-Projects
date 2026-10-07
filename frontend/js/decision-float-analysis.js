@@ -45,7 +45,6 @@ const DecisionFloatAnalysis = Object.assign(Object.create(DecisionCoarseCharts),
     init() {
         if(this.initialized) return;
         DecisionCoarseCharts.init.call(this);
-        document.getElementById('decision-float-open').addEventListener('click',()=>App.goToPage('page-float'));
     },
     refresh() {
         this.init();
@@ -58,10 +57,6 @@ const DecisionFloatAnalysis = Object.assign(Object.create(DecisionCoarseCharts),
             (s.duplicates?` · ${s.duplicates} 条重复时间保留首条`:'')+
             (s.early?` · ${s.early} 条早期工况未纳入`:'')+
             (s.invalid?` · ${s.invalid} 条无效数据未纳入`:'');
-        for(const [id,value,unit] of [['ash',l?.ash,'%'],['amount',l?.amount,'t/h'],['influence',l?.influence,'百分点'],['range',s.deviation,'百分点']]) {
-            const text=this.number(value,id==='influence' || id==='range'?3:2);
-            document.getElementById('decision-float-stat-'+id).textContent=(Number.isFinite(value)&&id==='influence'&&value>0?'+':Number.isFinite(value)&&id==='range'?'±':'')+text+' '+unit;
-        }
         document.getElementById('decision-float-table').innerHTML=s.rows.slice().reverse().map(r=>
             `<tr><td>${r.timestamp}</td><td>${this.number(r.ash)}</td><td>${this.number(r.amount)}</td><td>${this.number(r.heavyAsh)}</td><td>${r.defaultHeavy?'默认基准':'5分钟近邻'}</td><td>${this.number(r.total,3)}</td><td>${this.number(r.influence,3)}</td><td>${r.press}</td><td>${this.escape(r.annotation)}</td></tr>`).join('');
         this.draw();
