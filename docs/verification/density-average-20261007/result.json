@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "physicalPoints": 50,
+  "derivedPoints": 4,
+  "liveAvailable": true,
+  "liveValue": 1.2394039630889893,
+  "liveText": "1.239",
+  "unit": "",
+  "formula": "(A303/MD + A304/MD) ÷ 2",
+  "members": [
+    {
+      "label": "A303",
+      "value": 1,
+      "available": true,
+      "item_id": "TIA_4_1.TIA_4_1.A303/MD"
+    },
+    {
+      "label": "A304",
+      "value": 1.4788079261779785,
+      "available": true,
+      "item_id": "TIA_4_1.TIA_4_1.A304/MD"
+    }
+  ],
+  "selectable": true,
+  "simulatedMeanShown": true,
+  "mixedBatchUnavailable": true,
+  "storeUnchanged": true,
+  "apiMutationsBlocked": true,
+  "pageErrors": []
+}

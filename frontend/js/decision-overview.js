@@ -40,6 +40,7 @@ const DecisionOverviewPage = {
         const item = this.displayPoints().find(p => this.pointIdentity(p) === choice);
         const sample = item?.sample || {};
         const group = item?.kind === 'state_group';
+        const derived = group || item?.kind === 'numeric_average';
         const hasValue = group ? item.member_count > 0 && sample.components?.length === item.member_count && sample.value != null : typeof sample.value === 'boolean' || Number.isFinite(sample.value);
         const available = !!item?.available && !window.Operations?.telemetryFailed && sample.quality === 'good' && !sample.issue && hasValue;
         let value = '—';
@@ -57,8 +58,8 @@ const DecisionOverviewPage = {
         const received = sample.received_at ? new Date(sample.received_at) : null;
         const clock = received && Number.isFinite(received.getTime()) ? received.toLocaleTimeString('zh-CN', {hour12:false}) : '时间未记录';
         return {bound:true,item,available,value,components:group ? sample.components : null,sampleAt:sample.received_at || null,
-            source:available ? `${group ? '组合' : 'KEP'} · ${item.tag_name || item.name} · ${clock}` : `不可用 · ${state}`,
-            title:`${group ? '本系统派生的'+item.name : item?.item_id || sample.node_id || choice}；${state}；${group ? '状态组合，无单位' : item?.unit ? '单位 '+item.unit : '单位未提供'}；接收时间 ${this.time(sample.received_at)}`};
+            source:available ? `${group ? '组合' : derived ? '组合计算' : 'KEP'} · ${derived && !group ? item.name : item.tag_name || item.name} · ${clock}` : `不可用 · ${state}`,
+            title:`${derived ? '本系统派生的'+item.name : item?.item_id || sample.node_id || choice}；${state}；${group ? '状态组合，无单位' : item?.unit ? '单位 '+item.unit : '单位未提供'}；接收时间 ${this.time(sample.received_at)}`};
     },
     telemetryUpdated() {
         if (!this.initialized || !this.active() || document.hidden || !this.snapshot) return;
@@ -518,7 +519,7 @@ const DecisionOverviewPage = {
     },
 
     telemetryState(item, failed = window.Operations?.telemetryFailed) {
-        const labels = {good:'可用',no_data:'无数据',bad_quality:'坏质量',uncertain_quality:'质量不确定',stale:'接收超时',source_stale:'源时间过期',collector_offline:'采集离线',out_of_range:'超出量程',invalid_value_type:'类型不匹配',non_finite_value:'数值无效',future_source_time:'源时钟异常',incomplete_components:'组合数据未齐',member_unavailable:'部分系统不可用',mixed_batches:'成员接收批次不一致'};
+        const labels = {good:'可用',no_data:'无数据',bad_quality:'坏质量',uncertain_quality:'质量不确定',stale:'接收超时',source_stale:'源时间过期',collector_offline:'采集离线',out_of_range:'超出量程',invalid_value_type:'类型不匹配',non_finite_value:'数值无效',future_source_time:'源时钟异常',incomplete_components:'组合数据未齐',member_unavailable:'部分成员不可用',mixed_batches:'成员接收批次不一致',unit_mismatch:'成员单位不一致'};
         return failed ? '查询中断 · 最后读数不可用' : `${item.sample?.quality || '无质量信息'} · ${labels[item.status] || '不可用'}`;
     },
     pointIdentity(item) { return JSON.stringify([item.source_id,item.key]); },
@@ -550,7 +551,7 @@ const DecisionOverviewPage = {
         const value = item?.kind === 'state_group' ? this.groupValue(sample.components) : typeof sample.value === 'boolean' ? (sample.value ? '开' : '关') : sample.value ?? '—';
         const available = item && item.available && !window.Operations?.telemetryFailed;
         const live = item ? `<dl class="decision-facts"><dt>最后读数</dt><dd class="${available ? '' : 'decision-unavailable'}">${this.escape(value)} ${this.escape(item.unit || '')}${available ? '' : '（不可用）'}</dd><dt>质量 / 时效</dt><dd>${this.escape(this.telemetryState(item))}</dd><dt>数据来源</dt><dd>${this.escape(item.item_id || item.source_id + '/' + item.key)}</dd><dt>源时间</dt><dd>${this.escape(this.time(sample.source_at))}</dd><dt>服务器时间</dt><dd>${this.escape(this.time(sample.server_at))}</dd><dt>接收时间</dt><dd>${this.escape(this.time(sample.received_at))}</dd></dl>` : `<p>${choice ? '已选点位暂未返回，卡片保持不可用，等待采集恢复。' : '选择点位后，该卡片立即显示采集值；清空选择恢复原业务显示。建议密度只增加采集对照值。'}</p>`;
-        const memberDetails = item?.kind === 'state_group' ? `<dl class="decision-facts">${(sample.components || []).map(c => `<dt>${this.escape(c.label)} ${this.escape(item.member_label || '系统')}</dt><dd>${this.escape(c.available && !window.Operations?.telemetryFailed ? c.value ? '开' : '关' : '未知')} · ${this.escape(c.item_id)}<br>接收 ${this.escape(this.time(c.received_at))} · ${this.escape(c.status || '未知')}${!c.available && typeof c.value === 'boolean' ? `<br>最后读数 ${c.value ? '1' : '0'}（不可用）` : ''}</dd>`).join('')}</dl>` : '';
+        const memberDetails = item?.kind === 'state_group' ? `<dl class="decision-facts">${(sample.components || []).map(c => `<dt>${this.escape(c.label)} ${this.escape(item.member_label || '系统')}</dt><dd>${this.escape(c.available && !window.Operations?.telemetryFailed ? c.value ? '开' : '关' : '未知')} · ${this.escape(c.item_id)}<br>接收 ${this.escape(this.time(c.received_at))} · ${this.escape(c.status || '未知')}${!c.available && typeof c.value === 'boolean' ? `<br>最后读数 ${c.value ? '1' : '0'}（不可用）` : ''}</dd>`).join('')}</dl>` : item?.kind === 'numeric_average' ? `<dl class="decision-facts"><dt>计算方式</dt><dd>${this.escape(sample.formula)} · 每路 50%<br>本系统计算，保留原始采集点。</dd>${(sample.components || []).map(c => `<dt>${this.escape(c.label)} 当前密度</dt><dd>${this.escape(Number.isFinite(c.value) ? c.value : '—')} ${this.escape(c.unit || '（单位未提供）')}${c.available && !window.Operations?.telemetryFailed ? '' : '（不可用）'}<br>${this.escape(c.item_id)}<br>接收 ${this.escape(this.time(c.received_at))} · ${this.escape(c.status || '未知')}</dd>`).join('')}</dl>` : '';
         const collector = window.Operations?.telemetryFailed ? '采集查询中断，最后读数不可用' : !items.length ? (window.Operations?.serverState === 'local' ? '单机模式 · 通过服务器地址查看采集' : '暂无点位 · 等待现场配置与联调') : `${items.filter(p => p.available).length} / ${items.length} 个点位可用（含组合点）`;
         document.getElementById('decision-inspector').innerHTML = `<div class="decision-inspector-header"><span>因素与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${node.reference ? '对照 / 预留' : '业务取值'}</span></div><p>${this.escape(node.description)}</p><dl class="decision-facts">${facts}</dl>${node.page ? `<button class="decision-detail-link" type="button" data-decision-page="${node.page}">查看对应业务页面 →</button>` : '<button class="decision-detail-link" type="button" data-decision-page="page-collect">查看数据采集与补录 →</button>'}</div><div class="decision-detail decision-source-panel"><h4>卡片数据 → 采集来源</h4><p class="decision-live-state">${this.escape(collector)}。所选读数用于卡片展示，尚未参与本页计算。</p><label for="decision-source-point">选择卡片显示点位${node.id === 'density' ? '（采集对照）' : ''}</label><select id="decision-source-point"><option value="">不使用采集值</option>${options}</select>${live}${memberDetails}</div>`;
         document.getElementById('decision-inspector').scrollTop = scrollTop;

@@ -1,4 +1,5 @@
 """Read-only composite points calculated from a single latest-query snapshot."""
+import math
 from .domain import parse_time
 
 FOUR_SYSTEM_MEMBERS = (
@@ -23,6 +24,60 @@ STATUS_GROUPS = (
      "tag_name":"浮精压滤机运行状态", "description":"A415、A416、A417、A418 四台运行状态组合",
      "member_label":"压滤机", "members":FLOAT_PRESS_MEMBERS},
 )
+DENSITY_AVERAGE_MEMBERS = (
+    ("A303", "TIA_4_1.TIA_4_1.A303/MD"),
+    ("A304", "TIA_4_1.TIA_4_1.A304/MD"),
+)
+
+
+def density_average_points(items):
+    """User-confirmed equal-weight mean of the two current-density tags, not MD_SET."""
+    result = []
+    for source_id in sorted({item["source_id"] for item in items}):
+        by_id = {item.get("item_id"): item for item in items if item["source_id"] == source_id}
+        if not any(item_id in by_id for _, item_id in DENSITY_AVERAGE_MEMBERS):
+            continue
+        components, times = [], []
+        for label, item_id in DENSITY_AVERAGE_MEMBERS:
+            item = by_id.get(item_id)
+            sample = (item.get("sample") or {}) if item else {}
+            value = sample.get("value")
+            try:
+                numeric = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+            except OverflowError:
+                numeric = False
+            usable = bool(item and item.get("available") and numeric and sample.get("quality") == "good" and not sample.get("issue"))
+            component = {"label": label, "item_id": item_id, "point_key": item.get("key") if item else None,
+                "value": value if numeric else None, "weight": 0.5, "unit": str(item.get("unit") or "").strip() if item else "",
+                "available": usable, "status": item.get("status") if item and numeric else "invalid_value_type" if item else "no_data",
+                "quality": sample.get("quality"), "received_at": sample.get("received_at"),
+                "source_at": sample.get("source_at"), "server_at": sample.get("server_at")}
+            components.append(component)
+            if isinstance(component["received_at"], str):
+                try:
+                    times.append(parse_time(component["received_at"]))
+                except (TypeError, ValueError):
+                    pass
+        complete = len(times) == 2 and all(c["point_key"] for c in components)
+        same_batch = complete and len(set(times)) == 1
+        same_unit = len({c["unit"] for c in components}) == 1
+        available = same_batch and same_unit and all(c["available"] for c in components)
+        issue = None if available else "incomplete_components" if not complete else "member_unavailable" if not all(c["available"] for c in components) else "mixed_batches" if not same_batch else "unit_mismatch"
+        qualities = [c["quality"] for c in components]
+        quality = "bad" if "bad" in qualities else "uncertain" if "uncertain" in qualities else "good" if all(q == "good" for q in qualities) else "unknown"
+        # Halving each finite operand first avoids overflowing their sum.
+        value = sum(c["value"] / 2 for c in components) if available else None
+        result.append({"source_id": source_id, "key": "a303_a304_density_average",
+            "name": "A303/A304 当前密度（平均）", "device": "A303/A304", "tag_name": "当前密度（平均）",
+            "description": "本系统计算：(A303/MD + A304/MD) ÷ 2；两路各占 50%",
+            "item_id": "", "kind": "numeric_average", "member_count": 2,
+            "unit": components[0]["unit"] if same_unit else "", "available": available,
+            "status": "good" if available else issue,
+            "sample": {"value": value, "quality": quality, "issue": issue,
+                "received_at": min(times).isoformat(timespec="milliseconds") if complete else None,
+                "source_at": None, "server_at": None, "components": components,
+                "formula": "(A303/MD + A304/MD) ÷ 2"}})
+    return result
 
 
 def system_status_points(items):
