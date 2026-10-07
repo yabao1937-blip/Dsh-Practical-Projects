@@ -24,6 +24,23 @@ window.Api = {
         return value;
     },
 
+    async reconnectTelemetry() {
+        const token = this.writeToken();
+        const response = await fetch(this.base + '/telemetry/reconnect', {
+            method: 'POST',
+            headers: token ? {'X-DMCS-Token': token} : {},
+            signal: AbortSignal.timeout(15000),
+        });
+        const value = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const message = [401, 403].includes(response.status) ? '没有重新连接采集的权限，请重新打开服务器页面。'
+                : value.detail?.message || '后台采集启动失败，请检查服务器连接。';
+            throw new Error(message);
+        }
+        if (!value.ok || !value.source_id || !value.requested_at) throw new Error('采集启动响应格式异常');
+        return value;
+    },
+
     async getState() {
         const r = await fetch(this.base + '/state', {signal: AbortSignal.timeout(20000)});
         if (!r.ok) throw new Error('state ' + r.status);

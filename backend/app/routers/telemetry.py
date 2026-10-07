@@ -1,13 +1,25 @@
-"""实时点位与历史的只读接口；没有通过网页修改点表或写 PLC 的入口。"""
-from fastapi import APIRouter, Depends, Query
+"""实时点位、历史查询及后台只读采集启动；没有修改点表或写 PLC 的入口。"""
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..auth import require_write
+from ..telemetry.control import CollectorStartError, ensure_collector_started
 from ..telemetry.models import TelemetryReading
 from ..telemetry.repository import latest_view
 
 router = APIRouter(prefix="/telemetry", tags=["工业数据采集"])
+
+
+@router.post("/reconnect", dependencies=[Depends(require_write)], status_code=202)
+def reconnect():
+    """启动或复用服务器固定配置的采集进程；实际连接状态由 latest 确认。"""
+    try:
+        return JSONResponse(ensure_collector_started(), status_code=202)
+    except CollectorStartError as exc:
+        raise HTTPException(status_code=503, detail={"error_code": exc.code, "message": exc.message}) from None
 
 
 @router.get("/latest")

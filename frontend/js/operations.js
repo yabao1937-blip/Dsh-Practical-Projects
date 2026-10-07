@@ -7,8 +7,11 @@ window.Operations = {
     checkedAt: null,
     _inFlight: null,
     _timer: null,
+    _reconnectTask: null,
+    _reconnectBusy: false,
 
     init() {
+        this.installReconnectControl();
         if (!window.location.protocol.startsWith('http')) {
             this.serverState = 'local';
             this.render();
@@ -20,6 +23,78 @@ window.Operations = {
             if (document.visibilityState !== 'hidden') this.refresh();
         });
         window.addEventListener('online', () => this.refresh());
+    },
+
+    installReconnectControl() {
+        const header = document.querySelector('#page-collect .telemetry-panel .panel-header');
+        if (!header || document.getElementById('telemetry-reconnect')) return;
+        const actions = document.createElement('div');
+        actions.className = 'page-header-actions';
+        const button = document.createElement('button');
+        button.id = 'telemetry-reconnect';
+        button.className = 'btn btn-primary btn-sm';
+        button.type = 'button';
+        button.addEventListener('click', () => this.reconnect());
+        actions.appendChild(button);
+        const check = header.querySelector('button');
+        if (check) actions.appendChild(check);
+        header.appendChild(actions);
+        this.renderReconnectControl();
+    },
+
+    renderReconnectControl() {
+        const button = document.getElementById('telemetry-reconnect');
+        if (!button) return;
+        const local = !window.location.protocol.startsWith('http');
+        button.disabled = local || this._reconnectBusy;
+        button.textContent = this._reconnectBusy ? '连接中…' : '重新连接';
+        button.title = local ? '通过服务器地址打开页面后可重新连接。' : '启动或恢复后台只读采集，关闭页面后继续运行。';
+        button.setAttribute('aria-busy', String(this._reconnectBusy));
+    },
+
+    reconnect() {
+        if (this._reconnectTask) return this._reconnectTask;
+        if (!window.location.protocol.startsWith('http')) return Promise.resolve(false);
+        this._reconnectBusy = true;
+        this.renderReconnectControl();
+        this._reconnectTask = this.runReconnect().finally(() => {
+            this._reconnectTask = null;
+            this._reconnectBusy = false;
+            this.renderReconnectControl();
+        });
+        return this._reconnectTask;
+    },
+
+    async runReconnect() {
+        try {
+            App.showToast('正在重新连接后台采集…', 'info');
+            const result = await window.Api.reconnectTelemetry();
+            const requestedAt = Date.parse(result.requested_at);
+            if (!Number.isFinite(requestedAt)) throw new Error('采集启动响应时间异常');
+            const deadline = Date.now() + 90000;
+            let lastRequestAt = Date.now();
+            while (Date.now() < deadline) {
+                await this.refresh();
+                const source = !this.telemetryFailed && this.telemetry?.sources.find(item => item.source_id === result.source_id);
+                const fresh = source && Date.parse(source.heartbeat_at) >= requestedAt;
+                if (fresh && source.state === 'connected' && Date.parse(source.last_sample_at) >= requestedAt) {
+                    const items = this.telemetry.items.filter(item => item.source_id === result.source_id);
+                    App.showToast(`后台采集已连接，${items.filter(item => item.available).length} / ${items.length} 个点位可用`, 'success');
+                    return true;
+                }
+                if (fresh && source.state === 'fault') throw new Error('采集连接异常：' + (source.error_code || '请检查配置和服务器'));
+                // 进程被突然结束时，等待原租约失效后再启动，避免抢占仍在运行的采集。
+                if (source && ['offline', 'stopped'].includes(source.state) && Date.now() - lastRequestAt >= 10000) {
+                    await window.Api.reconnectTelemetry();
+                    lastRequestAt = Date.now();
+                }
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+            throw new Error('暂未收到新的采集数据，请检查网线、服务器及采集状态后重试。');
+        } catch (error) {
+            App.showToast(error.message || '重新连接失败，请稍后重试。', 'error');
+            return false;
+        }
     },
 
     refresh() {
@@ -80,6 +155,7 @@ window.Operations = {
     },
 
     render() {
+        this.renderReconnectControl();
         const serverNames = {checking:'检查中', online:'后端在线', offline:'后端离线', unavailable:'数据库未就绪', local:'单机模式'};
         const server = serverNames[this.serverState];
         this.text('server-status-label', server);
