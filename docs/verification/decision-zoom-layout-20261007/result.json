@@ -1,0 +1,204 @@
+{
+  "passed": true,
+  "method": "Equivalent CSS viewport and DPR for browser zoom; no app page scaling",
+  "maxPageWidth": 1760,
+  "layouts": [
+    {
+      "zoom": 1,
+      "cssWidth": 2048,
+      "dpr": 1.25,
+      "pageWidth": 1760,
+      "left": 144,
+      "right": 144,
+      "navWidth": 1760,
+      "plots": [
+        {
+          "width": 1161,
+          "height": 300
+        },
+        {
+          "width": 1161,
+          "height": 320
+        },
+        {
+          "width": 1161,
+          "height": 320
+        },
+        {
+          "width": 1161,
+          "height": 320
+        },
+        {
+          "width": 1161,
+          "height": 320
+        }
+      ],
+      "stageHeight": 900,
+      "mainOverflow": false,
+      "pageOverflow": false,
+      "background": "rgb(28, 10, 235)",
+      "transform": "none",
+      "panels": [
+        {
+          "node": "float-amount",
+          "placement": "right",
+          "left": 1380,
+          "right": 1880,
+          "pageLeft": 144,
+          "pageRight": 1904
+        },
+        {
+          "node": "raw-ash",
+          "placement": "left",
+          "left": 168,
+          "right": 668,
+          "pageLeft": 144,
+          "pageRight": 1904
+        },
+        {
+          "node": "density",
+          "placement": "bottom",
+          "left": 566.5,
+          "right": 1526.5,
+          "pageLeft": 144,
+          "pageRight": 1904
+        }
+      ]
+    },
+    {
+      "zoom": 0.5,
+      "cssWidth": 4096,
+      "dpr": 0.625,
+      "pageWidth": 1760,
+      "left": 1168,
+      "right": 1168,
+      "navWidth": 1760,
+      "plots": [
+        {
+          "width": 1161,
+          "height": 300
+        },
+        {
+          "width": 1161,
+          "height": 320
+        },
+        {
+          "width": 1161,
+          "height": 320
+        },
+        {
+          "width": 1161,
+          "height": 320
+        },
+        {
+          "width": 1161,
+          "height": 320
+        }
+      ],
+      "stageHeight": 900,
+      "mainOverflow": false,
+      "pageOverflow": false,
+      "background": "rgb(28, 10, 235)",
+      "transform": "none",
+      "panels": [
+        {
+          "node": "float-amount",
+          "placement": "right",
+          "left": 2404,
+          "right": 2904,
+          "pageLeft": 1168,
+          "pageRight": 2928
+        },
+        {
+          "node": "raw-ash",
+          "placement": "left",
+          "left": 1192,
+          "right": 1692,
+          "pageLeft": 1168,
+          "pageRight": 2928
+        },
+        {
+          "node": "density",
+          "placement": "bottom",
+          "left": 1590.5,
+          "right": 2550.5,
+          "pageLeft": 1168,
+          "pageRight": 2928
+        }
+      ]
+    },
+    {
+      "zoom": 0.25,
+      "cssWidth": 8192,
+      "dpr": 0.3125,
+      "pageWidth": 1760,
+      "left": 3216,
+      "right": 3216,
+      "navWidth": 1760,
+      "plots": [
+        {
+          "width": 1161,
+          "height": 300
+        },
+        {
+          "width": 1161,
+          "height": 320
+        },
+        {
+          "width": 1161,
+          "height": 320
+        },
+        {
+          "width": 1161,
+          "height": 320
+        },
+        {
+          "width": 1161,
+          "height": 320
+        }
+      ],
+      "stageHeight": 900,
+      "mainOverflow": false,
+      "pageOverflow": false,
+      "background": "rgb(28, 10, 235)",
+      "transform": "none",
+      "panels": [
+        {
+          "node": "float-amount",
+          "placement": "right",
+          "left": 4452,
+          "right": 4952,
+          "pageLeft": 3216,
+          "pageRight": 4976
+        },
+        {
+          "node": "raw-ash",
+          "placement": "left",
+          "left": 3240,
+          "right": 3740,
+          "pageLeft": 3216,
+          "pageRight": 4976
+        },
+        {
+          "node": "density",
+          "placement": "bottom",
+          "left": 3638.5,
+          "right": 4598.5,
+          "pageLeft": 3216,
+          "pageRight": 4976
+        }
+      ]
+    }
+  ],
+  "narrow": {
+    "pageWidth": 342,
+    "overflow": false
+  },
+  "blueBackdrop": true,
+  "inspectorInsidePage": true,
+  "chartsKeepRatio": true,
+  "otherPagesUnaffected": true,
+  "storeUnchanged": true,
+  "apiMutationsBlocked": true,
+  "pageErrors": []
+}

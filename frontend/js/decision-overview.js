@@ -264,9 +264,12 @@ const DecisionOverviewPage = {
             this.closeInspector(false); return;
         }
         const margin = innerWidth < 800 ? 12 : 24, gap = 16;
-        const room = {left:rect.left-margin-gap,right:innerWidth-margin-rect.right-gap};
+        // Browser zoom-out expands the CSS viewport. Keep detail panels beside the centered page.
+        const pageBounds=document.getElementById('page-decision').getBoundingClientRect();
+        const bounds={left:Math.max(margin,pageBounds.left+margin),right:Math.min(innerWidth-margin,pageBounds.right-margin)};
+        const room = {left:rect.left-bounds.left-gap,right:bounds.right-rect.right-gap};
         let placement = node.id === 'density' ? 'bottom' : node.x+node.w/2 < root.x+root.w/2 ? 'right' : 'left';
-        const minimumWidth = Math.min(280,innerWidth-2*margin);
+        const minimumWidth = Math.min(280,bounds.right-bounds.left);
         if (placement !== 'bottom' && room[placement] < minimumWidth) {
             const other = placement === 'left' ? 'right' : 'left';
             placement = room[other] >= minimumWidth ? other : 'bottom';
@@ -276,7 +279,7 @@ const DecisionOverviewPage = {
         this.queueReveal();
         let width, left, top;
         if (placement === 'bottom') {
-            width = Math.min(960,innerWidth-2*margin);
+            width = Math.min(960,bounds.right-bounds.left);
             if (ensureRoom) {
                 const main = document.querySelector('.main-content');
                 const minimumHeight = Math.max(100,Math.min(260,innerHeight-topSafe-rect.height-gap-margin));
@@ -286,10 +289,10 @@ const DecisionOverviewPage = {
                 rect = card.getBoundingClientRect();
             }
             top = Math.max(topSafe,rect.bottom+gap);
-            left = Math.max(margin,Math.min((rect.left+rect.right-width)/2,innerWidth-margin-width));
+            left = Math.max(bounds.left,Math.min((rect.left+rect.right-width)/2,bounds.right-width));
         } else {
             width = Math.min(500,room[placement]);
-            left = placement === 'left' ? margin : innerWidth-margin-width;
+            left = placement === 'left' ? bounds.left : bounds.right-width;
             top = Math.max(topSafe,Math.min(rect.top,130));
         }
         if (innerHeight-margin-top < 100) {
