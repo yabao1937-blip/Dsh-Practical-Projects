@@ -1,7 +1,7 @@
 // Fresh Chrome contexts; all API mutations are blocked before navigation.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {chromium}=require(process.env.DMCS_PLAYWRIGHT_MODULE || 'playwright');
-const url=process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000',output=path.resolve(__dirname,'../../docs/verification/decision-float-20261007');
+const url=process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000',output=path.resolve(__dirname,'../../docs/verification/decision-float-white-20261007');
 (async()=> {
     const browser=await chromium.launch({channel:'chrome',headless:true});
     try {
@@ -13,6 +13,9 @@ const url=process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000',output=path.res
         await page.evaluate(()=>{clearInterval(Operations.timer);clearInterval(DecisionOverviewPage.timer);document.querySelector('.toast-container').textContent='';});
         const before=await page.evaluate(()=>JSON.stringify(App.store));
         const section=page.locator('#decision-float-analysis');await section.scrollIntoViewIfNeeded();
+        assert.equal(await section.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)');
+        const coarseColors=await page.locator('#decision-coarse-analysis').evaluate(el=>({background:getComputedStyle(el).backgroundColor,ink:getComputedStyle(el).getPropertyValue('--ds-ink').trim()}));
+        assert.equal(coarseColors.background,'rgb(28, 10, 235)');assert.equal(coarseColors.ink,'#ffffff');
         async function capture(name) {
             const height=await section.evaluate(el=>Math.ceil(el.getBoundingClientRect().height)+180);
             await page.setViewportSize({width:page.viewportSize().width,height});await section.scrollIntoViewIfNeeded();
@@ -32,16 +35,24 @@ const url=process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000',output=path.res
             const canvas=page.locator('#decision-float-'+id),hit=await page.evaluate(id=>DecisionFloatAnalysis.hits[id][0],id);
             assert.ok(hit);await canvas.hover({position:{x:hit.x,y:hit.y}});
             const card=canvas.locator('..').locator('..');assert.equal(await card.evaluate(el=>el.classList.contains('is-engaged')),true);
+            assert.equal(await card.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(28, 10, 235)');
+            assert.equal(await canvas.evaluate(c=>DecisionFloatAnalysis.palette(c.closest('.decision-chart-card')).blue),'#ffffff');
             assert.equal(await canvas.locator('..').locator('.decision-chart-tooltip').isVisible(),true);
             assert.ok((await canvas.locator('..').locator('.decision-chart-tooltip').innerText()).includes('参考'));
             await page.locator('#decision-float-meta').hover();assert.equal(await card.evaluate(el=>el.classList.contains('is-engaged')),false);
+            assert.equal(await card.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)');
         }
+        const hit=await page.evaluate(()=>DecisionFloatAnalysis.hits.linkage[0]);
+        await page.locator('#decision-float-linkage').hover({position:{x:hit.x,y:hit.y}});
+        await section.screenshot({path:path.join(output,'float-hover-blue.png')});
+        await page.locator('#decision-float-meta').hover();
         await page.locator('#decision-float-open').focus();await page.keyboard.press('Tab');
         assert.equal(await page.evaluate(()=>document.activeElement.id),'decision-float-linkage');
         await page.keyboard.press('End');assert.ok((await page.locator('#decision-float-linkage-tooltip').innerText()).includes(await page.evaluate(()=>DecisionFloatAnalysis.snapshot.latest.timestamp)));
         await page.keyboard.press('Escape');assert.equal(await page.locator('#decision-float-linkage-tooltip').isVisible(),false);
         await page.locator('#decision-float-open').focus();await page.evaluate(()=>{DecisionFloatAnalysis.build=window.__floatBuild;});
         await page.locator('#decision-theme').click();await capture('float-dark.png');
+        assert.equal(await section.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(255, 255, 255)','Float remains white in the dark page theme');
         const geometry=[];
         for(const width of [1600,1440,1024,800,390]) {
             await page.setViewportSize({width,height:1600});await section.scrollIntoViewIfNeeded();
@@ -66,6 +77,7 @@ const url=process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000',output=path.res
         assert.equal(await section.locator('[data-decision-period]').count(),0);
         assert.ok(await page.evaluate(before=>JSON.stringify(App.store)===before,before));assert.deepEqual(errors,[]);
         const result={passed:true,records:count,charts:2,metrics:4,originalFormulaParity:true,hoverKeyboard:true,themes:true,emptyState:true,
+            defaultWhite:true,hoverBlue:true,whiteInBothThemes:true,coarsePalettePreserved:true,
             coarseSwitchIsolated:true,annotationsEscaped:true,storeUnchanged:true,apiMutationsBlocked:true,geometry,pageErrors:errors};
         fs.writeFileSync(path.join(output,'result.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
     } finally {await browser.close();}
