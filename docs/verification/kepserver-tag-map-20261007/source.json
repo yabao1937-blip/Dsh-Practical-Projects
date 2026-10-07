@@ -1,0 +1,406 @@
+{
+  "source_id": "kepserver-main",
+  "date": "2026-10-07",
+  "points": [
+    {
+      "key": "tag_39807deeb36f45488721",
+      "device": "TIA_3_1",
+      "tag_name": "202/AAD",
+      "description": "化验灰分",
+      "item_id": "TIA_3_1.TIA_3_1.202/AAD",
+      "node_id": "ns=2;s=TIA_3_1.TIA_3_1.202/AAD"
+    },
+    {
+      "key": "tag_d0c5b1628f3bee2d0a35",
+      "device": "TIA_3_1",
+      "tag_name": "202/AAD_T",
+      "description": "累计灰分",
+      "item_id": "TIA_3_1.TIA_3_1.202/AAD_T",
+      "node_id": "ns=2;s=TIA_3_1.TIA_3_1.202/AAD_T"
+    },
+    {
+      "key": "tag_7909d678396ccde5c0d2",
+      "device": "TIA_3_1",
+      "tag_name": "202/ASH_R_INS",
+      "description": "r射线在线测灰瞬时值",
+      "item_id": "TIA_3_1.TIA_3_1.202/ASH_R_INS",
+      "node_id": "ns=2;s=TIA_3_1.TIA_3_1.202/ASH_R_INS"
+    },
+    {
+      "key": "tag_f87050e7c1b861b8ee9d",
+      "device": "TIA_3_1",
+      "tag_name": "301/COAL_CAP",
+      "description": "瞬时带煤量",
+      "item_id": "TIA_3_1.TIA_3_1.301/COAL_CAP",
+      "node_id": "ns=2;s=TIA_3_1.TIA_3_1.301/COAL_CAP"
+    },
+    {
+      "key": "tag_b2060bc9267fe3700c9c",
+      "device": "TIA_3_1",
+      "tag_name": "301/CT_C",
+      "description": "班累计带煤量",
+      "item_id": "TIA_3_1.TIA_3_1.301/CT_C",
+      "node_id": "ns=2;s=TIA_3_1.TIA_3_1.301/CT_C"
+    },
+    {
+      "key": "tag_080b15b6c2c6645073de",
+      "device": "TIA_3_1",
+      "tag_name": "301/CT_D",
+      "description": "日累计带煤量",
+      "item_id": "TIA_3_1.TIA_3_1.301/CT_D",
+      "node_id": "ns=2;s=TIA_3_1.TIA_3_1.301/CT_D"
+    },
+    {
+      "key": "tag_af11e125a86f0850fdf7",
+      "device": "TIA_3_1",
+      "tag_name": "301/CT_M",
+      "description": "月累计带煤量",
+      "item_id": "TIA_3_1.TIA_3_1.301/CT_M",
+      "node_id": "ns=2;s=TIA_3_1.TIA_3_1.301/CT_M"
+    },
+    {
+      "key": "tag_c9a08e04e78c24ac6f28",
+      "device": "TIA_3_1",
+      "tag_name": "301/CT_Y",
+      "description": "年累计带煤量",
+      "item_id": "TIA_3_1.TIA_3_1.301/CT_Y",
+      "node_id": "ns=2;s=TIA_3_1.TIA_3_1.301/CT_Y"
+    },
+    {
+      "key": "tag_c2edc91f48654789a7f2",
+      "device": "TIA_3_2",
+      "tag_name": "401/COAL_CAP",
+      "description": "瞬时带煤量",
+      "item_id": "TIA_3_2.TIA_3_2.401/COAL_CAP",
+      "node_id": "ns=2;s=TIA_3_2.TIA_3_2.401/COAL_CAP"
+    },
+    {
+      "key": "tag_a19a76616015ad21e5ef",
+      "device": "TIA_3_2",
+      "tag_name": "402/COAL_CAP",
+      "description": "瞬时带煤量",
+      "item_id": "TIA_3_2.TIA_3_2.402/COAL_CAP",
+      "node_id": "ns=2;s=TIA_3_2.TIA_3_2.402/COAL_CAP"
+    },
+    {
+      "key": "tag_c719e555bac9e1329a8b",
+      "device": "TIA_3_2",
+      "tag_name": "403/MD",
+      "description": "当前密度",
+      "item_id": "TIA_3_2.TIA_3_2.403/MD",
+      "node_id": "ns=2;s=TIA_3_2.TIA_3_2.403/MD"
+    },
+    {
+      "key": "tag_67b6a6a0092ad596317f",
+      "device": "TIA_3_2",
+      "tag_name": "403/MD_SET",
+      "description": "设定密度",
+      "item_id": "TIA_3_2.TIA_3_2.403/MD_SET",
+      "node_id": "ns=2;s=TIA_3_2.TIA_3_2.403/MD_SET"
+    },
+    {
+      "key": "tag_45ebe7e78f9968fd4b76",
+      "device": "TIA_3_2",
+      "tag_name": "404/MD",
+      "description": "当前密度",
+      "item_id": "TIA_3_2.TIA_3_2.404/MD",
+      "node_id": "ns=2;s=TIA_3_2.TIA_3_2.404/MD"
+    },
+    {
+      "key": "tag_f318b4a85860a1020657",
+      "device": "TIA_3_2",
+      "tag_name": "404/MD_SET",
+      "description": "设定密度",
+      "item_id": "TIA_3_2.TIA_3_2.404/MD_SET",
+      "node_id": "ns=2;s=TIA_3_2.TIA_3_2.404/MD_SET"
+    },
+    {
+      "key": "tag_3a82e49b2a019451078b",
+      "device": "TIA_3_3",
+      "tag_name": "473/if_prod",
+      "description": "运行信号",
+      "item_id": "TIA_3_3.TIA_3_3.473/if_prod",
+      "node_id": "ns=2;s=TIA_3_3.TIA_3_3.473/if_prod"
+    },
+    {
+      "key": "tag_caf82182c2980109b2de",
+      "device": "TIA_3_3",
+      "tag_name": "474/if_prod",
+      "description": "运行信号",
+      "item_id": "TIA_3_3.TIA_3_3.474/if_prod",
+      "node_id": "ns=2;s=TIA_3_3.TIA_3_3.474/if_prod"
+    },
+    {
+      "key": "tag_9b0d4848650ae61b7902",
+      "device": "TIA_3_3",
+      "tag_name": "478/if_prod",
+      "description": "运行信号",
+      "item_id": "TIA_3_3.TIA_3_3.478/if_prod",
+      "node_id": "ns=2;s=TIA_3_3.TIA_3_3.478/if_prod"
+    },
+    {
+      "key": "tag_8afad1e9566de559e4c3",
+      "device": "TIA_3_3",
+      "tag_name": "479/if_prod",
+      "description": "运行信号",
+      "item_id": "TIA_3_3.TIA_3_3.479/if_prod",
+      "node_id": "ns=2;s=TIA_3_3.TIA_3_3.479/if_prod"
+    },
+    {
+      "key": "tag_3f707b15d6016e79874b",
+      "device": "TIA_3_4",
+      "tag_name": "501/COAL_CAP",
+      "description": "瞬时带煤量",
+      "item_id": "TIA_3_4.TIA_3_4.501/COAL_CAP",
+      "node_id": "ns=2;s=TIA_3_4.TIA_3_4.501/COAL_CAP"
+    },
+    {
+      "key": "tag_7d7170cd19572fceee5f",
+      "device": "TIA_3_4",
+      "tag_name": "501/CT_C",
+      "description": "班累计带煤量",
+      "item_id": "TIA_3_4.TIA_3_4.501/CT_C",
+      "node_id": "ns=2;s=TIA_3_4.TIA_3_4.501/CT_C"
+    },
+    {
+      "key": "tag_f176de01dd34011025be",
+      "device": "TIA_3_4",
+      "tag_name": "501/CT_D",
+      "description": "日累计带煤量",
+      "item_id": "TIA_3_4.TIA_3_4.501/CT_D",
+      "node_id": "ns=2;s=TIA_3_4.TIA_3_4.501/CT_D"
+    },
+    {
+      "key": "tag_eb431eae804c55cb0e61",
+      "device": "TIA_3_4",
+      "tag_name": "501/CT_M",
+      "description": "月累计带煤量",
+      "item_id": "TIA_3_4.TIA_3_4.501/CT_M",
+      "node_id": "ns=2;s=TIA_3_4.TIA_3_4.501/CT_M"
+    },
+    {
+      "key": "tag_7f997d1fb0f98d73dcfa",
+      "device": "TIA_3_4",
+      "tag_name": "501/CT_Y",
+      "description": "年累计带煤量",
+      "item_id": "TIA_3_4.TIA_3_4.501/CT_Y",
+      "node_id": "ns=2;s=TIA_3_4.TIA_3_4.501/CT_Y"
+    },
+    {
+      "key": "tag_9fdf339e5f8983a8ceb2",
+      "device": "TIA_3_4",
+      "tag_name": "502/COAL_CAP",
+      "description": "瞬时带煤量",
+      "item_id": "TIA_3_4.TIA_3_4.502/COAL_CAP",
+      "node_id": "ns=2;s=TIA_3_4.TIA_3_4.502/COAL_CAP"
+    },
+    {
+      "key": "tag_2faa7e31b767c549815e",
+      "device": "TIA_3_4",
+      "tag_name": "502/CT_C",
+      "description": "班累计带煤量",
+      "item_id": "TIA_3_4.TIA_3_4.502/CT_C",
+      "node_id": "ns=2;s=TIA_3_4.TIA_3_4.502/CT_C"
+    },
+    {
+      "key": "tag_a42b8910c73a655f2e6e",
+      "device": "TIA_3_4",
+      "tag_name": "502/CT_D",
+      "description": "日累计带煤量",
+      "item_id": "TIA_3_4.TIA_3_4.502/CT_D",
+      "node_id": "ns=2;s=TIA_3_4.TIA_3_4.502/CT_D"
+    },
+    {
+      "key": "tag_a348b1e9e5278f764041",
+      "device": "TIA_3_4",
+      "tag_name": "502/CT_M",
+      "description": "月累计带煤量",
+      "item_id": "TIA_3_4.TIA_3_4.502/CT_M",
+      "node_id": "ns=2;s=TIA_3_4.TIA_3_4.502/CT_M"
+    },
+    {
+      "key": "tag_a27152c4d7ef48ac22dd",
+      "device": "TIA_3_4",
+      "tag_name": "502/CT_Y",
+      "description": "年累计带煤量",
+      "item_id": "TIA_3_4.TIA_3_4.502/CT_Y",
+      "node_id": "ns=2;s=TIA_3_4.TIA_3_4.502/CT_Y"
+    },
+    {
+      "key": "tag_05c42a734b536384d11a",
+      "device": "TIA_4_1",
+      "tag_name": "A301/COAL_CAP",
+      "description": "瞬时带煤量",
+      "item_id": "TIA_4_1.TIA_4_1.A301/COAL_CAP",
+      "node_id": "ns=2;s=TIA_4_1.TIA_4_1.A301/COAL_CAP"
+    },
+    {
+      "key": "tag_80ca8c8d19ed5b157e2b",
+      "device": "TIA_4_1",
+      "tag_name": "A301/CT_C",
+      "description": "班累计带煤量",
+      "item_id": "TIA_4_1.TIA_4_1.A301/CT_C",
+      "node_id": "ns=2;s=TIA_4_1.TIA_4_1.A301/CT_C"
+    },
+    {
+      "key": "tag_72c0896ede5557f5b5f5",
+      "device": "TIA_4_1",
+      "tag_name": "A301/CT_D",
+      "description": "日累计带煤量",
+      "item_id": "TIA_4_1.TIA_4_1.A301/CT_D",
+      "node_id": "ns=2;s=TIA_4_1.TIA_4_1.A301/CT_D"
+    },
+    {
+      "key": "tag_6dd44a33cce9a18d0d33",
+      "device": "TIA_4_1",
+      "tag_name": "A301/CT_M",
+      "description": "月累计带煤量",
+      "item_id": "TIA_4_1.TIA_4_1.A301/CT_M",
+      "node_id": "ns=2;s=TIA_4_1.TIA_4_1.A301/CT_M"
+    },
+    {
+      "key": "tag_dba357b069ae4a572d0f",
+      "device": "TIA_4_1",
+      "tag_name": "A301/CT_Y",
+      "description": "年累计带煤量",
+      "item_id": "TIA_4_1.TIA_4_1.A301/CT_Y",
+      "node_id": "ns=2;s=TIA_4_1.TIA_4_1.A301/CT_Y"
+    },
+    {
+      "key": "tag_f2b50db6a8687fe7c098",
+      "device": "TIA_4_1",
+      "tag_name": "A303/MD",
+      "description": "当前密度",
+      "item_id": "TIA_4_1.TIA_4_1.A303/MD",
+      "node_id": "ns=2;s=TIA_4_1.TIA_4_1.A303/MD"
+    },
+    {
+      "key": "tag_dadfcfe00e2c2d7a5c67",
+      "device": "TIA_4_1",
+      "tag_name": "A303/MD_SET",
+      "description": "设定密度",
+      "item_id": "TIA_4_1.TIA_4_1.A303/MD_SET",
+      "node_id": "ns=2;s=TIA_4_1.TIA_4_1.A303/MD_SET"
+    },
+    {
+      "key": "tag_90a110a2c83b3bf19dd7",
+      "device": "TIA_4_1",
+      "tag_name": "A304/MD",
+      "description": "当前密度",
+      "item_id": "TIA_4_1.TIA_4_1.A304/MD",
+      "node_id": "ns=2;s=TIA_4_1.TIA_4_1.A304/MD"
+    },
+    {
+      "key": "tag_f90a128c0897a962ede9",
+      "device": "TIA_4_1",
+      "tag_name": "A304/MD_SET",
+      "description": "设定密度",
+      "item_id": "TIA_4_1.TIA_4_1.A304/MD_SET",
+      "node_id": "ns=2;s=TIA_4_1.TIA_4_1.A304/MD_SET"
+    },
+    {
+      "key": "tag_4a0972486bc537848b1a",
+      "device": "TIA_4_2",
+      "tag_name": "A345/if_prod",
+      "description": "运行信号",
+      "item_id": "TIA_4_2.TIA_4_2.A345/if_prod",
+      "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A345/if_prod"
+    },
+    {
+      "key": "tag_824f8fdb62e4f87e5040",
+      "device": "TIA_4_2",
+      "tag_name": "A346/if_prod",
+      "description": "运行信号",
+      "item_id": "TIA_4_2.TIA_4_2.A346/if_prod",
+      "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A346/if_prod"
+    },
+    {
+      "key": "tag_dad2e2d2c1037e28a92b",
+      "device": "MOD_2_1",
+      "tag_name": "A403/CONCENTRATION",
+      "description": "实时浓度显示",
+      "item_id": "MOD_2_1.MOD_2_1.A403/CONCENTRATION",
+      "node_id": "ns=2;s=MOD_2_1.MOD_2_1.A403/CONCENTRATION"
+    },
+    {
+      "key": "tag_dd2ec4ff7e4dc0b108b7",
+      "device": "MOD_3_1",
+      "tag_name": "A405/CONCENTRATION",
+      "description": "实时浓度显示",
+      "item_id": "MOD_3_1.MOD_3_1.A405/CONCENTRATION",
+      "node_id": "ns=2;s=MOD_3_1.MOD_3_1.A405/CONCENTRATION"
+    },
+    {
+      "key": "tag_806dd99c5bc3863ce93d",
+      "device": "TIA_26_1",
+      "tag_name": "A415/PLATE_CNT",
+      "description": "压滤机当前板数",
+      "item_id": "TIA_26_1.TIA_26_1.A415/PLATE_CNT",
+      "node_id": "ns=2;s=TIA_26_1.TIA_26_1.A415/PLATE_CNT"
+    },
+    {
+      "key": "tag_203c19d26f7790a77555",
+      "device": "TIA_4_2",
+      "tag_name": "A415/YL_STATE",
+      "description": "压滤机运行状态",
+      "item_id": "TIA_4_2.TIA_4_2.A415/YL_STATE",
+      "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A415/YL_STATE"
+    },
+    {
+      "key": "tag_21e654c95cc33d05a9ab",
+      "device": "TIA_27_1",
+      "tag_name": "A416/PLATE_CNT",
+      "description": "压滤机当前板数",
+      "item_id": "TIA_27_1.TIA_27_1.A416/PLATE_CNT",
+      "node_id": "ns=2;s=TIA_27_1.TIA_27_1.A416/PLATE_CNT"
+    },
+    {
+      "key": "tag_14be43f7bf9c0e155dba",
+      "device": "TIA_4_2",
+      "tag_name": "A416/YL_STATE",
+      "description": "压滤机运行状态",
+      "item_id": "TIA_4_2.TIA_4_2.A416/YL_STATE",
+      "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A416/YL_STATE"
+    },
+    {
+      "key": "tag_dbc10bfc92ac0c811233",
+      "device": "TIA_4_2",
+      "tag_name": "A417/PLATE_CNT",
+      "description": "压滤机当前板数",
+      "item_id": "TIA_4_2.TIA_4_2.A417/PLATE_CNT",
+      "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A417/PLATE_CNT"
+    },
+    {
+      "key": "tag_befe2d5ac856e90aeb46",
+      "device": "TIA_4_2",
+      "tag_name": "A417/YL_STATE",
+      "description": "压滤机运行状态",
+      "item_id": "TIA_4_2.TIA_4_2.A417/YL_STATE",
+      "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A417/YL_STATE"
+    },
+    {
+      "key": "tag_08f52f63cd811a3a50ff",
+      "device": "TIA_4_2",
+      "tag_name": "A418/PLATE_CNT",
+      "description": "压滤机当前板数",
+      "item_id": "TIA_4_2.TIA_4_2.A418/PLATE_CNT",
+      "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A418/PLATE_CNT"
+    },
+    {
+      "key": "tag_f380141208e1df23e026",
+      "device": "TIA_4_2",
+      "tag_name": "A418/YL_STATE",
+      "description": "压滤机运行状态",
+      "item_id": "TIA_4_2.TIA_4_2.A418/YL_STATE",
+      "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A418/YL_STATE"
+    },
+    {
+      "key": "tag_543c440c9a90e0e2daae",
+      "device": "TIA_3_5",
+      "tag_name": "JMCWC/LEVEL_B",
+      "description": "当前液位%",
+      "item_id": "TIA_3_5.TIA_3_5.JMCWC/LEVEL_B",
+      "node_id": "ns=2;s=TIA_3_5.TIA_3_5.JMCWC/LEVEL_B"
+    }
+  ]
+}
