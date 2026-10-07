@@ -14,9 +14,6 @@
 .decision-legend-dashed { border-top-style: dashed; margin-left: 10px; }
 .decision-zoom { display: flex; border: 1px solid var(--dm-border); border-radius: 9px; }
 .decision-zoom button:hover { background: color-mix(in srgb, var(--dm-cyan) 9%, transparent); }
-.decision-motion { border: 1px solid var(--dm-border); background: color-mix(in srgb, var(--dm-cyan) 8%, var(--dm-card)); color: var(--dm-cyan); border-radius: 8px; padding: 7px 12px; font-size: 12px; }
-.decision-motion:hover { border-color: var(--dm-cyan); }
-.decision-motion:disabled { cursor: default; color: var(--dm-muted); background: transparent; }
 .decision-context { display: flex; gap: 8px 20px; flex-wrap: wrap; padding: 14px 22px; color: var(--dm-muted); line-height: 1.6; font-size: 12px; }
 .decision-context strong { color: var(--dm-text); font-weight: 500; }
 .decision-canvas-scroll { overflow: auto; background-image: radial-gradient(var(--dm-grid) 1px, transparent 1px); background-size: 22px 22px; }
@@ -93,7 +90,7 @@
     .decision-node { transition: none; }
 }
 @media print {
-    .decision-flow, .decision-node.has-flow::after, .decision-motion { display: none; }
+    .decision-flow, .decision-node.has-flow::after { display: none; }
 }
 @media (max-width: 800px) {
     .decision-toolbar { padding: 12px; gap: 10px; }
@@ -132,9 +129,8 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 #page-decision .decision-masthead .btn-primary { background: #293be3; color: #fff; border-color: #293be3; }
 .decision-workspace { --dm-bg: #101934; --dm-card: #151f3f; --dm-text: #e4e9ff; --dm-muted: #a2acce; --dm-border: #34416c; --dm-grid: #2a365b; --dm-blue: #96afff; --dm-orange: #e5b281; --dm-green: #88c4ae; --dm-cyan: #98a7ff; --dm-root-bg: #283c9f; color-scheme: dark; position: relative; border-radius: 2px; }
 .decision-workspace.is-light { --dm-bg: #f5f4f0; --dm-card: #fffefb; --dm-text: #253154; --dm-muted: #68728c; --dm-border: #cfd3df; --dm-grid: #d6d9e5; --dm-blue: #3449ce; --dm-orange: #a97036; --dm-green: #3b7e6d; --dm-cyan: #293be3; --dm-root-bg: #293be3; color-scheme: light; }
-.decision-view-switch, .decision-zoom, .decision-motion, .decision-badge, .decision-formula, .decision-detail-link { border-radius: 2px; }
+.decision-view-switch, .decision-zoom, .decision-badge, .decision-formula, .decision-detail-link { border-radius: 2px; }
 .decision-view-switch button, .decision-zoom button { border-radius: 1px; }
-.decision-motion { background: transparent; }
 .decision-canvas-scroll { background-image: radial-gradient(var(--dm-grid) .8px, transparent .8px), url('../assets/decision-paper.svg'); background-size: 24px 24px, 180px 180px; }
 .decision-flow { filter: none; }
 .decision-node { border-radius: 3px; box-shadow: 3px 3px 0 color-mix(in srgb, var(--dm-border) 35%, transparent); }

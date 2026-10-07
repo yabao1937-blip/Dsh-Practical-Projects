@@ -4,7 +4,7 @@ const DecisionOverviewPage = {
     pointChoices: {}, nodes: [], timer: null,
     sourceInteractionUntil: 0,
     inspectorFrame: null,
-    motionEnabled: true, motionReduced: false, motionPrinting: false,
+    motionReduced: false, motionPrinting: false,
     revealFrame: null,
     background: null,
     choicesKey: 'dmcs.decision-point-choices.v1',
@@ -149,9 +149,6 @@ const DecisionOverviewPage = {
             if (!this.active() && typeof DecisionFloatAnalysis !== 'undefined' && DecisionFloatAnalysis.initialized) DecisionFloatAnalysis.resetPointer();
         });
         this.activityObserver.observe(document.getElementById('page-decision'), {attributes:true, attributeFilter:['class']});
-        document.getElementById('decision-motion').addEventListener('click', () => {
-            this.motionEnabled = !this.motionEnabled; this.syncMotion();
-        });
         document.addEventListener('visibilitychange', () => this.syncMotion());
         document.querySelectorAll('[data-decision-model]').forEach(button => button.addEventListener('click', () => {
             this.view = button.dataset.decisionModel;
@@ -319,14 +316,9 @@ const DecisionOverviewPage = {
     },
     changeZoom(delta) { this.zoom = Math.max(.65, Math.min(1.5, (this.actualZoom || 1) + delta)); this.fit(); },
     syncMotion() {
-        const button = document.getElementById('decision-motion');
-        if (!button) return;
-        if (!this.motionEnabled || this.motionReduced || this.motionPrinting || document.hidden || !this.active()) this.background?.setRunning(false);
-        document.getElementById('decision-workspace').classList.toggle('is-motion-paused', !this.motionEnabled || this.motionReduced || document.hidden || !this.active());
-        button.disabled = this.motionReduced;
-        button.textContent = this.motionReduced ? '静态视图' : this.motionEnabled ? '暂停动效' : '开启动效';
-        button.setAttribute('aria-pressed',String(this.motionEnabled && !this.motionReduced));
-        button.title = this.motionReduced ? '已按系统的减少动态效果设置显示静态视图' : '动效示意计算方向，不代表实时采集正在更新';
+        const paused = this.motionReduced || this.motionPrinting || document.hidden || !this.active();
+        if (paused) this.background?.setRunning(false);
+        document.getElementById('decision-workspace').classList.toggle('is-motion-paused', paused);
         this.queueReveal();
     },
     queueReveal() {
@@ -340,9 +332,9 @@ const DecisionOverviewPage = {
             const height = reveal.querySelector('.decision-underlay').clientHeight;
             if (!height) { this.background?.setRunning(false); return; }
             const progress = Math.max(0,Math.min(1,(viewport.bottom-foreground.bottom)/height));
-            this.background?.setRunning(this.motionEnabled && !this.motionReduced && !this.motionPrinting && !document.hidden && this.active() && progress > 0);
-            reveal.style.setProperty('--dr-progress',this.motionReduced || !this.motionEnabled ? '1' : progress.toFixed(3));
-            reveal.style.setProperty('--dr-lift',`${this.motionReduced || !this.motionEnabled ? 0 : (1-progress)*36}px`);
+            this.background?.setRunning(!this.motionReduced && !this.motionPrinting && !document.hidden && this.active() && progress > 0);
+            reveal.style.setProperty('--dr-progress',this.motionReduced ? '1' : progress.toFixed(3));
+            reveal.style.setProperty('--dr-lift',`${this.motionReduced ? 0 : (1-progress)*36}px`);
         });
     },
 
