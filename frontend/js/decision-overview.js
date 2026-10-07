@@ -133,6 +133,7 @@ const DecisionOverviewPage = {
             const light = document.getElementById('decision-workspace').classList.toggle('is-light');
             event.currentTarget.textContent = light ? '深色视图' : '浅色视图';
             if (typeof DecisionCoarseCharts !== 'undefined') DecisionCoarseCharts.refresh();
+            if (typeof DecisionFloatAnalysis !== 'undefined') DecisionFloatAnalysis.refresh();
         });
         const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
         this.motionReduced = reducedMotion.matches;
@@ -144,6 +145,7 @@ const DecisionOverviewPage = {
         this.activityObserver = new MutationObserver(() => {
             this.syncMotion();
             if (!this.active() && typeof DecisionCoarseCharts !== 'undefined' && DecisionCoarseCharts.initialized) DecisionCoarseCharts.resetPointer();
+            if (!this.active() && typeof DecisionFloatAnalysis !== 'undefined' && DecisionFloatAnalysis.initialized) DecisionFloatAnalysis.resetPointer();
         });
         this.activityObserver.observe(document.getElementById('page-decision'), {attributes:true, attributeFilter:['class']});
         document.getElementById('decision-motion').addEventListener('click', () => {
@@ -216,6 +218,7 @@ const DecisionOverviewPage = {
         this.nodes = this.buildNodes(this.snapshot);
         this.renderGraph(); this.renderContext(); this.renderInspector(); this.fit();
         if (typeof DecisionCoarseCharts !== 'undefined') DecisionCoarseCharts.refresh();
+        if (typeof DecisionFloatAnalysis !== 'undefined') DecisionFloatAnalysis.refresh();
         if (focused) document.querySelector(`[data-decision-node="${focused}"]`)?.focus({preventScroll:true});
         if (sourceFocused) document.getElementById('decision-source-point')?.focus({preventScroll:true});
         if (closeFocused) document.querySelector('[data-decision-close]')?.focus({preventScroll:true});

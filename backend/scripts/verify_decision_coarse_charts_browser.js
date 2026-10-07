@@ -56,9 +56,9 @@ const output=path.resolve(__dirname,'../../docs/verification/decision-day-sample
         assert.equal(await page.evaluate(()=>JSON.stringify(DecisionCoarseCharts.dailyCache)),dayCache);
         assert.deepEqual(await page.evaluate(()=>DecisionCoarseCharts.snapshot.factors),day.factors);
         await page.locator('[data-decision-period="sample"]').click();
-        await page.locator('.decision-analysis-data summary').click();
+        await section.locator('.decision-analysis-data summary').click();
         assert.equal(await page.locator('#decision-coarse-table tr').count(),sample.groups);
-        await page.locator('.decision-analysis-data summary').click();
+        await section.locator('.decision-analysis-data summary').click();
         await page.evaluate(()=> {
             window.__hoverSnapshot=JSON.stringify(DecisionCoarseCharts.snapshot);
             window.__chartBuild=DecisionCoarseCharts.build;

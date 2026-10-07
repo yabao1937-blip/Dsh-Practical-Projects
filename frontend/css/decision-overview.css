@@ -229,3 +229,11 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 }
 @media (prefers-reduced-motion: reduce) { .decision-chart-heading h4::after { transition: none; } }
 @media print { .decision-coarse-analysis { print-color-adjust: exact; -webkit-print-color-adjust: exact; } .decision-chart-tooltip { display: none; } .decision-chart-card { break-inside: avoid; } }
+.decision-float-analysis { margin-top: 0; border-top: 1px solid #ffffff36; }
+.decision-float-stats { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 18px; padding: 28px 0; border-bottom: 1px solid var(--ds-rule); }
+.decision-float-stats span { display: block; font-size: 11px; color: var(--ds-muted); line-height: 1.7; }
+.decision-float-stats strong { display: block; font-size: clamp(18px,1.9vw,26px); font-weight: 400; margin-top: 9px; font-variant-numeric: tabular-nums; }
+.decision-analysis-open { border: 1px solid #ffffff80; background: transparent; color: #ffffff; font: inherit; font-size: 12px; padding: 12px 18px; cursor: pointer; flex-shrink: 0; }
+.decision-analysis-open:hover, .decision-analysis-open:focus-visible { color: #1c0aeb; background: #ffffff; }
+.decision-analysis-open:focus-visible { outline: 2px solid #ffffff; outline-offset: 4px; }
+@media (max-width: 800px) { .decision-float-stats { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px 14px; } }

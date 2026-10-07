@@ -1,0 +1,87 @@
+{
+  "passed": true,
+  "records": 26,
+  "charts": 2,
+  "metrics": 4,
+  "originalFormulaParity": true,
+  "hoverKeyboard": true,
+  "themes": true,
+  "emptyState": true,
+  "coarseSwitchIsolated": true,
+  "annotationsEscaped": true,
+  "storeUnchanged": true,
+  "apiMutationsBlocked": true,
+  "geometry": [
+    {
+      "width": 1600,
+      "overflow": false,
+      "cards": [
+        {
+          "overflow": false,
+          "plot": 1011
+        },
+        {
+          "overflow": false,
+          "plot": 1011
+        }
+      ]
+    },
+    {
+      "width": 1440,
+      "overflow": false,
+      "cards": [
+        {
+          "overflow": false,
+          "plot": 896
+        },
+        {
+          "overflow": false,
+          "plot": 896
+        }
+      ]
+    },
+    {
+      "width": 1024,
+      "overflow": false,
+      "cards": [
+        {
+          "overflow": false,
+          "plot": 623
+        },
+        {
+          "overflow": false,
+          "plot": 623
+        }
+      ]
+    },
+    {
+      "width": 800,
+      "overflow": false,
+      "cards": [
+        {
+          "overflow": false,
+          "plot": 702
+        },
+        {
+          "overflow": false,
+          "plot": 702
+        }
+      ]
+    },
+    {
+      "width": 390,
+      "overflow": false,
+      "cards": [
+        {
+          "overflow": false,
+          "plot": 312
+        },
+        {
+          "overflow": false,
+          "plot": 312
+        }
+      ]
+    }
+  ],
+  "pageErrors": []
+}

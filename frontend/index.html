@@ -6,7 +6,7 @@
     <title>重介密控系统 - 密度推荐与灰分监控平台</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css?v=11">
-    <link rel="stylesheet" href="css/decision-overview.css?v=11">
+    <link rel="stylesheet" href="css/decision-overview.css?v=12">
     <!-- 无外部依赖，图表使用纯Canvas 2D绘制 -->
     <script src="js/xlsx-lite.js?v=8"></script>
     <script src="js/chart-lite.js?v=7"></script>
@@ -132,6 +132,31 @@
                     </div>
                     <p class="decision-analysis-note">按日：因子与实测灰分取自然日采样均值，使用独立缓存的 GPT 日级分析模型，每日一点；按采样：使用 GPT 采样保存模型，每条有效历史记录一点。三图随口径同步切换，日级模型不替换生产模型。液位缺失时不显示对应散点，日均开关比例不代表全天运行时长。历史回算不是新的独立验证，化验报告时间尚未记录；尚未接入 KEPServer 实时预测。</p>
                     <details class="decision-analysis-data"><summary>查看图表数据</summary><div class="decision-analysis-table-wrap"><table><thead><tr><th>日期 / 采样时间</th><th>采样数</th><th>实测灰分 (%)</th><th>GPT 预测 (%)</th><th>液位 (%)</th><th>液位有值采样数</th><th>液位图实测 (%)</th><th>液位图预测 (%)</th></tr></thead><tbody id="decision-coarse-table"></tbody></table></div></details>
+                </section>
+                <section class="decision-coarse-analysis decision-float-analysis" id="decision-float-analysis" aria-labelledby="decision-float-title">
+                    <div class="decision-analysis-header">
+                        <div class="decision-analysis-title"><p class="decision-eyebrow">FLOAT COAL / INFLUENCE / 03</p><h3 id="decision-float-title">浮精影响分析<span>从组分灰分到混配影响</span></h3><p>历史采样 · 两组分参考计算 · 只读分析</p></div>
+                        <button type="button" class="decision-analysis-open" id="decision-float-open">打开浮精分析页 ↗</button>
+                    </div>
+                    <p class="decision-analysis-meta" id="decision-float-meta" aria-live="polite"></p>
+                    <div class="decision-float-stats">
+                        <div><span>最近记录浮精灰分</span><strong id="decision-float-stat-ash">—</strong></div>
+                        <div><span>最近记录浮精煤量</span><strong id="decision-float-stat-amount">—</strong></div>
+                        <div><span>最近记录参考影响</span><strong id="decision-float-stat-influence">—</strong></div>
+                        <div><span>历史影响标准差</span><strong id="decision-float-stat-range">—</strong></div>
+                    </div>
+                    <div class="decision-charts-grid">
+                        <article class="decision-chart-card">
+                            <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">01 / LINKAGE</p><h4>浮精灰分<br>联动趋势</h4><p>对照浮精灰分、两组分参考灰分与影响差值。右轴为影响值，单位为百分点。</p></div><div class="decision-chart-legend"><span class="is-actual">浮精灰分</span><span class="is-predicted">两组分参考灰分</span><span class="is-target">参考影响（右轴）</span></div></div>
+                            <div class="decision-chart-plot"><canvas id="decision-float-linkage" role="img" tabindex="0" aria-describedby="decision-float-linkage-tooltip" aria-label="浮精历史灰分、两组分参考灰分和参考影响联动图。方向键查看数据，Home和End跳到首尾，Escape收起提示。"></canvas><div class="decision-chart-tooltip" id="decision-float-linkage-tooltip" aria-live="off" hidden></div></div>
+                        </article>
+                        <article class="decision-chart-card decision-chart-factors">
+                            <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">02 / IMPACT</p><h4>浮精影响<br>近期分布</h4><p>最近 12 个采样时段的影响差值；正值提高参考灰分，负值降低参考灰分。</p></div><p class="decision-factor-key"><span class="decision-factor-negative">正向影响</span><span class="decision-factor-positive">负向影响</span></p></div>
+                            <div class="decision-chart-plot"><canvas id="decision-float-impact" role="img" tabindex="0" aria-describedby="decision-float-impact-tooltip" aria-label="最近12个浮精采样时段的参考影响柱状图，正负值相对零线。方向键查看数据，Home和End跳到首尾，Escape收起提示。"></canvas><div class="decision-chart-tooltip" id="decision-float-impact-tooltip" aria-live="off" hidden></div></div>
+                        </article>
+                    </div>
+                    <p class="decision-analysis-note">沿用原浮精页口径：重介量固定为 250 t/h，粗精煤泥不计入；重介灰分取采样时刻前后 5 分钟的最近历史记录，缺少匹配时使用默认 8.50%。参考影响 = 含浮精两组分灰分 − 不含浮精的重介基准灰分。此处不是三组分总灰分实测，也不是 KEPServer 实时预测。统计从 2026-06-01 起；最近记录指标与上方当前业务值分开。压滤机和工况标注来自历史记录。</p>
+                    <details class="decision-analysis-data"><summary>查看浮精记录与计算来源</summary><div class="decision-analysis-table-wrap"><table><thead><tr><th>采样时间</th><th>浮精灰分 (%)</th><th>浮精量 (t/h)</th><th>重介灰分 (%)</th><th>基准来源</th><th>两组分参考 (%)</th><th>影响 (百分点)</th><th>历史压滤机</th><th>工况标注</th></tr></thead><tbody id="decision-float-table"></tbody></table></div></details>
                 </section>
             </div>
             <div class="decision-reveal" id="decision-reveal">
@@ -919,8 +944,9 @@
     <script src="js/app.js?v=86"></script>
     <script src="js/overview.js?v=46"></script>
     <script src="js/decision-background.js?v=1"></script>
-    <script src="js/decision-coarse-charts.js?v=3"></script>
-    <script src="js/decision-overview.js?v=13"></script>
+    <script src="js/decision-coarse-charts.js?v=4"></script>
+    <script src="js/decision-float-analysis.js?v=1"></script>
+    <script src="js/decision-overview.js?v=14"></script>
     <script src="js/collect.js?v=25"></script>
     <script src="js/coarse.js?v=24"></script>
     <script src="js/float.js?v=15"></script>

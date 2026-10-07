@@ -1,5 +1,7 @@
 /* GPT historical charts: private daily analysis model / saved sampling model; no production writes. */
 const DecisionCoarseCharts = {
+    rootId: 'decision-coarse-analysis', canvasPrefix: 'decision-coarse-', chartIds: ['trend','factors','level'],
+    canvas(id) { return document.getElementById(this.canvasPrefix+id); },
     mode: 'day', initialized: false, snapshot: null, signature: null, hits: {},
     shortLabels: {raw_ash:'原煤灰分',coal_amount:'入洗煤量',sysA:'A 系统',sysB:'B 系统',sys401:'401 系统',sys402:'402 系统',desliming473:'473 脱粉',desliming474:'474 脱粉',is_stoppage:'停机 / 低负荷',level:'精磁尾液位'},
     mean(values) { return values.length ? values.reduce((sum,v) => sum + v,0) / values.length : null; },
@@ -60,15 +62,15 @@ const DecisionCoarseCharts = {
     init() {
         if (this.initialized) return;
         this.initialized = true;
-        document.querySelectorAll('[data-decision-period]').forEach(button => button.addEventListener('click',()=> {
+        document.getElementById(this.rootId).querySelectorAll('[data-decision-period]').forEach(button => button.addEventListener('click',()=> {
             this.mode = button.dataset.decisionPeriod === 'sample' ? 'sample' : 'day';
             this.refresh();
         }));
         this.hoverMedia = window.matchMedia('(hover: hover) and (pointer: fine)');
         this.hoverMedia.addEventListener('change',()=>this.resetPointer());
         document.addEventListener('visibilitychange',()=> { if (document.hidden) this.resetPointer(); });
-        for (const id of ['trend','factors','level']) {
-            const canvas = document.getElementById('decision-coarse-'+id);
+        for (const id of this.chartIds) {
+            const canvas = this.canvas(id);
             const card = canvas.closest('.decision-chart-card');
             card.addEventListener('pointerenter',event=> {
                 if (event.pointerType !== 'touch' && this.hoverMedia.matches) { card.dataset.hovered='true'; this.syncEngagement(id); }
@@ -92,7 +94,7 @@ const DecisionCoarseCharts = {
         this.resizeObserver = new ResizeObserver(()=> {
             if (document.getElementById('page-decision').classList.contains('active') && this.snapshot) this.draw();
         });
-        document.querySelectorAll('.decision-chart-plot').forEach(el=>this.resizeObserver.observe(el));
+        document.getElementById(this.rootId).querySelectorAll('.decision-chart-plot').forEach(el=>this.resizeObserver.observe(el));
     },
     refresh() {
         this.init();
@@ -103,7 +105,7 @@ const DecisionCoarseCharts = {
         if (signature === this.signature && paletteKey === this.paletteKey) return;
         this.signature = signature; this.paletteKey = paletteKey;
         this.snapshot = this.build();
-        document.querySelectorAll('[data-decision-period]').forEach(button=> {
+        document.getElementById(this.rootId).querySelectorAll('[data-decision-period]').forEach(button=> {
             const selected = button.dataset.decisionPeriod === this.mode;
             button.classList.toggle('is-active',selected); button.setAttribute('aria-pressed',String(selected));
         });
@@ -117,13 +119,13 @@ const DecisionCoarseCharts = {
         document.getElementById('decision-coarse-table').innerHTML = s.rows.map(r=>
             `<tr><td>${r.label}</td><td>${r.n}</td><td>${this.number(r.actual)}</td><td>${this.number(r.pred)}</td><td>${this.number(r.level)}</td><td>${r.paired}</td><td>${this.number(r.scatterActual)}</td><td>${this.number(r.scatterPred)}</td></tr>`).join('');
         document.getElementById('decision-coarse-factor-list').textContent = s.factors.map(f=>`${f.name}：${this.number(f.value,3)}`).join('；') || '暂无 GPT 标准化系数';
-        document.querySelectorAll('[data-decision-series="actual"]').forEach(el=>el.textContent=daily?'实测日均值':'实测灰分');
-        document.querySelectorAll('[data-decision-series="predicted"]').forEach(el=>el.textContent=daily?'GPT 日级预测':'GPT 采样预测');
+        document.getElementById(this.rootId).querySelectorAll('[data-decision-series="actual"]').forEach(el=>el.textContent=daily?'实测日均值':'实测灰分');
+        document.getElementById(this.rootId).querySelectorAll('[data-decision-series="predicted"]').forEach(el=>el.textContent=daily?'GPT 日级预测':'GPT 采样预测');
         document.getElementById('decision-coarse-factor-caption').textContent=daily?'日级分析模型的标准化系数，仅用于历史分析。':'采样保存模型的标准化系数，保留原生产模型。';
         this.draw();
     },
     syncEngagement(id) {
-        const canvas=document.getElementById('decision-coarse-'+id),card=canvas.closest('.decision-chart-card');
+        const canvas=this.canvas(id),card=canvas.closest('.decision-chart-card');
         const visible=!document.hidden && document.getElementById('page-decision').classList.contains('active');
         const engaged=visible && (card.dataset.hovered==='true' || canvas.matches(':focus-visible'));
         if (card.classList.contains('is-engaged')===engaged) return;
@@ -131,19 +133,19 @@ const DecisionCoarseCharts = {
         if (this.snapshot) this.drawCard(id,true);
     },
     resetPointer() {
-        for (const id of ['trend','factors','level']) {
-            document.getElementById('decision-coarse-'+id).closest('.decision-chart-card').dataset.hovered='false';
+        for (const id of this.chartIds) {
+            this.canvas(id).closest('.decision-chart-card').dataset.hovered='false';
             this.hideTooltip(id);
             this.syncEngagement(id);
         }
     },
-    palette(element = document.getElementById('decision-coarse-analysis')) {
+    palette(element = document.getElementById(this.rootId)) {
         const style = getComputedStyle(element);
         const get = key=>style.getPropertyValue(key).trim();
         return {ink:get('--ds-ink'),muted:get('--ds-muted'),rule:get('--ds-rule'),blue:get('--dc-blue'),orange:get('--dc-orange'),purple:get('--dc-purple'),green:get('--dc-green'),red:get('--dc-red')};
     },
     surface(id, preserveTooltip = false) {
-        const canvas = document.getElementById('decision-coarse-'+id), rect = canvas.parentElement.getBoundingClientRect();
+        const canvas = this.canvas(id), rect = canvas.parentElement.getBoundingClientRect();
         const w = rect.width, h = rect.height;
         if (w <= 0 || h <= 0) return null;
         const dpr = Math.min(window.devicePixelRatio || 1,2);
@@ -250,9 +252,9 @@ const DecisionCoarseCharts = {
         if(!best || distance>(id==='factors'?18:id==='trend'?24:15)) {this.hideTooltip(id);return;}
         this.showTooltip(id,best,x,y);
     },
-    hideTooltip(id) { document.getElementById('decision-coarse-'+id).parentElement.querySelector('.decision-chart-tooltip').hidden=true; },
+    hideTooltip(id) { this.canvas(id).parentElement.querySelector('.decision-chart-tooltip').hidden=true; },
     showTooltip(id,hit,x,y,keyboard=false) {
-        const canvas=document.getElementById('decision-coarse-'+id),rect=canvas.getBoundingClientRect();
+        const canvas=this.canvas(id),rect=canvas.getBoundingClientRect();
         const tooltip=canvas.parentElement.querySelector('.decision-chart-tooltip');
         tooltip.setAttribute('aria-live',keyboard?'polite':'off');
         tooltip.textContent=hit.text;tooltip.hidden=false;
