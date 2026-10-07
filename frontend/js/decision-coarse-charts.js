@@ -52,10 +52,30 @@ const DecisionCoarseCharts = {
             this.mode = button.dataset.decisionPeriod === 'shift' ? 'shift' : 'day';
             this.refresh();
         }));
+        this.hoverMedia = window.matchMedia('(hover: hover) and (pointer: fine)');
+        this.hoverMedia.addEventListener('change',()=>this.resetPointer());
+        document.addEventListener('visibilitychange',()=> { if (document.hidden) this.resetPointer(); });
         for (const id of ['trend','factors','level']) {
             const canvas = document.getElementById('decision-coarse-'+id);
+            const card = canvas.closest('.decision-chart-card');
+            card.addEventListener('pointerenter',event=> {
+                if (event.pointerType !== 'touch' && this.hoverMedia.matches) { card.dataset.hovered='true'; this.syncEngagement(id); }
+            });
+            card.addEventListener('pointerleave',()=> { card.dataset.hovered='false'; this.syncEngagement(id); });
+            canvas.addEventListener('focus',()=> {
+                this.syncEngagement(id);
+                if (canvas.matches(':focus-visible')) this.keyboard(id,{key:'Home',preventDefault(){}});
+            });
+            canvas.addEventListener('blur',()=> { this.hideTooltip(id); this.syncEngagement(id); });
+            canvas.addEventListener('keydown',event=>this.keyboard(id,event));
             canvas.addEventListener('mousemove',event=>this.hover(id,event));
-            canvas.addEventListener('mouseleave',()=>canvas.parentElement.querySelector('.decision-chart-tooltip').hidden=true);
+            canvas.addEventListener('mouseleave',()=> { if (!canvas.matches(':focus-visible')) this.hideTooltip(id); });
+            canvas.addEventListener('pointerdown',event=> { if (event.pointerType==='touch') canvas._tapOrigin={x:event.clientX,y:event.clientY}; });
+            canvas.addEventListener('pointerup',event=> {
+                const origin=canvas._tapOrigin; canvas._tapOrigin=null;
+                if (event.pointerType==='touch' && origin && Math.hypot(event.clientX-origin.x,event.clientY-origin.y)<10) this.hover(id,event);
+            });
+            canvas.addEventListener('pointercancel',()=> { canvas._tapOrigin=null; this.hideTooltip(id); });
         }
         this.resizeObserver = new ResizeObserver(()=> {
             if (document.getElementById('page-decision').classList.contains('active') && this.snapshot) this.draw();
@@ -87,12 +107,27 @@ const DecisionCoarseCharts = {
         document.getElementById('decision-coarse-factor-list').textContent = s.factors.map(f=>`${f.name}：${this.number(f.value,3)}`).join('；') || '暂无 GPT 标准化系数';
         this.draw();
     },
-    palette() {
-        const style = getComputedStyle(document.getElementById('decision-coarse-analysis'));
+    syncEngagement(id) {
+        const canvas=document.getElementById('decision-coarse-'+id),card=canvas.closest('.decision-chart-card');
+        const visible=!document.hidden && document.getElementById('page-decision').classList.contains('active');
+        const engaged=visible && (card.dataset.hovered==='true' || canvas.matches(':focus-visible'));
+        if (card.classList.contains('is-engaged')===engaged) return;
+        card.classList.toggle('is-engaged',engaged);
+        if (this.snapshot) this.drawCard(id,true);
+    },
+    resetPointer() {
+        for (const id of ['trend','factors','level']) {
+            document.getElementById('decision-coarse-'+id).closest('.decision-chart-card').dataset.hovered='false';
+            this.hideTooltip(id);
+            this.syncEngagement(id);
+        }
+    },
+    palette(element = document.getElementById('decision-coarse-analysis')) {
+        const style = getComputedStyle(element);
         const get = key=>style.getPropertyValue(key).trim();
         return {ink:get('--ds-ink'),muted:get('--ds-muted'),rule:get('--ds-rule'),blue:get('--dc-blue'),orange:get('--dc-orange'),purple:get('--dc-purple'),green:get('--dc-green'),red:get('--dc-red')};
     },
-    surface(id) {
+    surface(id, preserveTooltip = false) {
         const canvas = document.getElementById('decision-coarse-'+id), rect = canvas.parentElement.getBoundingClientRect();
         const w = rect.width, h = rect.height;
         if (w <= 0 || h <= 0) return null;
@@ -103,8 +138,8 @@ const DecisionCoarseCharts = {
         ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
         ctx.font = '11px Microsoft YaHei, sans-serif';
         this.hits[id] = [];
-        canvas.parentElement.querySelector('.decision-chart-tooltip').hidden = true;
-        return {canvas,ctx,w,h,c:this.palette()};
+        if (!preserveTooltip) this.hideTooltip(id);
+        return {canvas,ctx,w,h,c:this.palette(canvas.closest('.decision-chart-card'))};
     },
     empty(surface,text) {
         const {ctx,w,h,c} = surface;
@@ -128,12 +163,13 @@ const DecisionCoarseCharts = {
     },
     draw() {
         document.getElementById('decision-coarse-metrics').textContent = this.snapshot.model ? '暂无可配对的历史液位与灰分' : '暂无可用 GPT 模型';
-        for(const id of ['trend','factors','level']) {
-            const surface=this.surface(id); if (!surface) continue;
-            if (!this.snapshot.model) { this.empty(surface,'暂无可用 GPT 模型'); continue; }
-            if (id !== 'factors' && !this.snapshot.rows.length) { this.empty(surface,'暂无有效历史采样数据'); continue; }
-            this[id](surface);
-        }
+        for(const id of ['trend','factors','level']) this.drawCard(id);
+    },
+    drawCard(id,preserveTooltip = false) {
+        const surface=this.surface(id,preserveTooltip); if (!surface) return;
+        if (!this.snapshot.model) { this.empty(surface,'暂无可用 GPT 模型'); return; }
+        if (id !== 'factors' && !this.snapshot.rows.length) { this.empty(surface,'暂无有效历史采样数据'); return; }
+        this[id](surface);
     },
     trend(surface) {
         const {ctx,w,h,c}=surface,rows=this.snapshot.rows,n=rows.length;
@@ -195,10 +231,29 @@ const DecisionCoarseCharts = {
             const d=id==='trend'?Math.abs(hit.x-x):id==='factors'?Math.abs(hit.y-y):Math.hypot(hit.x-x,hit.y-y);
             if(d<distance) {best=hit;distance=d;}
         }
+        if(!best || distance>(id==='factors'?18:id==='trend'?24:15)) {this.hideTooltip(id);return;}
+        this.showTooltip(id,best,x,y);
+    },
+    hideTooltip(id) { document.getElementById('decision-coarse-'+id).parentElement.querySelector('.decision-chart-tooltip').hidden=true; },
+    showTooltip(id,hit,x,y,keyboard=false) {
+        const canvas=document.getElementById('decision-coarse-'+id),rect=canvas.getBoundingClientRect();
         const tooltip=canvas.parentElement.querySelector('.decision-chart-tooltip');
-        if(!best || distance>(id==='factors'?18:id==='trend'?24:15)) {tooltip.hidden=true;return;}
-        tooltip.textContent=best.text;tooltip.hidden=false;
+        tooltip.setAttribute('aria-live',keyboard?'polite':'off');
+        tooltip.textContent=hit.text;tooltip.hidden=false;
         tooltip.style.left=Math.max(4,Math.min(x+14,rect.width-tooltip.offsetWidth-4))+'px';
         tooltip.style.top=Math.max(4,Math.min(y+12,rect.height-tooltip.offsetHeight-4))+'px';
+    },
+    keyboard(id,event) {
+        if (event.key==='Escape') { this.hideTooltip(id);return; }
+        if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(event.key)) return;
+        const hits=this.hits[id] || []; if (!hits.length) return;
+        event.preventDefault();this.syncEngagement(id);
+        if (!this.keyboardIndices) this.keyboardIndices={};
+        let index=this.keyboardIndices[id] || 0;
+        if (event.key==='Home') index=0;
+        else if(event.key==='End') index=hits.length-1;
+        else index=Math.max(0,Math.min(hits.length-1,index+(['ArrowLeft','ArrowUp'].includes(event.key)?-1:1)));
+        this.keyboardIndices[id]=index;
+        this.showTooltip(id,hits[index],hits[index].x,hits[index].y,true);
     }
 };

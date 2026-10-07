@@ -6,7 +6,7 @@
     <title>重介密控系统 - 密度推荐与灰分监控平台</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css?v=11">
-    <link rel="stylesheet" href="css/decision-overview.css?v=10">
+    <link rel="stylesheet" href="css/decision-overview.css?v=11">
     <!-- 无外部依赖，图表使用纯Canvas 2D绘制 -->
     <script src="js/xlsx-lite.js?v=8"></script>
     <script src="js/chart-lite.js?v=7"></script>
@@ -119,15 +119,15 @@
                     <div class="decision-charts-grid">
                         <article class="decision-chart-card decision-chart-trend">
                             <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">01 / TREND</p><h4>粗精煤泥<br>灰分趋势</h4><p>沿时间观察实测与预测的变化，比较它们与目标参考线的距离。</p></div><div class="decision-chart-legend"><span class="is-actual">实测均值</span><span class="is-predicted">GPT 预测均值</span><span class="is-target">目标参考 13%</span></div></div>
-                            <div class="decision-chart-plot"><canvas id="decision-coarse-trend" role="img" aria-label="历史实测灰分、GPT 预测灰分与13%参考线趋势，汇总数据见下方表格"></canvas><div class="decision-chart-tooltip" hidden></div></div>
+                            <div class="decision-chart-plot"><canvas id="decision-coarse-trend" role="img" tabindex="0" aria-describedby="decision-trend-tooltip" aria-label="历史实测灰分、GPT 预测灰分与13%参考线趋势。方向键查看数据，Home和End跳到首尾，Escape收起提示；汇总数据见下方表格。"></canvas><div class="decision-chart-tooltip" id="decision-trend-tooltip" aria-live="off" hidden></div></div>
                         </article>
                         <article class="decision-chart-card decision-chart-factors">
                             <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">02 / FACTORS</p><h4>多因素模型<br>关联强度</h4><p>从保存模型的标准化系数查看关联强弱与方向；关联不代表因果。</p></div><p class="decision-factor-key"><span class="decision-factor-positive">正向关联</span><span class="decision-factor-negative">负向关联</span></p><p class="decision-chart-sr" id="decision-coarse-factor-list"></p></div>
-                            <div class="decision-chart-plot"><canvas id="decision-coarse-factors" role="img" aria-label="GPT 保存模型的标准化系数关联强度，不代表因果或准确率"></canvas><div class="decision-chart-tooltip" hidden></div></div>
+                            <div class="decision-chart-plot"><canvas id="decision-coarse-factors" role="img" tabindex="0" aria-describedby="decision-factors-tooltip" aria-label="GPT 保存模型的标准化系数关联强度，不代表因果或准确率。方向键查看系数，Home和End跳到首尾，Escape收起提示。"></canvas><div class="decision-chart-tooltip" id="decision-factors-tooltip" aria-live="off" hidden></div></div>
                         </article>
                         <article class="decision-chart-card decision-chart-level">
                             <div class="decision-chart-copy"><div class="decision-chart-heading"><p class="decision-chart-index">03 / RELATIONSHIP</p><h4>灰分与<br>精磁尾液位</h4><p>在同组有效液位采样中，对照实测与预测灰分的分布。</p></div><div class="decision-chart-legend"><span class="is-actual">实测均值</span><span class="is-predicted">GPT 预测均值</span></div><p class="decision-chart-metrics" id="decision-coarse-metrics"></p></div>
-                            <div class="decision-chart-plot"><canvas id="decision-coarse-level" role="img" aria-label="历史液位均值与实测和GPT预测灰分均值的散点对照，汇总数据见下方表格"></canvas><div class="decision-chart-tooltip" hidden></div></div>
+                            <div class="decision-chart-plot"><canvas id="decision-coarse-level" role="img" tabindex="0" aria-describedby="decision-level-tooltip" aria-label="历史液位均值与实测和GPT预测灰分均值的散点对照。方向键查看数据，Home和End跳到首尾，Escape收起提示；汇总数据见下方表格。"></canvas><div class="decision-chart-tooltip" id="decision-level-tooltip" aria-live="off" hidden></div></div>
                         </article>
                     </div>
                     <p class="decision-analysis-note">按日为自然日；白班 08:00–20:00，夜班 20:00–次日 08:00，夜班归入起始日期。先用保存模型预测各采样点，再按组取均值，不使用待确认的 KEPServer 累计灰分或煤量。液位图只汇总同组中有有效液位的配对采样；开关采样比例不代表运行时长。历史回算不是新的独立验证，化验报告时间尚未记录。</p>
@@ -919,8 +919,8 @@
     <script src="js/app.js?v=86"></script>
     <script src="js/overview.js?v=46"></script>
     <script src="js/decision-background.js?v=1"></script>
-    <script src="js/decision-coarse-charts.js?v=1"></script>
-    <script src="js/decision-overview.js?v=12"></script>
+    <script src="js/decision-coarse-charts.js?v=2"></script>
+    <script src="js/decision-overview.js?v=13"></script>
     <script src="js/collect.js?v=25"></script>
     <script src="js/coarse.js?v=24"></script>
     <script src="js/float.js?v=15"></script>

@@ -141,7 +141,10 @@ const DecisionOverviewPage = {
         this.motionPrinting = printing.matches;
         printing.addEventListener('change', event => { this.motionPrinting = event.matches; this.syncMotion(); });
         // Also stop on programmatic navigation, which does not dispatch a nav click.
-        this.activityObserver = new MutationObserver(() => this.syncMotion());
+        this.activityObserver = new MutationObserver(() => {
+            this.syncMotion();
+            if (!this.active() && typeof DecisionCoarseCharts !== 'undefined' && DecisionCoarseCharts.initialized) DecisionCoarseCharts.resetPointer();
+        });
         this.activityObserver.observe(document.getElementById('page-decision'), {attributes:true, attributeFilter:['class']});
         document.getElementById('decision-motion').addEventListener('click', () => {
             this.motionEnabled = !this.motionEnabled; this.syncMotion();
