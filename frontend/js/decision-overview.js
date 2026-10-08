@@ -72,9 +72,9 @@ const DecisionOverviewPage = {
         const available = !!(valid && effective.status === 'good' && !window.Operations?.telemetryFailed);
         const reason = effective?.reason || (window.Operations?.telemetryFailed ? '采集请求异常 · 沿用最近有效值' : '');
         const parts = effective?.components || (effective ? [effective] : []);
-        const detail = parts.map(p => `${p.label || item?.device || '密度'}：${this.number(p.value, 3)}；${p.reason || '实时读数'}；${this.time(p.received_at)}`).join('；');
+        const detail = parts.map(p => `${p.label || item?.device || '密度'}：${this.number(p.value, 3, App.telemetryDisplayUnit(p))}；${p.reason || '实时读数'}；${this.time(p.received_at)}`).join('；');
         return {bound:true,item,available,held,stopped:false,components:null,
-            value:valid ? this.number(effective.value, 3, effective.unit) : '—',
+            value:valid ? this.number(effective.value, 3, effective.unit || App.telemetryDisplayUnit(item)) : '—',
             sampleAt:effective?.received_at || null,valueSourceAt:effective?.source_at || null,
             source:valid ? (held ? (reason || '沿用本路最近非 1 有效值') : 'KEP · ' + (item.name || '当前密度')) : (reason || '暂无有效密度'),
             title:detail || reason || '暂无有效密度'};
@@ -99,6 +99,7 @@ const DecisionOverviewPage = {
         const held = !!(fallback && previous);
         if (stopped) available = false;
         const shown = held ? previous : sample;
+        const shownUnit = shown.unit || App.telemetryDisplayUnit(item);
         let value = '—';
         if (group) value = this.groupValue(sample.components);
         else if (available || held) {
@@ -108,7 +109,7 @@ const DecisionOverviewPage = {
                 value = magnitude >= 1e7 || (magnitude > 0 && magnitude < .001) ? shown.value.toExponential(3) :
                     new Intl.NumberFormat('zh-CN', {maximumFractionDigits:3, useGrouping:false}).format(shown.value);
             }
-            if (shown.unit || item?.unit) value += ' ' + (shown.unit || item.unit);
+            if (shownUnit) value += ' ' + shownUnit;
         }
         const state = stopped ? '设备停机' : item ? this.telemetryState(item) : '已选点位未返回';
         const received = shown.received_at ? new Date(shown.received_at) : null;
@@ -116,7 +117,7 @@ const DecisionOverviewPage = {
         return {bound:true,item,available,held,stopped,value,components:group ? sample.components : null,sampleAt:shown.received_at || null,valueSourceAt:shown.source_at || null,
             source:held ? `${stopped ? '设备停机' : '采集异常'} · 沿用上次有效值 · ${clock}` :
                 stopped ? '设备停机 · 暂无历史有效值' : available ? `${group ? '组合' : derived ? '组合计算' : 'KEP'} · ${derived && !group ? item.name : item.tag_name || item.name} · ${clock}` : `不可用 · ${state}`,
-            title:`${derived ? '本系统派生的'+item.name : item?.item_id || sample.node_id || choice}；${state}；${held ? '沿用上次有效值；' : ''}${group ? '状态组合，无单位' : (shown.unit || item?.unit) ? '单位 '+(shown.unit || item.unit) : '单位未提供'}；数值接收时间 ${this.time(shown.received_at)}`};
+            title:`${derived ? '本系统派生的'+item.name : item?.item_id || sample.node_id || choice}；${state}；${held ? '沿用上次有效值；' : ''}${group ? '状态组合，无单位' : shownUnit ? '单位 '+shownUnit : '单位未配置'}；数值接收时间 ${this.time(shown.received_at)}`};
     },
     telemetryUpdated() {
         if (!this.initialized || !this.active() || document.hidden || !this.snapshot) return;
@@ -577,14 +578,14 @@ const DecisionOverviewPage = {
         const pairs = [['当前业务值',node.value + (node.id === 'density' ? ' g/cm³' : '')],['当前来源',node.source],['采样 / 记录时间',this.time(node.sampleAt)],['人工录入时间',this.time(node.enteredAt)],['化验结果可用时间','未记录（不由采样时刻推断）'],['实时业务绑定','尚未接入']];
         if (display.bound) pairs.unshift([node.id === 'density' ? '采集对照值' : '卡片显示值',display.value + (display.held ? '（沿用上次有效值）' : display.available ? '' : '（不可用）')],
             ['卡片状态',display.stopped ? '设备停机' : display.held ? '采集异常 · 沿用历史值' : display.available ? '实时采集' : '不可用'],
-            ['卡片采集来源',display.item?.item_id || display.item?.name || '已选点位未返回'],['显示数值原接收时间',this.time(display.sampleAt)],['采集单位',display.components ? '运行状态 · 无单位' : display.item?.unit || '未提供 · 不沿用业务单位']);
+            ['卡片采集来源',display.item?.item_id || display.item?.name || '已选点位未返回'],['显示数值原接收时间',this.time(display.sampleAt)],['单位',display.components ? '运行状态 · 无单位' : App.telemetryDisplayUnit(display.item) || '未配置']);
         if (display.held) pairs.splice(4, 0, ['沿用数值原源时间', this.time(display.valueSourceAt)]);
         if (node.id === 'density-current' && display.item?.effective_density) {
             const effective = display.item.effective_density;
             pairs.splice(2, 0, ['密度采用规则', effective.reason || '有效非 1 读数']);
             for (const part of effective.components || [effective]) pairs.push([
                 `${part.label || display.item.device || '本路'} 采用值`,
-                `${this.number(part.value,3)} · ${part.reason || '实时读数'} · ${this.time(part.received_at)}`]);
+                `${this.number(part.value,3,App.telemetryDisplayUnit(part))} · ${part.reason || '实时读数'} · ${this.time(part.received_at)}`]);
         }
         if (node.family && s.sum > 0 && node.type === 'component') {
             const contribution = Number.isFinite(s.ashes[node.family]) ? s.ashes[node.family] * s.amounts[node.family] / s.sum : null;
@@ -605,8 +606,8 @@ const DecisionOverviewPage = {
         const sample = item?.sample || {};
         const value = item?.kind === 'state_group' ? this.groupValue(sample.components) : typeof sample.value === 'boolean' ? (sample.value ? '开' : '关') : sample.value ?? '—';
         const available = item && item.available && !window.Operations?.telemetryFailed;
-        const live = item ? `<dl class="decision-facts"><dt>原始读数（回退前）</dt><dd class="${available ? '' : 'decision-unavailable'}">${this.escape(value)} ${this.escape(item.unit || '')}${available ? '' : '（不可用）'}</dd><dt>质量 / 时效</dt><dd>${this.escape(this.telemetryState(item))}</dd><dt>数据来源</dt><dd>${this.escape(item.item_id || item.source_id + '/' + item.key)}</dd><dt>源时间</dt><dd>${this.escape(this.time(sample.source_at))}</dd><dt>服务器时间</dt><dd>${this.escape(this.time(sample.server_at))}</dd><dt>接收时间</dt><dd>${this.escape(this.time(sample.received_at))}</dd></dl>` : `<p>${choice ? '已选点位暂未返回，卡片保持不可用，等待采集恢复。' : '选择点位后，该卡片立即显示采集值；清空选择恢复原业务显示。建议密度只增加采集对照值。'}</p>`;
-        const memberDetails = item?.kind === 'state_group' ? `<dl class="decision-facts">${(sample.components || []).map(c => `<dt>${this.escape(c.label)} ${this.escape(item.member_label || '系统')}</dt><dd>${this.escape(c.available && !window.Operations?.telemetryFailed ? c.value ? '开' : '关' : '未知')} · ${this.escape(c.item_id)}<br>接收 ${this.escape(this.time(c.received_at))} · ${this.escape(c.status || '未知')}${!c.available && typeof c.value === 'boolean' ? `<br>最后读数 ${c.value ? '1' : '0'}（不可用）` : ''}</dd>`).join('')}</dl>` : item?.kind === 'numeric_average' ? `<dl class="decision-facts"><dt>计算方式</dt><dd>${this.escape(sample.formula)} · 每路 50%<br>本系统计算，保留原始采集点。</dd>${(sample.components || []).map(c => `<dt>${this.escape(c.label)} 原始密度</dt><dd>${this.escape(Number.isFinite(c.value) ? c.value : '—')} ${this.escape(c.unit || '（单位未提供）')}${c.available && !window.Operations?.telemetryFailed ? '' : '（不可用）'}<br>${this.escape(c.item_id)}<br>接收 ${this.escape(this.time(c.received_at))} · ${this.escape(c.status || '未知')}</dd>`).join('')}</dl>` : '';
+        const live = item ? `<dl class="decision-facts"><dt>原始读数（回退前）</dt><dd class="${available ? '' : 'decision-unavailable'}">${this.escape(value)} ${this.escape(App.telemetryDisplayUnit(item))}${available ? '' : '（不可用）'}</dd><dt>质量 / 时效</dt><dd>${this.escape(this.telemetryState(item))}</dd><dt>数据来源</dt><dd>${this.escape(item.item_id || item.source_id + '/' + item.key)}</dd><dt>源时间</dt><dd>${this.escape(this.time(sample.source_at))}</dd><dt>服务器时间</dt><dd>${this.escape(this.time(sample.server_at))}</dd><dt>接收时间</dt><dd>${this.escape(this.time(sample.received_at))}</dd></dl>` : `<p>${choice ? '已选点位暂未返回，卡片保持不可用，等待采集恢复。' : '选择点位后，该卡片立即显示采集值；清空选择恢复原业务显示。建议密度只增加采集对照值。'}</p>`;
+        const memberDetails = item?.kind === 'state_group' ? `<dl class="decision-facts">${(sample.components || []).map(c => `<dt>${this.escape(c.label)} ${this.escape(item.member_label || '系统')}</dt><dd>${this.escape(c.available && !window.Operations?.telemetryFailed ? c.value ? '开' : '关' : '未知')} · ${this.escape(c.item_id)}<br>接收 ${this.escape(this.time(c.received_at))} · ${this.escape(c.status || '未知')}${!c.available && typeof c.value === 'boolean' ? `<br>最后读数 ${c.value ? '1' : '0'}（不可用）` : ''}</dd>`).join('')}</dl>` : item?.kind === 'numeric_average' ? `<dl class="decision-facts"><dt>计算方式</dt><dd>${this.escape(sample.formula)} · 每路 50%<br>本系统计算，保留原始采集点。</dd>${(sample.components || []).map(c => `<dt>${this.escape(c.label)} 原始密度</dt><dd>${this.escape(Number.isFinite(c.value) ? c.value : '—')} ${this.escape(App.telemetryDisplayUnit(c) || '（单位未配置）')}${c.available && !window.Operations?.telemetryFailed ? '' : '（不可用）'}<br>${this.escape(c.item_id)}<br>接收 ${this.escape(this.time(c.received_at))} · ${this.escape(c.status || '未知')}</dd>`).join('')}</dl>` : '';
         const collector = window.Operations?.telemetryFailed ? '采集查询中断，最后读数不可用' : !items.length ? (window.Operations?.serverState === 'local' ? '单机模式 · 通过服务器地址查看采集' : '暂无点位 · 等待现场配置与联调') : `${items.filter(p => p.available).length} / ${items.length} 个点位可用（含组合点）`;
         document.getElementById('decision-inspector').innerHTML = `<div class="decision-inspector-header"><span>因素与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${node.reference ? '对照 / 预留' : '业务取值'}</span></div><p>${this.escape(node.description)}</p><dl class="decision-facts">${facts}</dl></div><div class="decision-detail decision-source-panel"><h4>卡片数据 → 采集来源</h4><p class="decision-live-state">${this.escape(collector)}。所选读数用于卡片展示，尚未参与本页计算。</p><label for="decision-source-point">选择卡片显示点位${node.id === 'density' ? '（采集对照）' : ''}</label><select id="decision-source-point"><option value="">不使用采集值</option>${options}</select>${live}${memberDetails}</div>`;
         document.getElementById('decision-inspector').scrollTop = scrollTop;

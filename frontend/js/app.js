@@ -1264,6 +1264,17 @@ const App = {
     },
 
     // 工具函数
+    telemetryDisplayUnit(item) {
+        const configured = String(item?.unit || '').trim();
+        if (configured) return configured;
+        const density = item?.key === 'a303_a304_density_average' ||
+            /^TIA_4_1\.TIA_4_1\.A30[34]\/MD(?:_SET)?$/.test(item?.item_id || '');
+        if (!density) return '';
+        // Reuse the established instrument unit without changing telemetry
+        // definitions or the units attached to retained raw samples.
+        return (typeof CollectPage !== 'undefined' ? CollectPage.instruments.find(i => i.id === 'density')?.unit : null) || 'g/cm³';
+    },
+
     formatDate(d) {
         const pad = n => String(n).padStart(2, '0');
         return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;

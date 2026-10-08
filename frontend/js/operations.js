@@ -210,6 +210,8 @@ window.Operations = {
             const sample = item.sample || {};
             const valid = !this.telemetryFailed && item.available;
             const value = sample.value == null ? '—' : typeof sample.value === 'boolean' ? (sample.value ? '1' : '0') : String(sample.value);
+            const unit = App.telemetryDisplayUnit(item);
+            const displayValue = value + (Number.isFinite(sample.value) && unit ? ' ' + unit : '');
             const quality = {good:'Good', uncertain:'Uncertain', bad:'Bad'}[sample.quality] || '—';
             const reason = this.telemetryFailed ? '查询中断' : reasons[item.status] || '不可用';
             const split = (item.name || '').indexOf(' · ');
@@ -217,7 +219,7 @@ window.Operations = {
             const description = item.description || (split < 0 ? '' : item.name.slice(split + 3));
             return '<tr><td>' + this.escape(item.device || '—') + '</td><td>' + this.escape(tag || '—') + '</td>' +
                 '<td>' + this.escape(description || '—') + '</td><td>' + this.escape(item.item_id || sample.node_id || '—') + '</td>' +
-                '<td class="' + (valid ? '' : 'ops-unavailable') + '" title="' + this.escape(quality + ' / ' + reason) + '">' + this.escape(value) + '</td>' +
+                '<td class="' + (valid ? '' : 'ops-unavailable') + '" title="' + this.escape(quality + ' / ' + reason) + '">' + this.escape(displayValue) + '</td>' +
                 '<td title="' + this.escape(sample.received_at || '') + '">' + this.escape(this.time(sample.received_at)) + '</td></tr>';
         }).join('');
     },
