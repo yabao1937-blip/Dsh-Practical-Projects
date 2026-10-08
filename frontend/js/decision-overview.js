@@ -534,6 +534,8 @@ const DecisionOverviewPage = {
 
     renderGraph() {
         const s = this.snapshot, selected = this.nodes.find(n => n.id === this.selected);
+        const targetAsh = (typeof CollectPage !== 'undefined' ? CollectPage.instruments.find(i => i.id === 'total_ash') : null);
+        const targetAshRange = `${this.number(targetAsh?.min ?? 8.5,1)}–${this.number(targetAsh?.max ?? 9.0,1)}%`;
         const colors = {heavy:'var(--dm-blue)',float:'var(--dm-orange)',coarse:'var(--dm-green)'};
         const ancestorIds = new Set([this.selected]);
         let current = selected;
@@ -555,7 +557,7 @@ const DecisionOverviewPage = {
             const display = this.pointDisplay(node), root = node.id === 'density';
             const preview = node.id === 'coarse' ? `<span>查看${this.view === 'gpt' ? ' GPT' : '生产'}预测 ${this.number(s.prediction,2,'%')}${!s.model ? ' · 未训练' : s.previewOnly ? ' · 对照' : ' · 未平滑'}</span>` : '';
             const unit = node.id === 'density' ? '<span class="decision-root-unit">g/cm³</span>' : '';
-            const sub = node.id === 'density' ? `<span>当前 ${this.number(s.guide.rhoCur,3)} · 目标灰分 ${this.number(s.guide.targetTotal,2,'%')}</span>` : '';
+            const sub = node.id === 'density' ? `<span>当前 ${this.number(s.guide.rhoCur,3)}</span><span>目标灰分范围 ${targetAshRange}</span>` : '';
             const phase = -((now+index*.41)%5).toFixed(3);
             const badge = display.bound && !root ? `<span class="decision-badge">${display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
             const compare = display.bound && root ? `<span class="decision-live-comparison">采集对照 ${this.escape(display.value)}${display.available ? '' : '（不可用）'}</span>` : '';

@@ -93,7 +93,7 @@ assert.equal(page.pointDisplay(page.nodes.find(n => n.id === 'raw-ash')).stopped
 const boundPoint = ctx.window.Operations.telemetry.items[0];
 boundPoint.unit = '';
 assert.equal(page.pointDisplay(page.nodes.find(n => n.id === 'raw-ash')).value, '—', 'No earlier nonzero must not invent a value');
-assert.match(page.pointDisplay(page.nodes.find(n => n.id === 'raw-ash')).title, /单位未提供/);
+assert.match(page.pointDisplay(page.nodes.find(n => n.id === 'raw-ash')).title, /单位未配置/);
 boundPoint.sample.value = false;
 assert.equal(page.pointDisplay(page.nodes.find(n => n.id === 'raw-ash')).value, '0', 'Boolean false is a valid reading');
 boundPoint.sample.value = 0; boundPoint.unit = '%';
