@@ -1267,6 +1267,8 @@ const App = {
     telemetryDisplayUnit(item) {
         const configured = String(item?.unit || '').trim();
         if (configured) return configured;
+        const belt = /^TIA_3_4\.TIA_3_4\.(501|502)\/COAL_CAP$/.exec(item?.item_id || '');
+        if (belt) return (typeof CollectPage !== 'undefined' ? CollectPage.instruments.find(i => i.id === `scale_${belt[1]}`)?.unit : null) || 't/h';
         const density = item?.key === 'a303_a304_density_average' ||
             /^TIA_4_1\.TIA_4_1\.A30[34]\/MD(?:_SET)?$/.test(item?.item_id || '');
         if (!density) return '';

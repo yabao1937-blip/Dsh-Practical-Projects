@@ -35,12 +35,15 @@ assert.doesNotMatch(elements['decision-inspector'].innerHTML,/实时采集<\/dd>
 // The heavy card is a summary of both visible children, regardless of an old parent binding.
 const heavy = page.nodes.find(n => n.id === 'heavy');
 const amount = page.nodes.find(n => n.id === 'heavy-amount');
-amount.value='433.7 t/h'; // A rendered business value; no live store mutation.
+const belts=['501','502'].map((belt,i)=>({source_id:'kep',key: `belt${belt}`,item_id:`TIA_3_4.TIA_3_4.${belt}/COAL_CAP`,
+    available:true,status:'good',unit:'',sample:{value:i ? 203.7 : 300,quality:'good',batch_id:'same',received_at:'2026-10-08T03:04:13Z'}}));
+ops.telemetry={items:belts}; ops.telemetryFailed=false;
+for(const [id,value] of [['float-amount',40],['coarse-amount',30]]) Object.assign(page.nodes.find(n=>n.id===id),{numericValue:value,value:`${value.toFixed(1)} t/h`});
 page.pointChoices.heavy = '["kep","obsolete-parent"]';
 let summary = page.pointDisplay(heavy);
 assert.equal(summary.value,display.value);
 assert.equal(summary.source,`煤量 ${page.pointDisplay(amount).value}`);
-assert.equal(summary.available,true,'An unbound but valid amount can join a manual ash reading');
+assert.equal(summary.available,true,'A calculated amount can join a manual ash reading');
 page.selected='heavy';
 page.renderInspector();
 assert.match(elements['decision-inspector'].innerHTML,/显示值<\/dt><dd>8.5 %/);
@@ -51,11 +54,9 @@ const edge = (from,to) => elements['decision-board'].innerHTML.match(new RegExp(
 assert.doesNotMatch(edge('heavy-ash','heavy'),/is-reference/,'Manual ash really feeds the summary');
 assert.doesNotMatch(edge('heavy-amount','heavy'),/is-reference/);
 assert.match(edge('heavy','density'),/is-reference/,'Display choices must not imply new guidance inputs');
-const amountPoint = {source_id:'kep',key:'quantity',available:true,status:'good',unit:'t/h',sample:{value:433.7,quality:'good'}};
-ops.telemetry={items:[amountPoint]}; ops.telemetryFailed=false;
-page.pointChoices['heavy-amount']=page.pointIdentity(amountPoint);
+page.pointChoices['heavy-amount']='["kep","obsolete-amount"]';
 assert.equal(page.pointDisplay(heavy).source,'煤量 433.7 t/h');
-amountPoint.sample.value=434.2;
+belts[0].sample.value=300.5;
 point.sample.value=8.6;
 summary=page.pointDisplay(heavy);
 assert.equal(summary.value,'8.6 %','New manual readings propagate to the parent');
@@ -66,6 +67,7 @@ assert.equal(summary.value,'8.6 %','An unavailable quantity does not discard val
 assert.equal(summary.source,'煤量 —','Missing readings cannot reuse the old parent value');
 assert.equal(summary.badge,'部分缺失');
 delete page.pointChoices['heavy-amount'];
+ops.telemetryFailed=false;
 point.sample.value=8.5;
 ops.manualMeasurementsFailed = true;
 display = page.pointDisplay(node);
@@ -90,7 +92,7 @@ assert.equal(page.pointDisplay(node).stopped,false);
 page.pointChoices['heavy-ash']='';
 page.applyDefaultManualPoint();
 assert.equal(page.pointDisplay(node).bound,false,'Explicit opt-out survives periodic refresh');
-ctx.localStorage.getItem=()=>JSON.stringify({'heavy-ash':'',heavy:'["kep","obsolete-parent"]',float:'["kep","obsolete-float"]'});
+ctx.localStorage.getItem=()=>JSON.stringify({'heavy-ash':'',heavy:'["kep","obsolete-parent"]',float:'["kep","obsolete-float"]','heavy-amount':'["kep","obsolete-amount"]'});
 let savedChoices;
 ctx.localStorage.setItem=(key,value)=>{if(key===page.choicesKey) savedChoices=JSON.parse(value);};
 page.loadPointChoices(); page.applyDefaultManualPoint();
@@ -99,6 +101,7 @@ assert.equal(Object.hasOwn(page.pointChoices,'heavy'),false,'Legacy parent bindi
 assert.equal(Object.hasOwn(savedChoices,'heavy'),false,'Legacy parent binding is removed from saved preferences');
 assert.equal(Object.hasOwn(page.pointChoices,'float'),false,'Legacy float binding is removed on load');
 assert.equal(Object.hasOwn(savedChoices,'float'),false,'Legacy float binding is removed from saved preferences');
+assert.equal(Object.hasOwn(savedChoices,'heavy-amount'),false,'The old amount binding cannot override the formula');
 page.pointChoices['heavy-ash']='["kep","p"]';
 page.applyDefaultManualPoint();
 assert.equal(page.pointChoices['heavy-ash'],'["kep","p"]','Existing explicit sources are preserved');
