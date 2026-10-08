@@ -101,6 +101,19 @@ class TelemetryRepository:
                 # 重放旧批次/旧点位定义可以保留历史，但不能回退当前快照。
                 matches = sample.get("definition_id") == definition_id(point.config)
                 if matches and (not point.latest or received >= point.latest["received_at"]):
+                    # Preserve the nearest pre-hour reading before a 5-second latest
+                    # update replaces it. The regular history interval is 60 seconds.
+                    previous = raw_sample(point.latest)
+                    if (previous and previous.get("batch_id")
+                            and parse_time(previous["received_at"]).replace(minute=0, second=0, microsecond=0)
+                            < parse_time(received).replace(minute=0, second=0, microsecond=0)):
+                        saved = db.scalar(select(TelemetryReading.id).where(
+                            TelemetryReading.source_id == cfg.source_id,
+                            TelemetryReading.point_key == point.key,
+                            TelemetryReading.batch_id == previous["batch_id"]))
+                        if saved is None:
+                            db.add(TelemetryReading(source_id=cfg.source_id, point_key=point.key,
+                                batch_id=previous["batch_id"], received_at=previous["received_at"], sample=previous))
                     point.latest = remember_point(db, point, {**sample, "batch_id": batch["batch_id"]})
                 if not source.last_sample_at or received > source.last_sample_at:
                     source.last_sample_at = received

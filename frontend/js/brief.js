@@ -1,187 +1,144 @@
-/* ========================================
-   brief.js - 推测简报（独立页）
-   ----------------------------------------
-   把原来只能"点一下、在 800px 宽弹窗里横向拉"的推测简报，做成导航里的独立整页：
-   - 整页宽度（16 列在 1440px 以上基本一屏看全）
-   - 表头吸顶（sticky）+ 双向滚动，纵向可直接下拉浏览全部行
-   - 渲染后自动滚到最新一行（简报是时间升序，263 行不滚等于看不到当天数据）
-   - 顶部摘要说明口径：行数/区间/建议密度版本/目标灰分/容差/重介灰分来源
-
-   数据来源：App.buildHourlyBrief()（三表 1h 对齐 + 递归软测量，与后端 build_hourly_brief 逐值一致）。
-   行存在规则：粗精煤泥 / 浮精 / 灰分密度三表在该小时结束前 24h 内均有记录才成行。
-   ======================================== */
+/* Hourly reports are generated and frozen by the server. */
 const BriefPage = {
-    result: null,          // { headers, rows } —— 与导出 Excel 完全同一份数据
-    generatedAt: null,
+    result: null, day: null, offset: 0, error: '', loading: false, sequence: 0, timer: null,
 
+    escape(value) {
+        return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
+    },
+    localTime(value, dateOnly = false) {
+        if (!value || !Number.isFinite(Date.parse(value))) return '—';
+        return new Intl.DateTimeFormat('sv-SE', {
+            timeZone: 'Asia/Shanghai', year:'numeric', month:'2-digit', day:'2-digit',
+            ...(dateOnly ? {} : {hour:'2-digit', minute:'2-digit', second:'2-digit', hourCycle:'h23'}),
+        }).format(new Date(value));
+    },
     init() {
-        // 首次进入自动生成（数据已在 store 里，省一次点击）；之后切回来只重渲染
-        if (!this.result) this.generate();
-        else this.render();
+        if (this.day === null) this.day = this.localTime(new Date().toISOString(), true);
+        this.generate();
+        if (!this.timer) this.timer = setInterval(() => {
+            if (!document.hidden && document.getElementById('page-brief')?.classList.contains('active')) this.generate(true);
+        }, 15000);
     },
-
-    // 三表各自最近一条记录的时间（0 行时用来告诉用户到底缺哪张表）
-    _lastTs() {
-        const last = arr => {
-            let m = '';
-            (arr || []).forEach(r => { const t = (r && (r.timestamp || r.ts)) || ''; if (t > m) m = t; });
-            return m;
-        };
-        const ad = (App.store.calcLogs || []).filter(l => l.calc_type === 'ash_density');
-        return { coarse: last(App.store.coarseCoal), float: last(App.store.floatCoal), ad: last(ad) };
+    async generate(quiet = false) {
+        if (quiet && this.loading) return;
+        const sequence = ++this.sequence;
+        this.loading = true; this.error = '';
+        if (!quiet) this.render();
+        try {
+            if (location.protocol === 'file:') throw new Error('请通过服务器地址打开，小时简报由后台生成。');
+            const params = new URLSearchParams({limit:'100', offset:String(this.offset)});
+            if (this.day) params.set('day', this.day);
+            const response = await fetch((window.Api?.base || '/api/v1') + '/hourly-brief?' + params, {
+                cache:'no-store', signal:AbortSignal.timeout(15000),
+            });
+            if (!response.ok) throw new Error('小时简报读取失败，请稍后刷新。');
+            const data = await response.json();
+            if (!Array.isArray(data.columns) || !Array.isArray(data.rows)) throw new Error('小时简报返回格式异常。');
+            if (sequence !== this.sequence) return;
+            this.result = data;
+        } catch (error) {
+            if (sequence !== this.sequence) return;
+            this.error = error.name === 'TimeoutError' ? '请求超时，请检查服务器连接。' : error.message;
+        } finally {
+            if (sequence === this.sequence) { this.loading = false; this.render(); }
+        }
+        return this.result;
     },
-
-    generate() {
-        const brief = App.buildHourlyBrief();
-        this.result = brief;
-        this.generatedAt = new Date();
-        this.render();
-        if (!brief.rows.length) this._showEmptyHint();
-        return brief;
+    changeDay(value) { this.day = value; this.offset = 0; this.result = null; this.generate(); },
+    pageBy(delta) { this.offset = Math.max(0, this.offset + delta * 100); this.result = null; this.generate(); },
+    value(cell, key, formatted = true) {
+        const value = cell?.value;
+        if (value === null || value === undefined) return '—';
+        if (typeof value === 'object') return Object.entries(value).map(([name, on]) =>
+            name + '：' + (on === true ? '运行' : on === false ? '停止' : '—')).join(' / ');
+        if (typeof value === 'number') return formatted ? value.toFixed(key.includes('density') ? 3 : 2) : value;
+        return String(value);
     },
-
-    // 摘要文字（独立页与生成后的弹窗共用同一份口径说明）
-    summaryHtml() {
-        const b = this.result || { rows: [] };
-        const rows = b.rows;
-        const schemeName = (App.store.guideScheme === 'heavy') ? '重介精煤灰分版' : '总灰分版';
-        const target = (App.store.ashTarget != null ? App.store.ashTarget : 8.50).toFixed(2);
-        const tol = (App.store.ashTargetTol != null ? App.store.ashTargetTol : 0.1);
-        const heavyAshVal = App.getHeavyAsh();
-        const heavyAshLayer = App.heavyAshLayer();
-        const range = rows.length ? `${rows[0][0]} ~ ${rows[rows.length - 1][0]}` : '—';
-        return `
-            <div style="color:var(--text-secondary);font-size:12px;line-height:1.9">
-                共 <strong>${rows.length}</strong> 个 1h 间隔 ·
-                区间 <strong>${range}</strong> ·
-                建议密度口径：<strong>${schemeName}</strong> ·
-                目标灰分 <strong>${target}%</strong> · 容差 ±<strong>${tol}%</strong><br>
-                成行规则：粗精煤泥 / 浮精 / 灰分密度三表在该小时结束前 <strong>24h 内均有记录</strong>才成行，任一表超窗则整行跳过<br>
-                重介精煤灰分：<strong>${heavyAshVal.toFixed(2)}%</strong>（${heavyAshLayer}）<br>
-                <span style="color:var(--accent-orange)">三表无数据源项按恒值处理：粗精煤泥量 40 t/h · 501/502皮带秤 268.5/235.2 t/h
-                · 501 灰分仪未接入，该列留空</span>
-            </div>`;
+    note(cell) {
+        if (!cell) return '无数据';
+        return cell.reason || {default:'默认值', manual:'手工补录', predicted:'模型预测', calculated:'计算值', held:'沿用前值'}[cell.status] || '';
     },
-
-    _tableHtml() {
-        const b = this.result || { headers: [], rows: [] };
-        const thead = `<tr><th>#</th>${b.headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
-        const tbody = b.rows.map((row, i) =>
-            `<tr><td>${i + 1}</td>${row.map(c => `<td>${c === '' ? '-' : c}</td>`).join('')}</tr>`).join('');
-        return `<table class="data-table brief-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
-    },
-
     render() {
         const box = document.getElementById('brief-content');
         if (!box) return;
-        if (!this.result) {
-            box.innerHTML = '<div class="panel"><div class="panel-body">尚未生成简报：点右上角「生成/刷新简报」。</div></div>';
-            return;
-        }
-        const rows = this.result.rows;
-        if (!rows.length) {
-            const t = this._lastTs();
-            box.innerHTML = `
-                <div class="panel"><div class="panel-body" style="line-height:2;font-size:13px">
-                    <p><strong>未生成任何行</strong>，原因如下：</p>
-                    <p>• 成行规则：某一小时要成行，<strong>粗精煤泥 / 浮精 / 灰分密度三张表都必须在该小时结束前 24 小时内各有一条记录</strong>；任一表超窗，该小时整行跳过（不再用陈旧数据续传凑行）。</p>
-                    <p>• 本机各表最近一条记录：</p>
-                    <table class="data-table" style="margin:4px 0 12px">
-                        <tr><td>粗精煤泥（表1）</td><td>${t.coarse || '— 无数据'}</td></tr>
-                        <tr><td>浮精（表2）</td><td>${t.float || '— 无数据'}</td></tr>
-                        <tr><td>灰分密度（表3）</td><td>${t.ad || '— 无数据'}</td></tr>
-                    </table>
-                    <p>• 常见原因：三张表来自不同时间段（例如表1是 6-7 月、表2/表3 只有 5 月），时间窗不重叠；
-                       浮精表是每天化验 1 次，因此只有每次浮精采样之后的 24 小时内才会成行。</p>
-                </div></div>`;
-            return;
-        }
+        const sc = box.querySelector('.brief-scroll');
+        const position = {left:sc?.scrollLeft || 0, top:sc?.scrollTop || 0};
+        const data = this.result, rows = data?.rows || [], e = v => this.escape(v);
         box.innerHTML = `
-            <div class="panel" style="margin-bottom:14px">
-                <div class="panel-body" style="padding:14px 18px">${this.summaryHtml()}</div>
-            </div>
+            <div class="panel brief-toolbar"><div class="panel-body">
+                <div class="brief-controls">
+                    <label>日期（北京时间） <input aria-label="简报日期" type="date" value="${e(this.day || '')}" onchange="BriefPage.changeDay(this.value)"></label>
+                    <button class="btn btn-sm" onclick="BriefPage.changeDay('')">全部记录</button>
+                    <span class="brief-next">下一整点 <strong>${e(this.localTime(data?.next_hour))}</strong></span>
+                    <span class="brief-muted">${this.loading ? '正在读取…' : data ? '后台自动生成 · 每小时一行' : ''}</span>
+                </div>
+                <p class="brief-policy">取整点前最近的已接收数据；无手工值时使用已配置的在线仪表默认值。点击时间查看来源和缺项原因。</p>
+                ${this.error ? `<p class="brief-error" role="alert">${e(this.error)}${data ? ' 当前保留上次读取结果。' : ''}</p>` : ''}
+            </div></div>
             <div class="panel">
-                <div class="panel-header">
-                    <h3>三表 1h 对齐明细</h3>
-                    <div class="panel-header-actions">
-                        <span style="color:var(--text-muted);font-size:12px">共 ${rows.length} 行 · 表头吸顶，可直接下拉浏览</span>
-                    </div>
-                </div>
+                <div class="panel-header"><h3>小时推测明细</h3>
+                    <span class="brief-muted">共 ${data?.total ?? 0} 行 · 最新在前 · 左右滑动查看全部指标</span></div>
                 <div class="panel-body" style="padding:0">
-                    <div class="brief-scroll" id="brief-scroll">${this._tableHtml()}</div>
+                    ${rows.length ? `<div class="brief-scroll"><table class="data-table brief-table hourly-brief-table">
+                        <thead><tr><th>整点时间</th>${data.columns.map(c => `<th>${e(c.label)}${c.unit ? `<small>${e(c.unit)}</small>` : ''}</th>`).join('')}</tr></thead>
+                        <tbody>${rows.map((row, index) => `<tr>
+                            <td><button class="brief-hour" onclick="BriefPage.showSources(${index})" aria-label="查看 ${e(this.localTime(row.hour))} 数据来源">${e(this.localTime(row.hour).slice(0,16))}</button></td>
+                            ${data.columns.map(c => {
+                                const cell = row.cells[c.key], note = this.note(cell);
+                                return `<td class="brief-cell-${e(cell?.status || 'missing')}" title="${e([c.label, note, cell?.source, this.localTime(cell?.observed_at)].filter(Boolean).join(' · '))}">
+                                    <span class="brief-value">${e(this.value(cell, c.key))}</span>
+                                    ${note ? `<small class="brief-cell-note">${e(note)}</small>` : ''}</td>`;
+                            }).join('')}</tr>`).join('')}</tbody>
+                    </table></div>` : `<div class="brief-empty">
+                        <strong>${this.loading ? '正在读取小时简报' : this.error ? '暂时无法读取简报' : '暂无小时记录'}</strong>
+                        <p>${data?.next_hour ? `后台将在 ${e(this.localTime(data.next_hour))} 生成下一行。` : '等待后台任务就绪。'}</p>
+                        <p class="brief-muted">从功能启用后的下一个整点开始记录；关闭网页后，服务运行期间仍会继续生成。</p>
+                    </div>`}
                 </div>
-            </div>`;
-        // 简报按时间升序，263 行不滚到底等于看不到当天数据。
-        // 用 rAF 等布局完成：页面若正处于隐藏状态（从导入页生成时就是这样），
-        // 此时 scrollHeight/clientHeight 都是 0，直接设 scrollTop 会无效。
-        this.scrollToLatest();
-    },
-
-    scrollToLatest() {
-        requestAnimationFrame(() => {
-            const sc = document.getElementById('brief-scroll');
-            if (sc && sc.scrollHeight > sc.clientHeight) sc.scrollTop = sc.scrollHeight;
-        });
-    },
-
-    // 0 行分诊（与独立页空状态同一套文案，供导入页生成后弹窗复用）
-    emptyHintHtml() {
-        const t = this._lastTs();
-        return `
-            <div style="line-height:2;font-size:13px">
-                <p><strong>未生成任何行</strong>，原因如下：</p>
-                <p>• 成行规则：某一小时要成行，<strong>粗精煤泥 / 浮精 / 灰分密度三张表都必须在该小时结束前 24 小时内各有一条记录</strong>；
-                   任一表超窗，该小时整行跳过（不再用陈旧数据续传凑行）。</p>
-                <p>• 本机各表最近一条记录：</p>
-                <table class="data-table" style="margin:4px 0 12px">
-                    <tr><td>粗精煤泥（表1）</td><td>${t.coarse || '— 无数据'}</td></tr>
-                    <tr><td>浮精（表2）</td><td>${t.float || '— 无数据'}</td></tr>
-                    <tr><td>灰分密度（表3）</td><td>${t.ad || '— 无数据'}</td></tr>
-                </table>
-                <p>• 常见原因：三张表来自不同时间段（例如表1是 6-7 月、表2/表3 只有 5 月），时间窗不重叠；
-                   浮精表是每天化验 1 次，因此只有每次浮精采样之后的 24 小时内才会成行。</p>
-            </div>`;
-    },
-
-    _showEmptyHint() {
-        const t = this._lastTs();
-        const empty = [t.coarse, t.float, t.ad].filter(x => !x).length;
-        if (empty > 0) {
-            App.showToast(`三表数据不齐（粗精煤泥 ${t.coarse || '无'} / 浮精 ${t.float || '无'} / 灰分密度 ${t.ad || '无'}），请先导入缺失的表`, 'warning');
-        } else {
-            App.showToast(`三表时间窗未落在同一天内，无法成行。各表最近：粗精煤泥 ${t.coarse} / 浮精 ${t.float} / 灰分密度 ${t.ad}`
-                + `（成行规则：三表在该小时内 24h 内均有记录）`, 'warning');
-        }
-    },
-
-    // 生成后弹窗里的预览（最近 N 行，可下拉）
-    previewHtml(n) {
-        const rows = (this.result && this.result.rows) || [];
-        const headers = (this.result && this.result.headers) || [];
-        if (!rows.length) return '';
-        const tail = rows.slice(-Math.min(n || 20, rows.length));
-        const startIdx = rows.length - tail.length + 1;
-        const thead = `<tr><th>#</th>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
-        const tbody = tail.map((row, i) =>
-            `<tr><td>${startIdx + i}</td>${row.map(c => `<td>${c === '' ? '-' : c}</td>`).join('')}</tr>`).join('');
-        return `
-            <div style="margin:12px 0 6px;color:var(--text-secondary);font-size:12px">
-                预览：最近 ${tail.length} 行（共 ${rows.length} 行）
             </div>
-            <div class="brief-scroll" style="max-height:38vh">
-                <table class="data-table brief-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table>
-            </div>`;
+            ${(data?.total || 0) > 100 ? `<div class="brief-pagination">
+                <button class="btn" ${this.offset === 0 ? 'disabled' : ''} onclick="BriefPage.pageBy(-1)">上一页</button>
+                <span>第 ${Math.floor(this.offset / 100) + 1} 页</span>
+                <button class="btn" ${this.offset + 100 >= data.total ? 'disabled' : ''} onclick="BriefPage.pageBy(1)">下一页</button></div>` : ''}`;
+        const current = box.querySelector('.brief-scroll');
+        if (current) { current.scrollLeft = position.left; current.scrollTop = position.top; }
     },
-
-    exportExcel() {
-        const brief = this.result;
-        if (!brief || !brief.rows.length) { App.showToast('请先生成推测简报', 'warning'); return; }
-        const aoa = [brief.headers, ...brief.rows];
-        const ws = XLSX.utils.aoa_to_sheet(aoa);
-        ws['!cols'] = brief.headers.map(() => ({ wch: 16 }));
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, '推测简报');
-        XLSX.writeFile(wb, '推测简报_1h对齐.xlsx');
-        App.showToast(`推测简报已导出（${brief.rows.length} 行）`, 'success');
+    showSources(index) {
+        const row = this.result?.rows[index];
+        if (!row) return;
+        const e = v => this.escape(v);
+        App.openModal('整点数据来源 · ' + this.localTime(row.hour).slice(0,16),
+            `<p class="brief-muted">生成时间：${e(this.localTime(row.generated_at))} · 此行已保存，后续补录不会改写。</p>
+            ${row.model ? `<p class="brief-muted">模型：${e(row.model.method?.toUpperCase())} · 训练时间 ${e(row.model.trained_at)} · ${e(row.model.n)} 条训练记录</p>` : ''}
+            <div class="brief-source-scroll"><table class="data-table">
+            <thead><tr><th>指标</th><th>值</th><th>来源 / 采样时间</th><th>说明</th></tr></thead>
+            <tbody>${this.result.columns.map(c => {
+                const cell = row.cells[c.key];
+                return `<tr><td>${e(c.label)}</td><td>${e(this.value(cell,c.key))} ${e(c.unit)}</td>
+                <td>${e(cell?.source || '—')}<br><small>${e(this.localTime(cell?.observed_at))}</small></td>
+                <td>${e(this.note(cell) || '正常')}${cell?.item_id ? `<br><small>${e(cell.item_id)}</small>` : ''}
+                ${cell?.components ? `<br><small>${Object.entries(cell.components).map(([name, part]) => e(name + '：' + this.localTime(part.observed_at) + (part.reason ? ' · ' + part.reason : ''))).join('<br>')}</small>` : ''}</td></tr>`;
+            }).join('')}</tbody></table></div>`,
+            '<button class="btn" onclick="App.closeModal()">关闭</button>');
+    },
+    async exportExcel() {
+        const data = this.result;
+        if (!data?.rows.length) { App.showToast('当前列表暂无可导出的小时记录', 'warning'); return; }
+        const params = new URLSearchParams();
+        data.rows.forEach(row => params.append('hour', row.hour));
+        try {
+            const response = await fetch((window.Api?.base || '/api/v1') + '/hourly-brief/export?' + params,
+                {cache:'no-store', signal:AbortSignal.timeout(20000)});
+            if (!response.ok) throw new Error('导出失败，请稍后重试');
+            const url = URL.createObjectURL(await response.blob());
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = '小时推测简报_' + (this.day || '全部') + '_第' + (Math.floor(this.offset/100)+1) + '页.xlsx';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+            App.showToast('已导出当前页 ' + data.rows.length + ' 行及来源说明', 'success');
+        } catch (error) { App.showToast(error.message || '导出失败', 'error'); }
     },
 };

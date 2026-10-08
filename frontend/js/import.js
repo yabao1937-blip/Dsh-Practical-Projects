@@ -1042,34 +1042,10 @@ const ImportPage = {
         App.showToast('模板已下载：' + tpl.name, 'success');
     },
 
-    // ========================================
-    // 推测简报：三表 1h 对齐 + 建议密度 + 粗精煤泥灰分模型推测
-    // ========================================
-    // 三表各自最近一条记录的时间（用于 0 行时告诉用户到底缺哪张表）
-    _briefLastTs() {
-        const last = arr => {
-            let m = '';
-            (arr || []).forEach(r => { const t = (r && (r.timestamp || r.ts)) || ''; if (t > m) m = t; });
-            return m;
-        };
-        const ad = (App.store.calcLogs || []).filter(l => l.calc_type === 'ash_density');
-        return { coarse: last(App.store.coarseCoal), float: last(App.store.floatCoal), ad: last(ad) };
-    },
-
-    // 生成推测简报：生成后弹窗给「摘要 + 最近 20 行预览」，完整表格在「推测简报」独立页查看。
-    // 原来把 263 行 × 17 列塞进 800px 宽的弹窗，实测只能看到全部列宽的 38%，必须横向拉，
-    // 已改为独立整页（整页宽度 + 表头吸顶 + 直接下拉浏览）。
+    // 小时简报由后台整点生成，导入页只提供查看入口。
     generateBrief() {
         if (typeof BriefPage === 'undefined') { App.showToast('简报模块未加载，请刷新页面', 'error'); return; }
-        BriefPage.generate();
-        const brief = BriefPage.result || { rows: [] };
-        this.briefResult = brief;          // 兼容旧引用
-        if (!brief.rows.length) return;    // 0 行：分诊弹窗与提示由 BriefPage 给出
-        App.openModal('推测简报（三表1h对齐）',
-            BriefPage.summaryHtml() + BriefPage.previewHtml(20),
-            '<button class="btn btn-primary" onclick="App.closeModal(); App.goToPage(\'page-brief\')">在简报页查看全部</button>' +
-            '<button class="btn" onclick="BriefPage.exportExcel()">导出Excel</button>' +
-            '<button class="btn" onclick="App.closeModal()">关闭</button>');
+        App.goToPage('page-brief');
     },
 
     // 兼容旧入口（独立页未加载时退化为提示）

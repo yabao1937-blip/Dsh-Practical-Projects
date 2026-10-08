@@ -1,0 +1,737 @@
+{
+  "columns": [
+    {
+      "key": "raw_ash",
+      "label": "原煤灰分",
+      "unit": "%"
+    },
+    {
+      "key": "coal_amount",
+      "label": "入洗原煤量",
+      "unit": "t/h"
+    },
+    {
+      "key": "systems",
+      "label": "系统运行状态",
+      "unit": ""
+    },
+    {
+      "key": "desliming",
+      "label": "脱粉系统",
+      "unit": ""
+    },
+    {
+      "key": "level",
+      "label": "精磁尾液位",
+      "unit": "%"
+    },
+    {
+      "key": "coarse_amount",
+      "label": "粗精煤泥量",
+      "unit": "t/h"
+    },
+    {
+      "key": "raw_slime",
+      "label": "原煤煤泥含量",
+      "unit": "%"
+    },
+    {
+      "key": "coarse_ash",
+      "label": "粗精煤泥灰分",
+      "unit": "%"
+    },
+    {
+      "key": "heavy_ash",
+      "label": "重介精煤灰分",
+      "unit": "%"
+    },
+    {
+      "key": "heavy_amount",
+      "label": "重介精煤量",
+      "unit": "t/h"
+    },
+    {
+      "key": "float_ash",
+      "label": "浮精灰分",
+      "unit": "%"
+    },
+    {
+      "key": "float_amount",
+      "label": "浮精量",
+      "unit": "t/h"
+    },
+    {
+      "key": "float_press",
+      "label": "浮精压滤机运行",
+      "unit": ""
+    },
+    {
+      "key": "reagent",
+      "label": "药剂量",
+      "unit": ""
+    },
+    {
+      "key": "density",
+      "label": "当前分选密度",
+      "unit": "g/cm³"
+    },
+    {
+      "key": "total_ash",
+      "label": "总灰分",
+      "unit": "%"
+    },
+    {
+      "key": "suggested_density",
+      "label": "建议密度",
+      "unit": "g/cm³"
+    }
+  ],
+  "rows": [
+    {
+      "hour": "2026-10-08T02:00:00.000+00:00",
+      "generated_at": "2026-10-08T02:00:00.709+00:00",
+      "cells": {
+        "raw_ash": {
+          "value": 42.465309143066406,
+          "source": "KEPServer",
+          "observed_at": "2026-10-07T04:01:49.980+00:00",
+          "status": "held",
+          "reason": "设备停机 · 沿用上次非零读数",
+          "raw_value": 0,
+          "retained_sample": {
+            "key": "tag_7909d678396ccde5c0d2",
+            "name": "202/ASH_R_INS · r射线在线测灰瞬时值",
+            "node_id": "ns=2;s=TIA_3_1.TIA_3_1.202/ASH_R_INS",
+            "unit": "",
+            "raw_value": 42.465309143066406,
+            "value": 42.465309143066406,
+            "status_code": 0,
+            "quality": "good",
+            "issue": null,
+            "source_at": "2026-10-07T04:01:38.339+00:00",
+            "server_at": "2026-10-07T04:01:38.339+00:00",
+            "received_at": "2026-10-07T04:01:49.980+00:00",
+            "definition_id": "45af53e2fcd814e8292d83b66eface4cec8fa35db5ebed35319467a780b668e1"
+          },
+          "item_id": "TIA_3_1.TIA_3_1.202/ASH_R_INS",
+          "point_key": "tag_7909d678396ccde5c0d2",
+          "source_id": "kepserver-main",
+          "sample": {
+            "key": "tag_7909d678396ccde5c0d2",
+            "name": "202/ASH_R_INS · r射线在线测灰瞬时值",
+            "node_id": "ns=2;s=TIA_3_1.TIA_3_1.202/ASH_R_INS",
+            "unit": "",
+            "raw_value": 0.0,
+            "value": 0.0,
+            "status_code": 0,
+            "quality": "good",
+            "issue": null,
+            "source_at": "2026-10-08T01:59:50.104+00:00",
+            "server_at": "2026-10-08T01:59:50.104+00:00",
+            "received_at": "2026-10-08T01:59:59.558+00:00",
+            "definition_id": "45af53e2fcd814e8292d83b66eface4cec8fa35db5ebed35319467a780b668e1",
+            "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+          },
+          "unit": "%"
+        },
+        "coal_amount": {
+          "value": 667.0372314453125,
+          "source": "KEPServer",
+          "observed_at": "2026-10-08T01:58:53.028+00:00",
+          "status": "held",
+          "reason": "设备停机 · 沿用上次非零读数",
+          "raw_value": 0,
+          "retained_sample": {
+            "key": "tag_f87050e7c1b861b8ee9d",
+            "name": "301/COAL_CAP · 瞬时带煤量",
+            "node_id": "ns=2;s=TIA_3_1.TIA_3_1.301/COAL_CAP",
+            "unit": "",
+            "raw_value": 667.0372314453125,
+            "value": 667.0372314453125,
+            "status_code": 0,
+            "quality": "good",
+            "issue": null,
+            "source_at": "2026-10-08T01:58:43.554+00:00",
+            "server_at": "2026-10-08T01:58:43.554+00:00",
+            "received_at": "2026-10-08T01:58:53.028+00:00",
+            "definition_id": "2383e1d861af564dec208fc71a5db8bce9bae96308c72a29ddb3f57bc039680c",
+            "batch_id": "10df5427728e47208875849c14d1db31"
+          },
+          "item_id": "TIA_3_1.TIA_3_1.301/COAL_CAP",
+          "point_key": "tag_f87050e7c1b861b8ee9d",
+          "source_id": "kepserver-main",
+          "sample": {
+            "key": "tag_f87050e7c1b861b8ee9d",
+            "name": "301/COAL_CAP · 瞬时带煤量",
+            "node_id": "ns=2;s=TIA_3_1.TIA_3_1.301/COAL_CAP",
+            "unit": "",
+            "raw_value": 0.0,
+            "value": 0.0,
+            "status_code": 0,
+            "quality": "good",
+            "issue": null,
+            "source_at": "2026-10-08T01:59:50.104+00:00",
+            "server_at": "2026-10-08T01:59:50.104+00:00",
+            "received_at": "2026-10-08T01:59:59.558+00:00",
+            "definition_id": "2383e1d861af564dec208fc71a5db8bce9bae96308c72a29ddb3f57bc039680c",
+            "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+          },
+          "unit": "t/h"
+        },
+        "systems": {
+          "value": {
+            "401": true,
+            "402": true,
+            "A": false,
+            "B": true
+          },
+          "source": "KEPServer",
+          "observed_at": null,
+          "status": "good",
+          "reason": "",
+          "components": {
+            "401": {
+              "value": true,
+              "source": "KEPServer",
+              "observed_at": "2026-10-08T01:59:59.558+00:00",
+              "status": "good",
+              "reason": "",
+              "item_id": "TIA_3_3.TIA_3_3.478/if_prod",
+              "point_key": "tag_9b0d4848650ae61b7902",
+              "source_id": "kepserver-main",
+              "sample": {
+                "key": "tag_9b0d4848650ae61b7902",
+                "name": "478/if_prod · 运行信号",
+                "node_id": "ns=2;s=TIA_3_3.TIA_3_3.478/if_prod",
+                "unit": "",
+                "raw_value": true,
+                "value": true,
+                "status_code": 0,
+                "quality": "good",
+                "issue": null,
+                "source_at": "2026-10-08T01:59:50.119+00:00",
+                "server_at": "2026-10-08T01:59:50.119+00:00",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "definition_id": "f5a8eff14ed85c699c74910e864c80208dce20ac31e8462408b7fb19f901ba09",
+                "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+              },
+              "unit": ""
+            },
+            "402": {
+              "value": true,
+              "source": "KEPServer",
+              "observed_at": "2026-10-08T01:59:59.558+00:00",
+              "status": "good",
+              "reason": "",
+              "item_id": "TIA_3_3.TIA_3_3.479/if_prod",
+              "point_key": "tag_8afad1e9566de559e4c3",
+              "source_id": "kepserver-main",
+              "sample": {
+                "key": "tag_8afad1e9566de559e4c3",
+                "name": "479/if_prod · 运行信号",
+                "node_id": "ns=2;s=TIA_3_3.TIA_3_3.479/if_prod",
+                "unit": "",
+                "raw_value": true,
+                "value": true,
+                "status_code": 0,
+                "quality": "good",
+                "issue": null,
+                "source_at": "2026-10-08T01:59:50.119+00:00",
+                "server_at": "2026-10-08T01:59:50.119+00:00",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "definition_id": "a2a3ceb4973a597ac134e3a6912e5f5b55cfc854481ee88fe58fb8553dbbf303",
+                "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+              },
+              "unit": ""
+            },
+            "A": {
+              "value": false,
+              "source": "KEPServer",
+              "observed_at": "2026-10-08T01:59:59.558+00:00",
+              "status": "good",
+              "reason": "",
+              "item_id": "TIA_4_2.TIA_4_2.A345/if_prod",
+              "point_key": "tag_4a0972486bc537848b1a",
+              "source_id": "kepserver-main",
+              "sample": {
+                "key": "tag_4a0972486bc537848b1a",
+                "name": "A345/if_prod · 运行信号",
+                "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A345/if_prod",
+                "unit": "",
+                "raw_value": false,
+                "value": false,
+                "status_code": 0,
+                "quality": "good",
+                "issue": null,
+                "source_at": "2026-10-08T01:59:50.104+00:00",
+                "server_at": "2026-10-08T01:59:50.104+00:00",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "definition_id": "a3d41b6c571a49f5facc46aeee16ad8ed737b7523ab71e8b119564dc814383ae",
+                "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+              },
+              "unit": ""
+            },
+            "B": {
+              "value": true,
+              "source": "KEPServer",
+              "observed_at": "2026-10-08T01:59:59.558+00:00",
+              "status": "good",
+              "reason": "",
+              "item_id": "TIA_4_2.TIA_4_2.A346/if_prod",
+              "point_key": "tag_824f8fdb62e4f87e5040",
+              "source_id": "kepserver-main",
+              "sample": {
+                "key": "tag_824f8fdb62e4f87e5040",
+                "name": "A346/if_prod · 运行信号",
+                "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A346/if_prod",
+                "unit": "",
+                "raw_value": true,
+                "value": true,
+                "status_code": 0,
+                "quality": "good",
+                "issue": null,
+                "source_at": "2026-10-08T01:59:50.104+00:00",
+                "server_at": "2026-10-08T01:59:50.104+00:00",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "definition_id": "3a3ea691d175d35e0f577bfb8dd838f13f20c2681eefc776c7e67e34db8ea096",
+                "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+              },
+              "unit": ""
+            }
+          }
+        },
+        "desliming": {
+          "value": {
+            "473": false,
+            "474": false
+          },
+          "source": "KEPServer",
+          "observed_at": null,
+          "status": "good",
+          "reason": "",
+          "components": {
+            "473": {
+              "value": false,
+              "source": "KEPServer",
+              "observed_at": "2026-10-08T01:59:59.558+00:00",
+              "status": "good",
+              "reason": "",
+              "item_id": "TIA_3_3.TIA_3_3.473/if_prod",
+              "point_key": "tag_3a82e49b2a019451078b",
+              "source_id": "kepserver-main",
+              "sample": {
+                "key": "tag_3a82e49b2a019451078b",
+                "name": "473/if_prod · 运行信号",
+                "node_id": "ns=2;s=TIA_3_3.TIA_3_3.473/if_prod",
+                "unit": "",
+                "raw_value": false,
+                "value": false,
+                "status_code": 0,
+                "quality": "good",
+                "issue": null,
+                "source_at": "2026-10-08T01:59:50.119+00:00",
+                "server_at": "2026-10-08T01:59:50.119+00:00",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "definition_id": "28595b25eb48567136abb134e5230d1518010851625c537ac061a1689305d393",
+                "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+              },
+              "unit": ""
+            },
+            "474": {
+              "value": false,
+              "source": "KEPServer",
+              "observed_at": "2026-10-08T01:59:59.558+00:00",
+              "status": "good",
+              "reason": "",
+              "item_id": "TIA_3_3.TIA_3_3.474/if_prod",
+              "point_key": "tag_caf82182c2980109b2de",
+              "source_id": "kepserver-main",
+              "sample": {
+                "key": "tag_caf82182c2980109b2de",
+                "name": "474/if_prod · 运行信号",
+                "node_id": "ns=2;s=TIA_3_3.TIA_3_3.474/if_prod",
+                "unit": "",
+                "raw_value": false,
+                "value": false,
+                "status_code": 0,
+                "quality": "good",
+                "issue": null,
+                "source_at": "2026-10-08T01:59:50.119+00:00",
+                "server_at": "2026-10-08T01:59:50.119+00:00",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "definition_id": "28f5e5bd434bc80322128596b8af377b308ea3608f91a549e8cb1942e498c1fa",
+                "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+              },
+              "unit": ""
+            }
+          }
+        },
+        "float_press": {
+          "value": {
+            "A415": false,
+            "A416": false,
+            "A417": false,
+            "A418": false
+          },
+          "source": "KEPServer",
+          "observed_at": null,
+          "status": "good",
+          "reason": "",
+          "components": {
+            "A415": {
+              "value": false,
+              "source": "KEPServer",
+              "observed_at": "2026-10-08T01:59:59.558+00:00",
+              "status": "good",
+              "reason": "",
+              "item_id": "TIA_4_2.TIA_4_2.A415/YL_STATE",
+              "point_key": "tag_203c19d26f7790a77555",
+              "source_id": "kepserver-main",
+              "sample": {
+                "key": "tag_203c19d26f7790a77555",
+                "name": "A415/YL_STATE · 压滤机运行状态",
+                "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A415/YL_STATE",
+                "unit": "",
+                "raw_value": false,
+                "value": false,
+                "status_code": 0,
+                "quality": "good",
+                "issue": null,
+                "source_at": "2026-10-08T01:59:50.104+00:00",
+                "server_at": "2026-10-08T01:59:50.104+00:00",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "definition_id": "4b7403867a0e1d9277ec35ac49fe78f61a22d4b7a760f0e0b1cf2ec0f622029d",
+                "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+              },
+              "unit": ""
+            },
+            "A416": {
+              "value": false,
+              "source": "KEPServer",
+              "observed_at": "2026-10-08T01:59:59.558+00:00",
+              "status": "good",
+              "reason": "",
+              "item_id": "TIA_4_2.TIA_4_2.A416/YL_STATE",
+              "point_key": "tag_14be43f7bf9c0e155dba",
+              "source_id": "kepserver-main",
+              "sample": {
+                "key": "tag_14be43f7bf9c0e155dba",
+                "name": "A416/YL_STATE · 压滤机运行状态",
+                "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A416/YL_STATE",
+                "unit": "",
+                "raw_value": false,
+                "value": false,
+                "status_code": 0,
+                "quality": "good",
+                "issue": null,
+                "source_at": "2026-10-08T01:59:50.104+00:00",
+                "server_at": "2026-10-08T01:59:50.104+00:00",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "definition_id": "968e95c5375608b8e8a66f5c883821748604a2bb1eaa02cb3d3491fea7deacb0",
+                "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+              },
+              "unit": ""
+            },
+            "A417": {
+              "value": false,
+              "source": "KEPServer",
+              "observed_at": "2026-10-08T01:59:59.558+00:00",
+              "status": "good",
+              "reason": "",
+              "item_id": "TIA_4_2.TIA_4_2.A417/YL_STATE",
+              "point_key": "tag_befe2d5ac856e90aeb46",
+              "source_id": "kepserver-main",
+              "sample": {
+                "key": "tag_befe2d5ac856e90aeb46",
+                "name": "A417/YL_STATE · 压滤机运行状态",
+                "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A417/YL_STATE",
+                "unit": "",
+                "raw_value": false,
+                "value": false,
+                "status_code": 0,
+                "quality": "good",
+                "issue": null,
+                "source_at": "2026-10-08T01:59:50.104+00:00",
+                "server_at": "2026-10-08T01:59:50.104+00:00",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "definition_id": "7054bc6ea8c9e08b7b667b4233b6e5509854cc977410c58b0d32fa59577b905b",
+                "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+              },
+              "unit": ""
+            },
+            "A418": {
+              "value": false,
+              "source": "KEPServer",
+              "observed_at": "2026-10-08T01:59:59.558+00:00",
+              "status": "good",
+              "reason": "",
+              "item_id": "TIA_4_2.TIA_4_2.A418/YL_STATE",
+              "point_key": "tag_f380141208e1df23e026",
+              "source_id": "kepserver-main",
+              "sample": {
+                "key": "tag_f380141208e1df23e026",
+                "name": "A418/YL_STATE · 压滤机运行状态",
+                "node_id": "ns=2;s=TIA_4_2.TIA_4_2.A418/YL_STATE",
+                "unit": "",
+                "raw_value": false,
+                "value": false,
+                "status_code": 0,
+                "quality": "good",
+                "issue": null,
+                "source_at": "2026-10-08T01:59:50.104+00:00",
+                "server_at": "2026-10-08T01:59:50.104+00:00",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "definition_id": "8b49292fc73e027a57b490c43a0c80627ad0ab0731167849efaa5662b284a8b0",
+                "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+              },
+              "unit": ""
+            }
+          }
+        },
+        "density": {
+          "value": 1.2344560623168945,
+          "source": "KEPServer · A303/A304 平均",
+          "observed_at": "2026-10-08T01:59:59.558+00:00",
+          "status": "good",
+          "reason": "",
+          "sample": {
+            "value": 1.2344560623168945,
+            "quality": "good",
+            "issue": null,
+            "received_at": "2026-10-08T01:59:59.558+00:00",
+            "source_at": null,
+            "server_at": null,
+            "components": [
+              {
+                "label": "A303",
+                "item_id": "TIA_4_1.TIA_4_1.A303/MD",
+                "point_key": "tag_f2b50db6a8687fe7c098",
+                "value": 1.0,
+                "weight": 0.5,
+                "unit": "",
+                "available": true,
+                "status": "good",
+                "quality": "good",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "source_at": "2026-10-08T01:59:50.104+00:00",
+                "server_at": "2026-10-08T01:59:50.104+00:00"
+              },
+              {
+                "label": "A304",
+                "item_id": "TIA_4_1.TIA_4_1.A304/MD",
+                "point_key": "tag_90a110a2c83b3bf19dd7",
+                "value": 1.468912124633789,
+                "weight": 0.5,
+                "unit": "",
+                "available": true,
+                "status": "good",
+                "quality": "good",
+                "received_at": "2026-10-08T01:59:59.558+00:00",
+                "source_at": "2026-10-08T01:59:50.104+00:00",
+                "server_at": "2026-10-08T01:59:50.104+00:00"
+              }
+            ],
+            "formula": "(A303/MD + A304/MD) ÷ 2",
+            "unit": "",
+            "definition_id": "tag_f2b50db6a8687fe7c098:e52857fc181408b11d1f202fed3043bc32b20f855b44dfe75cd0bbe9ead04392|tag_90a110a2c83b3bf19dd7:27a1622b77ac2377e88fb5c50733c7ce9cb8bb34756e0b78292753502ed3418a"
+          }
+        },
+        "reagent": {
+          "value": null,
+          "source": "",
+          "observed_at": null,
+          "status": "missing",
+          "reason": "尚未配置药剂量测点、手工录入或默认值"
+        },
+        "level": {
+          "value": 59.34606170654297,
+          "source": "KEPServer",
+          "observed_at": "2026-10-08T01:59:59.558+00:00",
+          "status": "good",
+          "reason": "",
+          "item_id": "TIA_3_5.TIA_3_5.JMCWC/LEVEL_B",
+          "point_key": "tag_543c440c9a90e0e2daae",
+          "source_id": "kepserver-main",
+          "sample": {
+            "key": "tag_543c440c9a90e0e2daae",
+            "name": "JMCWC/LEVEL_B · 当前液位%",
+            "node_id": "ns=2;s=TIA_3_5.TIA_3_5.JMCWC/LEVEL_B",
+            "unit": "%",
+            "raw_value": 59.34606170654297,
+            "value": 59.34606170654297,
+            "status_code": 0,
+            "quality": "good",
+            "issue": null,
+            "source_at": "2026-10-08T01:59:50.104+00:00",
+            "server_at": "2026-10-08T01:59:50.104+00:00",
+            "received_at": "2026-10-08T01:59:59.558+00:00",
+            "definition_id": "be2932eee1ca1353a8356a81c39d88c4adce800860d8afd3860f47e01acb3cbe",
+            "batch_id": "ffa79205da8a4ed487b3d94950450deb"
+          },
+          "unit": "%"
+        },
+        "coarse_amount": {
+          "value": 20,
+          "source": "在线仪表手工值",
+          "observed_at": "2026-09-21T06:19:39.149+00:00",
+          "status": "manual",
+          "reason": "",
+          "created_at": "2026-09-21T06:19:39.149+00:00",
+          "input_path": "amountInputs.coarseAmount"
+        },
+        "raw_slime": {
+          "value": null,
+          "source": "",
+          "observed_at": null,
+          "status": "missing",
+          "reason": "无原煤煤泥含量手工补录或默认值"
+        },
+        "heavy_ash": {
+          "value": 7.758,
+          "source": "在线仪表手工值",
+          "observed_at": "2026-09-21T06:19:24.288+00:00",
+          "status": "manual",
+          "reason": "",
+          "created_at": "2026-09-21T06:19:24.288+00:00",
+          "input_path": "heavyAshInput"
+        },
+        "heavy_amount": {
+          "value": 235.2,
+          "source": "在线仪表默认值",
+          "observed_at": null,
+          "status": "default",
+          "reason": "502 点位单位尚未确认，使用默认值",
+          "default_key": "scale_502"
+        },
+        "float_ash": {
+          "value": 9.85,
+          "source": "在线仪表默认值",
+          "observed_at": null,
+          "status": "default",
+          "reason": "",
+          "default_key": "float_ash"
+        },
+        "float_amount": {
+          "value": 40,
+          "source": "在线仪表手工值",
+          "observed_at": "2026-09-18T01:39:29.957+00:00",
+          "status": "manual",
+          "reason": "",
+          "created_at": "2026-09-18T01:39:29.957+00:00",
+          "input_path": "amountInputs.floatAmount"
+        },
+        "coarse_ash": {
+          "value": 16.577381605060857,
+          "source": "当前保存模型预测",
+          "observed_at": "2026-10-08T02:00:00.000+00:00",
+          "status": "predicted",
+          "reason": "含停机沿用值"
+        },
+        "total_ash": {
+          "value": 8.638987913622008,
+          "source": "三组分加权公式",
+          "observed_at": "2026-10-08T02:00:00.000+00:00",
+          "status": "calculated",
+          "reason": "",
+          "formula": "(重介灰分×重介量 + 浮精灰分×浮精量 + 粗泥灰分×粗泥量) ÷ (重介量 + 浮精量 + 粗泥量)"
+        },
+        "suggested_density": {
+          "value": null,
+          "source": "",
+          "observed_at": null,
+          "status": "missing",
+          "reason": "实测密度超出建议算法适用范围 1.350–1.600，保留实测值"
+        }
+      },
+      "model": {
+        "id": 1,
+        "method": "mlr",
+        "trained_at": "2026-09-22 09:24:38",
+        "train_run_id": null,
+        "n": 152,
+        "model": {
+          "type": "mlr",
+          "intercept": 17.2933153021277,
+          "coefs": [
+            0.08784481417790381,
+            0.00016157314891896096,
+            -0.9164441833201246,
+            0.545809320138201,
+            -0.8387573591617876,
+            0.7684388389477952,
+            0.35593779895722616,
+            -1.210090163580109,
+            1.3379576084691354,
+            -0.10729464464815311
+          ],
+          "imputeMeans": [
+            42.724276315789474,
+            830.4651315789473,
+            0.9671052631578947,
+            0.6644736842105263,
+            0.756578947368421,
+            0.7368421052631579,
+            0.8881578947368421,
+            0.6907894736842105,
+            0.05263157894736842,
+            54.8842105263158
+          ],
+          "means": [
+            42.724276315789474,
+            830.4651315789473,
+            0.9671052631578947,
+            0.6644736842105263,
+            0.756578947368421,
+            0.7368421052631579,
+            0.8881578947368421,
+            0.6907894736842105,
+            0.05263157894736842,
+            54.8842105263158
+          ],
+          "featureNames": [
+            "raw_ash",
+            "coal_amount",
+            "sysA",
+            "sysB",
+            "sys401",
+            "sys402",
+            "desliming473",
+            "desliming474",
+            "is_stoppage",
+            "level"
+          ]
+        }
+      },
+      "model_inputs": {
+        "raw_ash": 42.465309143066406,
+        "coal_amount": 667.0372314453125,
+        "level": 59.34606170654297,
+        "sysA": 0,
+        "sysB": 1,
+        "sys401": 1,
+        "sys402": 1,
+        "desliming473": 0,
+        "desliming474": 0,
+        "is_stoppage": 1
+      },
+      "guidance": null,
+      "settings": {
+        "ashTarget": 8.5,
+        "ashTargetTol": 0.1,
+        "guideScheme": "total",
+        "densityGuide": {
+          "maxStep": 0.02,
+          "deadband": 0.05
+        }
+      },
+      "policy": "hour-boundary-v1"
+    }
+  ],
+  "total": 1,
+  "limit": 100,
+  "offset": 0,
+  "server_time": "2026-10-08T02:00:24.203+00:00",
+  "activated_at": "2026-10-08T01:49:24.757+00:00",
+  "next_hour": "2026-10-08T03:00:00.000+00:00",
+  "policy": "从启用后的下一整点开始；取整点前已收到的最近记录；手工值缺失时使用已配置仪表默认值。"
+}

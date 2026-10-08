@@ -6,6 +6,9 @@ from fastapi.staticfiles import StaticFiles
 from . import auth
 from . import models  # noqa: F401  确保建表前模型已注册
 from .telemetry import models as telemetry_models  # noqa: F401
+from .hourly_brief import models as hourly_brief_models  # noqa: F401
+from .hourly_brief.worker import lifespan as hourly_brief_lifespan
+from .routers.hourly_brief import router as hourly_brief_router
 from .config import APP_VERSION, FRONTEND_DIR
 from .database import Base, engine
 from .observability import install_observability
@@ -22,6 +25,7 @@ app = FastAPI(
     title="重介密控系统",
     description="前后端分离后端：密度推荐 + 精煤灰分监控（coal_records 统一主表）",
     version=APP_VERSION,
+    lifespan=hourly_brief_lifespan,
 )
 install_observability(app)
 
@@ -36,6 +40,7 @@ install_observability(app)
 #   · PUT /state?force=true（整库覆盖/清空）**只接受本机来源**，拿到 token 也不能从别的机器洗库。
 
 app.include_router(health.router, prefix="/api/v1")
+app.include_router(hourly_brief_router, prefix="/api/v1")
 app.include_router(assistant.router, prefix="/api/v1")   # AI解读助手(只读)
 app.include_router(migration.router, prefix="/api/v1")
 app.include_router(settings.router, prefix="/api/v1")

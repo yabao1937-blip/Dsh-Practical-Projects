@@ -713,7 +713,7 @@
             <div class="page-header">
                 <h2>批量数据导入</h2>
                 <div class="page-header-actions">
-                    <button class="btn btn-primary" onclick="ImportPage.generateBrief()">生成推测简报</button>
+                    <button class="btn btn-primary" onclick="ImportPage.generateBrief()">查看小时简报</button>
                 </div>
             </div>
 
@@ -841,14 +841,14 @@
         <!-- ==================== 页面六：推测简报 ==================== -->
         <section class="page" id="page-brief">
             <div class="page-header">
-                <h2>推测简报（三表1h对齐）</h2>
+                <h2>小时推测简报</h2>
                 <div class="page-header-actions">
-                    <button class="btn" onclick="BriefPage.generate()">生成/刷新简报</button>
-                    <button class="btn btn-primary" onclick="BriefPage.exportExcel()">导出Excel</button>
+                    <button class="btn" onclick="BriefPage.generate()">刷新列表</button>
+                    <button class="btn btn-primary" onclick="BriefPage.exportExcel()">导出当前页 Excel</button>
                 </div>
             </div>
             <div id="brief-content">
-                <div class="panel"><div class="panel-body">正在生成…</div></div>
+                <div class="panel"><div class="panel-body">正在读取小时记录…</div></div>
             </div>
         </section>
 
