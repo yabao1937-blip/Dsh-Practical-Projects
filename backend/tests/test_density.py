@@ -81,7 +81,7 @@ def test_guidance_predict_target_is_uncapped_by_law():
     与另外两个量各自的分工（三个都保留）：
       deltaRho        本次发布的一步（≤ maxStep=0.02，人工/自动执行用）
       deltaRhoFull    专家法则意义上的完整修正（法则本身封顶 0.03 = 现场"最多调 0.03"）
-      deltaRhoPredict 推测终点（偏差归零处的密度，只受 1.35~1.60 物理范围限制）
+      deltaRhoPredict 推测终点（偏差归零处的密度）
     """
     st = {"rho_cur": 1.49, "heavy_ash": 8.50, "actual_total": 9.00, "scheme": "total", "tol": 0.1}
     g = compute_density_guidance(st, 8.50)                    # ΔA = +0.50
@@ -89,10 +89,10 @@ def test_guidance_predict_target_is_uncapped_by_law():
     assert abs(g["deltaRhoFull"] + 0.03) < 1e-9               # 法则封顶后的完整修正
     assert abs(g["deltaRhoPredict"] - round(-0.5 / 15, 4)) < 1e-12   # 推测终点 0.0333 > 法则封顶 0.03
     assert abs(g["rhoPredict"] - round(1.49 - 0.5 / 15, 3)) < 1e-9
-    # 推测终点仍受物理范围钳制
-    st2 = dict(st, actual_total=12.0)                         # ΔA = +3.5 → 预测 1.2567 → 钳到 1.35
+    # 以当前密度为基准，不再截断到模拟阶段的固定范围。
+    st2 = dict(st, actual_total=12.0)
     g2 = compute_density_guidance(st2, 8.50)
-    assert g2["rhoPredict"] == 1.35
+    assert g2["rhoPredict"] == 1.257
     assert g2["deltaRhoPredict"] is not None
 
 

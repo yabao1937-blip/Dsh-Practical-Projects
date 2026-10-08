@@ -10,6 +10,7 @@ from sqlalchemy.orm import aliased
 
 from .domain import availability, definition_id, parse_time
 from .derived import DENSITY_AVERAGE_MEMBERS, density_average_points
+from .density_effective import DENSITY_ITEMS, valid_density
 from .models import TelemetryPoint, TelemetryReading
 
 MEMORY = "_display_memory"
@@ -59,8 +60,40 @@ def point_memory(db, point):
     """Bootstrap old installations from history once; new snapshots carry both memories."""
     memory = (point.latest or {}).get(MEMORY)
     if isinstance(memory, dict) and memory.get("definition_id") == definition_id(point.config):
-        return {key: memory.get(key) for key in ("last_valid", "last_nonzero")}
-    return _bootstrap(db, "point", [point], lambda: _point_history(db, point))
+        result = {key: memory.get(key) for key in ("last_valid", "last_nonzero", "last_density", "density_before_hour")}
+    else:
+        result = _bootstrap(db, "point", [point], lambda: _point_history(db, point))
+    if point.config.get("item_id") in DENSITY_ITEMS:
+        if not isinstance(memory, dict) or memory.get("definition_id") != definition_id(point.config) or "last_density" not in memory:
+            result["last_density"] = _bootstrap(db, "density-channel", [point], lambda: density_history(db, point))
+    return result
+
+
+def density_history(db, point, cutoff=None):
+    """Latest same-channel non-1 sample, including non-throttled durable memories."""
+    def accepted(sample):
+        return (usable_at_receipt(sample, point.config) and valid_density(sample.get("value"))
+                and (cutoff is None or parse_time(sample["received_at"]) <= parse_time(cutoff)))
+
+    memory = (point.latest or {}).get(MEMORY) or {}
+    candidates = [s for s in (raw_sample(point.latest), (memory.get("density_before_hour") or {}).get("sample"), memory.get("last_density"),
+                  memory.get("last_valid"), memory.get("last_nonzero")) if accepted(s)]
+    query = select(TelemetryReading).where(
+        TelemetryReading.source_id == point.source_id, TelemetryReading.point_key == point.key,
+        TelemetryReading.sample["definition_id"].as_string() == definition_id(point.config),
+        TelemetryReading.sample["quality"].as_string() == "good",
+        TelemetryReading.sample["value"].as_float() != 1,
+        TelemetryReading.sample["value"].as_float() > 0)
+    if cutoff:
+        query = query.where(TelemetryReading.received_at <= cutoff)
+    latest = newest(*candidates)
+    if latest:
+        query = query.where(TelemetryReading.received_at > latest["received_at"])
+    for row in db.scalars(query.order_by(TelemetryReading.received_at.desc(), TelemetryReading.id.desc()).execution_options(yield_per=64)):
+        if accepted(row.sample):
+            candidates.append({**raw_sample(row.sample), "batch_id": row.batch_id})
+            break
+    return newest(*candidates)
 
 
 def _point_history(db, point):
@@ -88,10 +121,18 @@ def _point_history(db, point):
 
 def remember_point(db, point, sample):
     memory = point_memory(db, point)
+    if point.config.get("item_id") in DENSITY_ITEMS and point.latest:
+        hour = parse_time(sample["received_at"]).replace(minute=0, second=0, microsecond=0)
+        if parse_time(point.latest["received_at"]) < hour:
+            # The scheduler can run just after the first new-hour poll. Keep its
+            # old held input even if history retention removes that old reading.
+            memory["density_before_hour"] = {"hour": hour.isoformat(), "sample": memory.get("last_density")}
     if point.config.get("value_type", "number") == "number" and usable_at_receipt(sample, point.config):
         memory["last_valid"] = newest(memory["last_valid"], raw_sample(sample))
         if sample["value"] != 0:
             memory["last_nonzero"] = newest(memory["last_nonzero"], raw_sample(sample))
+        if point.config.get("item_id") in DENSITY_ITEMS and valid_density(sample["value"]):
+            memory["last_density"] = newest(memory.get("last_density"), raw_sample(sample))
     result = {**raw_sample(sample), MEMORY: {"definition_id": definition_id(point.config), **memory}}
     if point.latest and DENSITY_MEMORY in point.latest:
         result[DENSITY_MEMORY] = point.latest[DENSITY_MEMORY]

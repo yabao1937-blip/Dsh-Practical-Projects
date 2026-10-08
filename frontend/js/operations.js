@@ -9,6 +9,24 @@ window.Operations = {
     _timer: null,
     _reconnectTask: null,
     _reconnectBusy: false,
+    _densityIncidents: {},
+
+    densityAlerts() {
+        const checks = this.telemetry?.density_alarm_checks || [];
+        const ids = new Set(checks.map(c => c.id));
+        for (const id of Object.keys(this._densityIncidents)) if (!ids.has(id)) delete this._densityIncidents[id];
+        return checks.flatMap(check => {
+            const state = this.telemetryFailed ? 'unknown' : check.status;
+            if (state === 'normal') { delete this._densityIncidents[check.id]; return []; }
+            if (state === 'abnormal') this._densityIncidents[check.id] = check;
+            const incident = this._densityIncidents[check.id];
+            const pending = state === 'unknown';
+            return [{id:check.id, level:pending ? '待确认' : '警告',
+                message:pending ? (incident ? incident.message + '；当前数据不可用，尚未确认恢复' :
+                    this.telemetryFailed ? `${check.device} 密度偏差无法判断：采集查询中断` : check.message) : check.message,
+                time:this.time(pending ? incident?.received_at : check.received_at)}];
+        });
+    },
 
     init() {
         this.installReconnectControl();
@@ -156,6 +174,7 @@ window.Operations = {
 
     render() {
         this.renderReconnectControl();
+        if (typeof App.renderAlerts === 'function') App.renderAlerts();
         const serverNames = {checking:'检查中', online:'后端在线', offline:'后端离线', unavailable:'数据库未就绪', local:'单机模式'};
         const server = serverNames[this.serverState];
         this.text('server-status-label', server);

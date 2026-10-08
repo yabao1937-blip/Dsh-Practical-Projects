@@ -1058,23 +1058,48 @@ const App = {
             }
         }
 
-        const count = this.store.alerts.length;
-        document.getElementById('alert-count').textContent = count;
-        document.getElementById('status-alert-count').textContent = count;
-        const zone = document.getElementById('overview-alerts');
-        if (zone) {
-            if (count > 0) {
-                zone.innerHTML = this.store.alerts.map(a =>
-                    `<div class="alert-item">
-                        <span class="alert-level">[${a.level}]</span>
-                        <span class="alert-msg">${a.message}</span>
-                        <span class="alert-time">${a.time}</span>
-                    </div>`
-                ).join('');
-            } else {
-                zone.innerHTML = '';
+        this.renderAlerts();
+    },
+
+    activeAlerts() {
+        return [...(window.Operations?.densityAlerts?.() || []), ...(this.store.alerts || [])];
+    },
+
+    alertListHtml(alerts) {
+        const e = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        return alerts.map(a => `<div class="alert-item"><span class="alert-level">[${e(a.level)}]</span><span class="alert-msg">${e(a.message)}</span><span class="alert-time">${e(a.time)}</span></div>`).join('');
+    },
+
+    renderAlerts() {
+        const alerts = this.activeAlerts(), count = alerts.length;
+        for (const id of ['alert-count','status-alert-count']) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = count;
+        }
+        const badge = document.getElementById('alert-badge');
+        if (badge) {
+            badge.title = count ? alerts.map(a => a.message).join('\n') : '暂无告警';
+            badge.setAttribute('role','button'); badge.tabIndex = 0;
+            badge.setAttribute('aria-label',`告警信息：${count} 条，点击查看`);
+            badge.setAttribute('aria-haspopup','dialog');
+            if (!badge.dataset.alertBound) {
+                badge.dataset.alertBound = '1';
+                badge.addEventListener('click', () => this.showAlerts());
+                badge.addEventListener('keydown', event => {
+                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.showAlerts(); }
+                });
             }
         }
+        const html = this.alertListHtml(alerts);
+        const zone = document.getElementById('overview-alerts');
+        if (zone) zone.innerHTML = html;
+        const open = document.getElementById('active-alert-list');
+        if (open) open.innerHTML = html || '<p>暂无告警。</p>';
+    },
+
+    showAlerts() {
+        this.openModal('当前告警', `<div id="active-alert-list">${this.alertListHtml(this.activeAlerts()) || '<p>暂无告警。</p>'}</div>`,
+            '<button class="btn" onclick="App.closeModal()">关闭</button>');
     },
 
     // 训练回归模型（从精磁尾液位数据训练）
@@ -2034,14 +2059,14 @@ const App = {
         const stepLimit = (this.DENSITY_STEPWISE && g.maxStep > 0) ? g.maxStep : Math.abs(dRhoFull);
         const dRhoStep = Math.max(-stepLimit, Math.min(stepLimit, dRhoFull));
         r.deltaRhoFull = +dRhoFull.toFixed(4);
-        r.rhoTargetFull = Math.max(g.rhoMin, Math.min(g.rhoMax, +(rhoCur + dRhoFull).toFixed(3)));
+        r.rhoTargetFull = +(rhoCur + dRhoFull).toFixed(3);
         // 建议密度（推测值）= 一步到位的终点：按现场确认增益把偏差线性外推归零处的密度。
         // 与 rhoTargetFull 的区别：后者受专家法则封顶 0.03 限制（那是"一次敢走多少"），
-        // 前者是"若一步步走到位最终会落在哪"（只受 1.35~1.60 物理范围限制）。
+        // 前者是按该增益外推的终点；两者均以当前有效密度为基准。
         // 用途：给操作员看系统判断的终点（首页卡片详情里展示）；**不改变**发布的建议步长。
         const dRhoPredict = -(r.deltaA / this.EXPERT_ADJUST.gain);
         r.deltaRhoPredict = +dRhoPredict.toFixed(4);
-        r.rhoPredict = Math.max(g.rhoMin, Math.min(g.rhoMax, +(rhoCur + dRhoPredict).toFixed(3)));
+        r.rhoPredict = +(rhoCur + dRhoPredict).toFixed(3);
         // 经验范围：现场法则封顶 0.03 对应的偏差 = 0.03 × 15 = 0.45%。
         // 超过它说明"一次只敢调 0.03"的经验已不适用（现场此时多半先查扰动源而不是猛动密度），
         // 所以推测值仍显示、但要标注"超出经验范围，仅供参考"。
@@ -2050,7 +2075,7 @@ const App = {
         r.steps = Math.max(1, Math.ceil(Math.abs(dRhoFull) / (stepLimit || 1) - 1e-9));
         r.stepwise = this.DENSITY_STEPWISE && r.steps > 1;
         r.deltaRho = +dRhoStep.toFixed(4);
-        r.rhoNew = Math.max(g.rhoMin, Math.min(g.rhoMax, +(rhoCur + dRhoStep).toFixed(3)));
+        r.rhoNew = +(rhoCur + dRhoStep).toFixed(3);
         r.direction = r.deltaA > 0 ? 'down' : 'up';
         r.reason = scheme === 'heavy'
             ? `重介灰分${r.deltaAHeavy > 0 ? '偏高' : '偏低'} ${Math.abs(r.deltaAHeavy).toFixed(2)}%` +
@@ -2521,12 +2546,8 @@ const App = {
             const lim = this.getDensityGuide();
             const epochNow = (this._densityAutoEpoch || 0);
             const externalChange = (this._densityAutoLastEpoch === undefined) || (epochNow !== this._densityAutoLastEpoch);
-            // 采样/改数/新数据后重算目标密度：ρ目标 = ρ当前 + K×(期望总灰分 − 实际总灰分)（完整修正量，限幅1.35~1.60）
+            // 采样/改数/新数据后以当前密度为基准，按受单步限制的修正量重算目标。
             if (externalChange && g.valid) {
-                const full = +(g.rhoCur + g.deltaRho).toFixed(3);
-                if (full > lim.rhoMax || full < lim.rhoMin) {
-                    this.showToast(`建议修正量超出密度限值，目标钳制到 ${g.rhoNew.toFixed(3)} g/cm³`, 'warning');
-                }
                 this._densityTarget = g.rhoNew;   // 达标时 g.rhoNew = 当前密度 → 保持
                 this._densityAutoLastEpoch = epochNow;
                 this._densityReachedNotified = Math.abs(g.deltaRho) <= 1e-9;

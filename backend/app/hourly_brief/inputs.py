@@ -4,15 +4,14 @@ import math
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
-from sqlalchemy.orm import aliased
 
 from ..models import AutoState, CalcLog, CoalRecord, ManualMeasurement, Setting
 from ..services.resolvers import INSTRUMENT_DEFAULT, measurement_number, manual_valid
 from ..telemetry.derived import FOUR_SYSTEM_MEMBERS, DESLIMING_MEMBERS, FLOAT_PRESS_MEMBERS, DENSITY_AVERAGE_MEMBERS
 from ..telemetry.domain import availability, definition_id, iso_time, parse_time
 from ..telemetry.models import TelemetryPoint, TelemetryReading, TelemetrySource
-from ..telemetry.retained import (MEMORY, DENSITY_MEMORY, density_candidate,
-                                  density_definition, raw_sample, usable_at_receipt)
+from ..telemetry.retained import MEMORY, density_history, raw_sample, usable_at_receipt
+from ..telemetry.density_effective import effective_average
 from .columns import cell
 
 LOCAL = timezone(timedelta(hours=8))
@@ -117,35 +116,17 @@ class Inputs:
         points = [self.point(item) for _, item in DENSITY_AVERAGE_MEMBERS]
         if not all(points) or points[0].source_id != points[1].source_id:
             return cell(reason="A303/A304 密度测点缺失或来源不一致")
-        samples = [self.latest(p) for p in points]
-        current = density_candidate(points, samples)
-        if current and all(self.usable(p, s) for p, s in zip(points, samples)):
-            return cell(current["value"], "KEPServer · A303/A304 平均", current["received_at"],
-                        "good", sample=current)
-        candidates = []
-        memory = (points[0].latest or {}).get(DENSITY_MEMORY) or {}
-        cached = memory.get("sample")
-        if memory.get("definition_id") == density_definition(points) and self.before(cached):
-            candidates.append(cached)
-        if current:
-            candidates.append(current)
-        left, right = aliased(TelemetryReading), aliased(TelemetryReading)
-        query = select(left, right).join(right, (left.source_id == right.source_id) &
-                 (left.batch_id == right.batch_id)).where(
-            left.source_id == points[0].source_id, left.point_key == points[0].key,
-            right.point_key == points[1].key, left.received_at <= self.cutoff,
-            right.received_at <= self.cutoff,
-            left.sample["quality"].as_string() == "good", right.sample["quality"].as_string() == "good"
-        ).order_by(left.received_at.desc()).execution_options(yield_per=64)
-        for a, b in self.db.execute(query):
-            candidate = density_candidate(points, [{**r.sample, "batch_id": r.batch_id} for r in (a, b)])
-            if candidate:
-                candidates.append(candidate)
-                break
-        held = max(candidates, key=lambda s: parse_time(s["received_at"]), default=None)
-        return cell(held["value"] if held else None, "KEPServer · A303/A304 平均",
-                    held["received_at"] if held else None, "held" if held else "missing",
-                    "采集异常 · 沿用上次有效密度" if held else "无有效密度记录", sample=held)
+        items = []
+        for p in points:
+            sample = self.latest(p)
+            items.append(dict(source_id=p.source_id, key=p.key, item_id=p.config["item_id"],
+                unit=p.config.get("unit", ""), definition_id=definition_id(p.config), sample=sample, as_of=self.cutoff,
+                available=self.usable(p, sample), status="good",
+                last_density_sample=density_history(self.db, p, self.cutoff)))
+        effective = effective_average(items)
+        return cell(effective["value"], "KEPServer · A303/A304 平均", effective["received_at"],
+                    effective["status"], effective["reason"], sample=effective,
+                    components=effective["components"], policy=effective["policy"])
 
     def group(self, members):
         parts = {label: self.telemetry(item) for label, item in members}

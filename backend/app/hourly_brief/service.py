@@ -88,14 +88,11 @@ def calculate(cells, store, model_metadata, hour):
         "灰分或煤量无效，或总煤量为零" if total is None else "",
         formula="(重介灰分×重介量 + 浮精灰分×浮精量 + 粗泥灰分×粗泥量) ÷ (重介量 + 浮精量 + 粗泥量)")
     rho = values["density"]
-    if total is None or not numeric(rho):
+    if total is None or not numeric(rho) or rho <= 0:
         cells["suggested_density"] = cell(reason="缺少可计算的总灰分或有效分选密度")
         return features, None
     if set(store.get("_unavailable_settings", [])) & {"ash_target", "ash_target_tol", "guide_scheme", "density_guide"}:
         cells["suggested_density"] = cell(reason="建议参数在整点后发生更新，无法还原当时配置")
-        return features, None
-    if not DENSITY_GUIDE["rhoMin"] <= rho <= DENSITY_GUIDE["rhoMax"]:
-        cells["suggested_density"] = cell(reason="实测密度超出建议算法适用范围 1.350–1.600，保留实测值")
         return features, None
     scheme = "heavy" if store.get("guideScheme") == "heavy" else "total"
     guard_store = deepcopy(store)
@@ -132,14 +129,14 @@ def calculate(cells, store, model_metadata, hour):
 def build_snapshot(db, hour, unavailable_reason=None):
     if unavailable_reason:
         return dict(cells={key: cell(reason=unavailable_reason) for key, _, _ in COLUMNS},
-                    reason=unavailable_reason, policy="hour-boundary-v1")
+                    reason=unavailable_reason, policy="hour-boundary-v2")
     inputs = Inputs(db, hour)
     cells = inputs.collect()
     store, model_metadata = settings_and_model(db, hour, inputs)
     features, guide = calculate(cells, store, model_metadata, hour)
     return dict(cells=cells, model=model_metadata, model_inputs=features, guidance=guide,
                 settings={key: store.get(key) for key in ("ashTarget", "ashTargetTol", "guideScheme", "densityGuide")},
-                policy="hour-boundary-v1")
+                policy="hour-boundary-v2")
 
 
 def tick(now=None, sessions=SessionLocal):

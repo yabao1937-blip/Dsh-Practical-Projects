@@ -9,7 +9,9 @@ from .domain import availability, definition_id, iso_time, parse_time, utc_now
 from .models import TelemetryPoint, TelemetryReading, TelemetrySource
 from .derived import density_average_points, system_status_points
 from .retained import (raw_sample, point_memory, remember_point, remember_density,
-                       density_rows, density_memory, density_definition)
+                       density_rows, density_memory, density_definition, density_history)
+from .density_effective import DENSITY_ITEMS, effective_component, effective_average
+from .density_alerts import density_alarm_checks
 
 
 class CollectorBusy(RuntimeError):
@@ -152,14 +154,23 @@ def latest_view(db, source_id=None, now=None):
         items.append({"source_id": row.source_id, "key": row.key, "name": row.config["name"],
             "device": row.config.get("device", ""), "tag_name": row.config.get("tag_name", ""),
             "description": row.config.get("description", ""), "item_id": row.config.get("item_id", ""),
+            "definition_id": definition_id(row.config),
             "unit": row.config["unit"], "sample": raw_sample(row.latest), "available": usable, "status": reason,
             "last_valid_sample": memory["last_valid"], "last_nonzero_sample": memory["last_nonzero"]})
+        if row.config.get("item_id") in DENSITY_ITEMS:
+            held = memory.get("last_density")
+            if held and parse_time(held["received_at"]) > now:
+                held = density_history(db, row, iso_time(now))
+            items[-1].update(last_density_sample=held, definition_id=definition_id(row.config), as_of=iso_time(now))
+            items[-1]["effective_density"] = effective_component(items[-1])
     averages = density_average_points(items)
     for item in averages:
+        item["effective_density"] = effective_average([p for p in items if p["source_id"] == item["source_id"]])
         rows = density_rows(db, item["source_id"])
         if all(rows):
             item["sample"]["definition_id"] = density_definition(rows)
             item["last_valid_sample"] = density_memory(db, rows)
     return {"checked_at": iso_time(now), "sources": sources, "items": items,
+            "density_alarm_checks": density_alarm_checks(items, now),
             "derived_items": system_status_points(items) + averages,
             "summary": {"points": len(items), "available": sum(p["available"] for p in items)}}

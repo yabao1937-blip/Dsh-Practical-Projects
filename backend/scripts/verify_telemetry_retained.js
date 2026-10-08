@@ -47,7 +47,7 @@ point.sample = {...sample(0),quality:'bad',issue:'bad_quality'}; point.available
 assert.equal(page.pointDisplay(ash).stopped,false,'A bad quality zero is not proof of a stop');
 point.available = true; point.sample = sample(0);
 assert.equal(page.pointDisplay(bind('other')).value,'0 %','Other numeric cards preserve real zeros');
-// Density accepts a genuine 1; only an unavailable result triggers retention.
+// Unrelated numeric tags retain their old semantics; the new rule targets A303/A304.
 const density = bind('density-current');
 point.sample = sample(1.48); assert.equal(page.pointDisplay(density).value,'1.48 %');
 point.sample = sample(1,later); assert.equal(page.pointDisplay(density).value,'1 %');
@@ -55,21 +55,36 @@ point.available = false; point.sample = {...sample(null),quality:'bad',issue:'ba
 let held = page.pointDisplay(density);
 assert.equal(held.value,'1 %'); assert.equal(held.available,false); assert.equal(held.held,true);
 ops.telemetryFailed = true; ops.telemetry = null;
-assert.equal(page.pointDisplay(density).value,'1 %','Query failure retains the displayed density');
+assert.equal(page.pointDisplay(density).value,'—','Missing point identity must never reuse a legacy density cache');
 // Reload while the very first request is unavailable: use the persisted display memory.
 const reloaded = setup();
 reloaded.page.pointChoices['density-current'] = page.pointChoices['density-current'];
 reloaded.ops.telemetry = null; reloaded.ops.telemetryFailed = true;
-assert.equal(reloaded.page.pointDisplay(density).value,'1 %');
+assert.equal(reloaded.page.pointDisplay(density).value,'—');
 reloaded.page.pointChoices['density-current'] = JSON.stringify(['other-source','ash']);
 assert.equal(reloaded.page.pointDisplay(density).value,'—','Different source cannot inherit a value');
-// Server persisted complete density average, never individual retained member values.
-const average = {...point,key:'average',kind:'numeric_average',sample:{...sample(null),definition_id:'pair'},
-    last_valid_sample:{...sample(1.55),definition_id:'pair'}};
+// Use per-channel server decisions; raw and legacy whole-pair values remain diagnostic.
+const effective = (value,status='held') => ({policy:'density-per-channel-nonone-v1',value,status,
+    unit:'g/cm³',received_at:start,reason:status==='held'?'A303：读数为 1.000 · 沿用本路最近非 1 有效值':'',
+    components:[{label:'A303',value:1.5,status:'held',reason:'沿用本路最近非 1 有效值',received_at:start},
+        {label:'A304',value:1.6,status:'good',reason:'',received_at:later}]});
+const average = {...point,key:'a303_a304_density_average',kind:'numeric_average',sample:{...sample(1.3),definition_id:'pair'},
+    last_valid_sample:{...sample(1.3),definition_id:'pair'},effective_density:effective(1.55)};
 ops.telemetryFailed = false; ops.telemetry = {items:[],derived_items:[average]};
-assert.equal(page.pointDisplay(bind('density-current',average)).value,'1.55 %');
+assert.equal(page.pointDisplay(bind('density-current',average)).value,'1.550 g/cm³');
+assert.equal(page.pointDisplay(density).held,true);
+assert.match(page.pointDisplay(density).title,/A303.*非 1.*A304/);
 ctx.localStorage.setItem = () => {throw Error('storage disabled');};
-average.last_valid_sample = {...sample(1.56,later),definition_id:'pair'};
-assert.equal(page.pointDisplay(density).value,'1.56 %');
+average.effective_density = effective(null,'missing');
+assert.equal(page.pointDisplay(density).value,'—','No per-channel history cannot fall back to old mean');
+average.effective_density = effective(1.55,'good');
+ops.telemetryFailed = true;
+assert.equal(page.pointDisplay(density).held,true);
+assert.equal(page.pointDisplay(density).available,false);
+ops.telemetryFailed = false;
+const a303 = {...point,available:true,item_id:'TIA_4_1.TIA_4_1.A303/MD',sample:sample(1),effective_density:effective(1.47)};
+ops.telemetry.items = [a303];
+assert.equal(page.pointDisplay(bind('density-current',a303)).value,'1.470 g/cm³');
+assert.equal(page.pointDisplay(bind('other',a303)).value,'1 %','Raw diagnostic display remains truthful');
 assert.equal(JSON.stringify(App.store),before,'Display retention never modifies models, records or business state');
-console.log('Retained telemetry: stop/recovery, true 1, history bootstrap, reload/outage, identity/unit isolation and read-only display passed.');
+console.log('Retained telemetry: zero holds, channel density policy, missing history, old-cache isolation, outages and read-only display passed.');

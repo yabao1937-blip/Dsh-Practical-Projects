@@ -540,7 +540,7 @@ const OverviewPage = {
                         : '—<span style="color:var(--text-secondary);font-size:12px">（保持中：等新化验/新数据，本次不给修正量）</span>'}</td></tr>
                     <tr><td>目标密度(本次一步)</td><td>${g.hold
                         ? '—<span style="color:var(--text-secondary);font-size:12px">（保持中，不给新的目标密度）</span>'
-                        : '<strong>' + g.rhoNew.toFixed(3) + ' g/cm³</strong>（范围1.35~1.60）'}</td></tr>
+                        : '<strong>' + g.rhoNew.toFixed(3) + ' g/cm³</strong>（以当前有效密度为基准）'}</td></tr>
                     <tr><td><strong>建议密度(推测值)</strong></td><td>${
                         (g.rhoPredict != null && g.valid)
                             ? `<strong style="color:${g.predictBeyondRange ? 'var(--text-muted)' : 'var(--accent-cyan)'}">`
@@ -555,7 +555,7 @@ const OverviewPage = {
                                   : '')
                               + `<br><span style="color:var(--text-secondary);font-size:12px">`
                               + `一步到位的终点：按现场确认增益 15%/单位密度把偏差线性外推归零所得，`
-                              + `不受单步限幅(≤${g.maxStep})约束，仅受 1.35~1.60 物理范围限制；`
+                              + `不受单步限幅(≤${g.maxStep})约束；`
                               + `属推测值（增益待阶跃实验实测），请以化验验证</span>`
                             : '—'}</td></tr>
                     <tr><td>重介灰分反推值</td><td>${balanceText(inferredHeavy)}；由当前总灰分反推</td></tr>

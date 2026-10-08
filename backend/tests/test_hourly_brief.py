@@ -108,23 +108,42 @@ def test_zero_fallback_excludes_future_nonzero_and_sets_stop(sessions, monkeypat
     assert result["model_inputs"]["is_stoppage"] == 1
 
 
-def test_density_one_is_real_and_missing_uses_same_batch_previous(sessions, monkeypatch):
+def test_density_one_uses_own_history_and_excludes_future(sessions, monkeypatch):
     setup_clock(monkeypatch, HOUR + timedelta(seconds=3))
     cfg = config([item for _, item in DENSITY_AVERAGE_MEMBERS])
     repo = TelemetryRepository(sessions)
     repo.acquire(cfg, "owner")
-    send(repo, cfg, HOUR - timedelta(seconds=2), [1, 1])
+    send(repo, cfg, HOUR - timedelta(seconds=50), [1.4, 1.6])
+    send(repo, cfg, HOUR - timedelta(seconds=4), [1.46, 1.66])
+    send(repo, cfg, HOUR - timedelta(seconds=2), [1, 1.68])
     with sessions() as db:
         value = Inputs(db, HOUR).density()
-        assert value["value"] == 1 and value["status"] == "good"
+        assert value["value"] == pytest.approx(1.57) and value["status"] == "held"
+        assert [c["value"] for c in value["components"]] == [1.46, 1.68]
+        assert value["components"][0]["raw_value"] == 1
     send(repo, cfg, HOUR + timedelta(seconds=3), [1.9, 1.9])
     with sessions() as db:
-        assert Inputs(db, HOUR).density()["value"] == 1
+        assert Inputs(db, HOUR).density()["value"] == pytest.approx(1.57)
     repo.state(cfg, "owner", "stopped")
     with sessions() as db:
-        assert Inputs(db, HOUR).density()["status"] == "good", "A later disconnect cannot change an earlier valid hour"
+        assert Inputs(db, HOUR).density()["value"] == pytest.approx(1.57), "Later samples/disconnect cannot change the earlier hour"
         held = Inputs(db, HOUR + timedelta(seconds=40)).density()
         assert held["value"] == 1.9 and held["status"] == "held"
+
+
+def test_hour_boundary_keeps_old_held_density_after_history_pruning(sessions, monkeypatch):
+    setup_clock(monkeypatch, HOUR + timedelta(seconds=3))
+    cfg = config([item for _, item in DENSITY_AVERAGE_MEMBERS])
+    repo = TelemetryRepository(sessions)
+    repo.acquire(cfg, "owner")
+    send(repo, cfg, HOUR - timedelta(days=10), [1.44, 1.64])
+    send(repo, cfg, HOUR - timedelta(seconds=2), [1, 1])
+    send(repo, cfg, HOUR + timedelta(seconds=3), [1.9, 1.9])
+    repo.prune(cfg)
+    with sessions() as db:
+        result = Inputs(db, HOUR).density()
+        assert result["value"] == pytest.approx(1.54)
+        assert result["status"] == "held"
 
 
 def add_manual(db, value, observed, created, metric="coarse_slime_amount"):
@@ -227,13 +246,13 @@ def test_missing_factor_no_imputation_and_zero_total_not_fabricated():
     assert cells["suggested_density"]["value"] is None
 
 
-def test_current_density_one_displayed_but_not_clamped_into_advice():
+@pytest.mark.parametrize("rho", [1.25, 1.75])
+def test_measured_density_outside_old_bounds_keeps_step_limit(rho):
     cells = complete_cells()
-    cells["density"]["value"] = 1
+    cells["density"]["value"] = rho
     calculate(cells, {}, model(), HOUR)
-    assert cells["density"]["value"] == 1
-    assert cells["suggested_density"]["value"] is None
-    assert "适用范围" in cells["suggested_density"]["reason"]
+    assert cells["density"]["value"] == rho
+    assert cells["suggested_density"]["value"] == pytest.approx(rho - .02)
 
 
 def test_density_guard_uses_actual_driver_time_and_updated_settings_block():

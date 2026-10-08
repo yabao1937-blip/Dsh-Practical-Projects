@@ -154,13 +154,11 @@ def compute_density_guidance(state: dict, target_total_ash: float) -> dict:
     step_limit = max_step if stepwise and max_step and max_step > 0 else abs(d_rho_full)
     d_rho = max(-step_limit, min(step_limit, d_rho_full))
     r["deltaRhoFull"] = round(d_rho_full, 4)
-    r["rhoTargetFull"] = max(DENSITY_GUIDE["rhoMin"],
-                             min(DENSITY_GUIDE["rhoMax"], round(rho_cur + d_rho_full, 3)))
+    r["rhoTargetFull"] = round(rho_cur + d_rho_full, 3)
     # 建议密度（推测值）：一步到位的终点（按现场确认增益把偏差外推归零），不受专家法则封顶限制
     d_rho_predict = -(r["deltaA"] / EXPERT_ADJUST["gain"])
     r["deltaRhoPredict"] = round(d_rho_predict, 4)
-    r["rhoPredict"] = max(DENSITY_GUIDE["rhoMin"],
-                          min(DENSITY_GUIDE["rhoMax"], round(rho_cur + d_rho_predict, 3)))
+    r["rhoPredict"] = round(rho_cur + d_rho_predict, 3)
     # 经验范围：法则封顶 0.03 × 现场确认增益 15 = 0.45%（超过则推测值仅供参考）
     expert_range = round(EXPERT_ADJUST["cap"] * EXPERT_ADJUST["gain"], 4)
     r["expertRangeDA"] = expert_range
@@ -168,7 +166,7 @@ def compute_density_guidance(state: dict, target_total_ash: float) -> dict:
     r["steps"] = max(1, int(-(-abs(d_rho_full) // (step_limit or 1)))) if step_limit else 1
     r["stepwise"] = bool(stepwise and r["steps"] > 1)
     r["deltaRho"] = round(d_rho, 4)
-    r["rhoNew"] = max(DENSITY_GUIDE["rhoMin"], min(DENSITY_GUIDE["rhoMax"], round(rho_cur + d_rho, 3)))
+    r["rhoNew"] = round(rho_cur + d_rho, 3)
     r["direction"] = "down" if r["deltaA"] > 0 else "up"
     if scheme == "heavy":
         r["reason"] = (f"重介灰分{'偏高' if r['deltaAHeavy'] > 0 else '偏低'} {abs(r['deltaAHeavy']):.2f}%"

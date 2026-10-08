@@ -46,6 +46,10 @@ def case_store(case):
                  coarseAshInput={"manual": 13, "manualAt": NOW})
     if case == "step":
         s["densityGuide"] = {"maxStep": 0.005}
+    if case in ("low_density", "high_density"):
+        s["instrumentInputs"]["density"]["manual"] = 1.32 if case == "low_density" else 1.64
+        if case == "high_density":
+            s.update(totalAshManualOn=True, ashInputs={"totalAsh":{"manual":7.9,"manualAt":NOW}})
     if case in ("dwell", "new_lab"):
         s["densityLastMoveAt"] = NOW - 60_000
     if case == "new_lab":
@@ -76,7 +80,7 @@ def case_store(case):
 
 
 @pytest.mark.parametrize("case", ["measured", "constant", "heavy", "step", "dwell", "new_lab", "placeholder", "latch", "density_meter", "expired_manual", "missing_ash",
-                                 "manual_pinned", "manual_source_off", "balance", "balance_zero", "balance_outside"])
+                                 "manual_pinned", "manual_source_off", "balance", "balance_zero", "balance_outside", "low_density", "high_density"])
 def test_guidance_matches_live_frontend(case):
     node = shutil.which("node")
     if not node:
@@ -95,7 +99,7 @@ def test_guidance_matches_live_frontend(case):
         expected = resolvers.back_calc_heavy_ash(store, ash)
         assert front[key] == (pytest.approx(expected, abs=1e-6) if expected is not None else None)
     for key in ("valid", "hold", "placeholderManual", "driveKey", "direction", "actualTotal",
-                "heavyAsh", "rhoNew", "deltaRho", "targetHeavy", "maxStep"):
+                "heavyAsh", "rhoNew", "rhoTargetFull", "rhoPredict", "deltaRho", "targetHeavy", "maxStep"):
         expected, actual = front["guidance"][key], guide[key]
         if isinstance(expected, (int, float)) and not isinstance(expected, bool):
             assert actual == pytest.approx(expected, abs=1e-6), key
@@ -107,6 +111,9 @@ def test_guidance_matches_live_frontend(case):
         assert not guide["valid"]
     if case == "new_lab":
         assert not guide["hold"] and guide["direction"] == "down"
+    if case in ("low_density", "high_density"):
+        assert abs(guide["rhoNew"] - guide["rhoCur"]) == pytest.approx(.02)
+        assert guide["rhoNew"] == pytest.approx(1.30 if case == "low_density" else 1.66)
     if case == "manual_pinned":
         assert guide["actualTotal"] == 9.3
     if case == "manual_source_off":
