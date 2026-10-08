@@ -54,6 +54,18 @@ const BriefPage = {
         if (typeof value === 'number') return formatted ? value.toFixed(key.includes('density') ? 3 : 2) : value;
         return String(value);
     },
+    valueHTML(cell, key) {
+        const members = {systems:['401','402','A','B'], desliming:['473','474'], float_press:['A415','A416','A417','A418']}[key];
+        if (!members) return `<span class="brief-value">${this.escape(this.value(cell, key))}</span>`;
+        // Only the saved, validated group value determines the light; raw components are context only.
+        return `<span class="brief-state-grid">${members.map(name => {
+            const on = cell?.value?.[name], part = cell?.components?.[name];
+            const state = on === true ? 'running' : on === false ? 'stopped' : 'unknown';
+            const label = name + '：' + ({running:'运行', stopped:'停止', unknown:'无有效数据'}[state]);
+            const title = [label, part?.reason || cell?.reason, part?.observed_at ? this.localTime(part.observed_at) : ''].filter(Boolean).join(' · ');
+            return `<span class="brief-device-state" role="img" aria-label="${this.escape(label)}" title="${this.escape(title)}"><span aria-hidden="true">${name}</span><i class="brief-state-dot is-${state}" aria-hidden="true"></i></span>`;
+        }).join('')}</span>`;
+    },
     note(cell) {
         if (!cell) return '无数据';
         return cell.reason || {default:'默认值', manual:'手工补录', predicted:'模型预测', calculated:'计算值', held:'沿用前值'}[cell.status] || '';
@@ -73,6 +85,7 @@ const BriefPage = {
                     <span class="brief-muted">${this.loading ? '正在读取…' : data ? '后台自动生成 · 每小时一行' : ''}</span>
                 </div>
                 <p class="brief-policy">取整点前最近的已接收数据；无手工值时使用已配置的在线仪表默认值。点击时间查看来源和缺项原因。</p>
+                <div class="brief-state-legend" aria-label="设备状态图例"><span><i class="brief-state-dot is-running" aria-hidden="true"></i>运行</span><span><i class="brief-state-dot is-stopped" aria-hidden="true"></i>停止</span><span><i class="brief-state-dot is-unknown" aria-hidden="true"></i>无有效数据</span></div>
                 ${this.error ? `<p class="brief-error" role="alert">${e(this.error)}${data ? ' 当前保留上次读取结果。' : ''}</p>` : ''}
             </div></div>
             <div class="panel">
@@ -86,7 +99,7 @@ const BriefPage = {
                             ${data.columns.map(c => {
                                 const cell = row.cells[c.key], note = this.note(cell);
                                 return `<td class="brief-cell-${e(cell?.status || 'missing')}" title="${e([c.label, note, cell?.source, this.localTime(cell?.observed_at)].filter(Boolean).join(' · '))}">
-                                    <span class="brief-value">${e(this.value(cell, c.key))}</span>
+                                    ${this.valueHTML(cell, c.key)}
                                     ${note ? `<small class="brief-cell-note">${e(note)}</small>` : ''}</td>`;
                             }).join('')}</tr>`).join('')}</tbody>
                     </table></div>` : `<div class="brief-empty">

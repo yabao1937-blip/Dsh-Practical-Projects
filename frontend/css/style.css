@@ -818,6 +818,13 @@ a:hover { color: var(--accent-blue); }
 .hourly-brief-table th small { display: block; color: var(--text-muted); font-weight: 400; margin-top: 4px; }
 .hourly-brief-table td { vertical-align: top; padding: 16px 12px; }
 .brief-value { font-variant-numeric: tabular-nums; }
+.brief-state-grid { display: inline-grid; grid-template-columns: repeat(2, max-content); gap: 8px 16px; }
+.brief-device-state { display: inline-flex; align-items: center; justify-content: space-between; gap: 7px; color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.brief-state-dot { display: inline-block; flex: 0 0 9px; width: 9px; height: 9px; border-radius: 50%; background: #94a3b8; box-shadow: 0 0 0 1px rgba(0,0,0,.12); }
+.brief-state-dot.is-running { background: #22c55e; }
+.brief-state-dot.is-stopped { background: #ef4444; }
+.brief-state-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 9px; color: var(--text-secondary); font-size: 12px; }
+.brief-state-legend > span { display: inline-flex; align-items: center; gap: 6px; }
 .brief-cell-note { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-muted); max-width: 148px; white-space: normal; font-size: 11px; line-height: 1.5; margin-top: 5px; }
 .brief-cell-held .brief-cell-note, .brief-cell-default .brief-cell-note { color: var(--accent-orange); }
 .brief-cell-missing .brief-value { color: var(--text-muted); }
