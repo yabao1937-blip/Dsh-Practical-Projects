@@ -21,13 +21,14 @@ const DecisionOverviewPage = {
         try {
             const saved = JSON.parse(localStorage.getItem(this.choicesKey) || '{}'), choices = Object.create(null);
             if (saved && typeof saved === 'object' && !Array.isArray(saved)) for (const [id,value] of Object.entries(saved)) {
-                if (id === 'stoppage' || !/^[a-z][a-z0-9-]{0,63}$/.test(id) || typeof value !== 'string' || value.length > 160) continue;
+                if (id === 'stoppage' || id === 'heavy' || !/^[a-z][a-z0-9-]{0,63}$/.test(id) || typeof value !== 'string' || value.length > 160) continue;
                 if (value === '') { choices[id] = ''; continue; }
                 let identity;
                 try { identity = JSON.parse(value); } catch (_) { continue; }
                 if (Array.isArray(identity) && identity.length === 2 && identity.every(v => typeof v === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(v))) choices[id] = value;
             }
             this.pointChoices = choices;
+            if (Object.prototype.hasOwnProperty.call(saved || {}, 'heavy')) this.savePointChoices();
         } catch (_) { /* An invalid or unavailable local preference does not alter business data. */ }
     },
     savePointChoices() {
@@ -100,8 +101,21 @@ const DecisionOverviewPage = {
             title:detail || reason || '暂无有效密度'};
     },
     pointDisplay(node) {
+        if (node.id === 'heavy') {
+            const summaryParts = ['heavy-ash','heavy-amount'].map(id => {
+                const child = this.nodes.find(n => n.id === id);
+                return {node:child,display:child ? this.pointDisplay(child) : {bound:false,value:'—',source:'暂无数据'}};
+            });
+            const available = summaryParts.every(p => this.displayAvailable(p.display));
+            const missing = summaryParts.filter(p => p.display.value === '—').length;
+            const held = summaryParts.some(p => p.display.held);
+            const badge = missing === 2 ? '数据缺失' : missing ? '部分缺失' : held ? '待刷新' : '汇总';
+            return {aggregate:true,bound:false,summaryParts,available,held,badge,
+                value:summaryParts[0].display.value,source:`煤量 ${summaryParts[1].display.value}`,
+                title:summaryParts.map(p => `${p.node?.title || '数据'}：${p.display.value}；${p.display.source}`).join('；')};
+        }
         const choice = this.pointChoices[node.id];
-        if (!choice) return {bound:false,value:node.value,source:node.source,sampleAt:node.sampleAt};
+        if (!choice) return {bound:false,value:node.value,source:node.source,sampleAt:node.sampleAt,enteredAt:node.enteredAt};
         const item = this.displayPoints().find(p => this.pointIdentity(p) === choice);
         if (item?.kind === 'manual_measurement' || choice.startsWith('["manual-measurements",')) return this.manualDisplay(item);
         if (node.id === 'density-current' && (!item || item.key === 'a303_a304_density_average' ||
@@ -140,6 +154,7 @@ const DecisionOverviewPage = {
                 stopped ? '设备停机 · 暂无历史有效值' : available ? `${group ? '组合' : derived ? '组合计算' : 'KEP'} · ${derived && !group ? item.name : item.tag_name || item.name} · ${clock}` : `不可用 · ${state}`,
             title:`${derived ? '本系统派生的'+item.name : item?.item_id || sample.node_id || choice}；${state}；${held ? '沿用上次有效值；' : ''}${group ? '状态组合，无单位' : shownUnit ? '单位 '+shownUnit : '单位未配置'}；数值接收时间 ${this.time(shown.received_at)}`};
     },
+    displayAvailable(display) { return display.bound || display.aggregate ? display.available : display.value !== '—'; },
     telemetryUpdated() {
         if (!this.initialized || !this.active() || document.hidden || !this.snapshot) return;
         this.applyDefaultManualPoint();
@@ -248,7 +263,7 @@ const DecisionOverviewPage = {
             if (!event.target.closest('.decision-formula,button,a,input,select,textarea,label,[contenteditable="true"]')) this.closeInspector(false);
         });
         document.getElementById('decision-inspector').addEventListener('change', event => {
-            if (event.target.id === 'decision-source-point') {
+            if (event.target.id === 'decision-source-point' && this.selected !== 'heavy') {
                 this.pointChoices[this.selected] = event.target.value;
                 this.savePointChoices();
                 this.sourceInteractionUntil = Date.now() + 500;
@@ -480,7 +495,7 @@ const DecisionOverviewPage = {
         return [
             n('density','建议密度',s.showAdvice ? this.number(s.guide.rhoNew,3) : '—',s.showAdvice ? (s.ashOk ? '达标保持' : s.guide.direction === 'down' ? '本步建议 · 下调' : '本步建议 · 上调') : s.guide.hold ? '等待新化验 / 新数据' : '暂无有效建议',
                 s.guide.reason,{x:670,y:343,w:245,h:207,type:'root',unit:'g/cm³',sampleAt:s.reader.ashMeasurementInfo(s.guide.scheme).sampleAt}),
-            n('heavy','重介精煤',ash(s.ashes.heavy),`煤量 ${rate(s.amounts.heavy)}`,`重介灰分与煤量共同进入三组分质量平衡。当前灰分来源：${heavyMeasurement.source}。`,
+            n('heavy','重介精煤',ash(s.ashes.heavy),`煤量 ${rate(s.amounts.heavy)}`,'汇总左侧重介精煤灰分和重介精煤量，随左侧数据同步更新。',
                 {...family('heavy',380,170,{w:220,h:148}),type:'component',parent:'density',reference:!s.componentFeeds,page:'page-overview',sampleAt:heavyMeasurement.sampleAt,enteredAt:heavyMeasurement.enteredAt}),
             n('float','浮精',ash(s.ashes.float),`煤量 ${rate(s.amounts.float)}`,`浮精灰分与煤量共同进入三组分质量平衡；压滤机状态为工况参考。`,
                 {...family('float',380,612,{w:220,h:148}),type:'component',parent:'density',reference:!s.componentFeeds,page:'page-float',sampleAt:s.floating?.timestamp}),
@@ -516,7 +531,7 @@ const DecisionOverviewPage = {
     renderContext() {
         const s = this.snapshot, sources = {manual:'人工总灰分',formula:'三组分公式',entry:'501 导入 / 录入',ash501:'501 灰分取值'};
         const message = s.componentFeeds ? '三组分参与当前建议计算' : '三组分显示公式核算对照，建议由所选总灰分驱动';
-        const bound = this.nodes.filter(node => this.pointChoices[node.id]).length;
+        const bound = this.nodes.filter(node => node.id !== 'heavy' && this.pointChoices[node.id]).length;
         document.getElementById('decision-context').innerHTML = `<span>指导口径 <strong>${s.guide.scheme === 'heavy' ? '重介精煤版' : '总灰分版'}</strong></span><span>生产模型 <strong>${this.escape(s.engineLabel)}</strong></span><span>总灰分来源 <strong>${this.escape(sources[s.total.source])}</strong></span><span>${message}</span><span>实时采集 <strong>${bound ? bound+' 张卡片已选点' : '选择点位后更新卡片'}</strong> · 展示不改变建议计算</span>`;
     },
 
@@ -563,10 +578,13 @@ const DecisionOverviewPage = {
         let current = selected;
         while (current?.parent) { ancestorIds.add(current.parent); current = this.nodes.find(n => n.id === current.parent); }
         const flowingIds = new Set(), now = Date.now()/1000;
+        const displays = new Map(this.nodes.map(node => [node.id,this.pointDisplay(node)]));
+        const displayOnly = node => node.id === 'heavy' ? displays.get(node.id).summaryParts.some(p => p.display.bound) : !!this.pointChoices[node.id];
         const paths = this.routeConnections().map(({node,parent,path},index) => {
             const highlight = ancestorIds.has(node.id) && ancestorIds.has(parent.id);
-            const displayReference = node.reference || (node.id !== 'density' && !!this.pointChoices[node.id]) || (parent.id !== 'density' && !!this.pointChoices[parent.id]);
-            const flows = !displayReference && node.value !== '—' && parent.value !== '—';
+            const summaryLink = parent.id === 'heavy';
+            const displayReference = !summaryLink && (node.reference || (node.id !== 'density' && displayOnly(node)) || (parent.id !== 'density' && displayOnly(parent)));
+            const flows = !displayReference && (summaryLink ? this.displayAvailable(displays.get(node.id)) : node.value !== '—' && parent.value !== '—');
             if (flows) { flowingIds.add(node.id); flowingIds.add(parent.id); }
             // Negative phase keeps motion continuous when the five-second snapshot rebuilds the graph.
             const phase = -((now+index*.37)%4).toFixed(3);
@@ -576,15 +594,15 @@ const DecisionOverviewPage = {
         const markers = Object.entries(colors).map(([key,color]) => `<marker id="decision-arrow-${key}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8" fill="${color}"/></marker>`).join('');
         const cards = this.nodes.map((node,index) => {
             const active = node.id === this.selected;
-            const display = this.pointDisplay(node), root = node.id === 'density';
+            const display = displays.get(node.id), root = node.id === 'density';
             const preview = node.id === 'coarse' ? `<span>查看${this.view === 'gpt' ? ' GPT' : '生产'}预测 ${this.number(s.prediction,2,'%')}${!s.model ? ' · 未训练' : s.previewOnly ? ' · 对照' : ' · 未平滑'}</span>` : '';
             const unit = node.id === 'density' ? '<span class="decision-root-unit">g/cm³</span>' : '';
             const sub = node.id === 'density' ? `<span>当前 ${this.number(s.guide.rhoCur,3)}</span><span>目标灰分范围 ${targetAshRange}</span>` : '';
             const phase = -((now+index*.41)%5).toFixed(3);
-            const badge = display.bound && !root ? `<span class="decision-badge">${display.manual ? (display.held ? '待刷新' : display.available ? '补录' : '无补录') : display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
+            const badge = display.aggregate ? `<span class="decision-badge">${display.badge}</span>` : display.bound && !root ? `<span class="decision-badge">${display.manual ? (display.held ? '待刷新' : display.available ? '补录' : '无补录') : display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
             const compare = display.bound && root ? `<span class="decision-live-comparison">采集对照 ${this.escape(display.value)}${display.available ? '' : '（不可用）'}</span>` : '';
             const groupHtml = display.components && !root ? `<span class="decision-state-grid">${display.components.map(c => `<span>${this.escape(c.label)} ${c.available && !window.Operations?.telemetryFailed ? c.value ? '开' : '关' : '未知'}</span>`).join('')}</span>` : this.escape(root ? node.value : display.value);
-            return `<button type="button" class="decision-node${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${display.bound && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}"${display.bound ? ` title="${this.escape(display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-pulse-delay:${phase}s"><span class="decision-node-heading">${this.escape(node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(root ? node.source : display.source)}</span>${sub}${preview}${compare}</span></button>`;
+            return `<button type="button" class="decision-node${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${(display.bound || display.aggregate) && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}"${display.bound || display.aggregate ? ` title="${this.escape(display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-pulse-delay:${phase}s"><span class="decision-node-heading">${this.escape(node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(root ? node.source : display.source)}</span>${sub}${preview}${compare}</span></button>`;
         }).join('');
         document.getElementById('decision-board').innerHTML = `<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 970"><defs>${markers}</defs>${paths}</svg>${cards}<div class="decision-formula"><strong>三组分质量平衡</strong>总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量<br>公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}</div>`;
     },
@@ -600,6 +618,18 @@ const DecisionOverviewPage = {
         const scrollTop = document.getElementById('decision-inspector').scrollTop || 0;
         const node = this.nodes.find(n => n.id === this.selected) || this.nodes[0], s = this.snapshot;
         const display = this.pointDisplay(node);
+        if (display.aggregate) {
+            const details = display.summaryParts.map(part => {
+                const d = part.display;
+                const pairs = [['显示值',d.value],['来源',d.source],['采样 / 记录时间',this.time(d.sampleAt)]];
+                if (d.enteredAt) pairs.push(['录入时间',this.time(d.enteredAt)]);
+                return `<div class="decision-detail"><h4>${this.escape(part.node?.title)}</h4><dl class="decision-facts">${pairs.map(([key,value]) => `<dt>${this.escape(key)}</dt><dd>${this.escape(value)}</dd>`).join('')}</dl></div>`;
+            }).join('');
+            document.getElementById('decision-inspector').innerHTML = `<div class="decision-inspector-header"><span>汇总与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${display.badge}</span></div><p>${this.escape(node.description)}</p></div>${details}`;
+            document.getElementById('decision-inspector').scrollTop = scrollTop;
+            this.queueInspectorPosition();
+            return;
+        }
         const pairs = display.manual ? [['卡片显示值',display.value + (display.held ? '（待刷新）' : display.available ? '' : '（不可用）')],
             ['数据来源','SQLite · 手工补录'],['测量时间',this.time(display.sampleAt)],['录入时间',this.time(display.enteredAt)],
             ['状态',display.item ? this.telemetryState(display.item) : '补录点位尚未返回'],['读取规则','按测量时间取最新；同一时间取最后录入']] :
