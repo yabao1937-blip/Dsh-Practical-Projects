@@ -1,6 +1,48 @@
 /* Hourly reports are generated and frozen by the server. */
 const BriefPage = {
     result: null, day: null, offset: 0, error: '', loading: false, sequence: 0, timer: null,
+    expandedGroups: new Set(),
+    groups: [
+        {key:'heavy', main:'heavy_ash', details:['heavy_amount']},
+        {key:'float', main:'float_ash', details:['float_amount','float_press','reagent']},
+        {key:'coarse', main:'coarse_ash', details:['raw_ash','coal_amount','systems','desliming','level','coarse_amount','raw_slime']},
+    ],
+
+    tableColumns(columns) {
+        const remaining = new Map(columns.map(c => [c.key, c])), ordered = [];
+        this.groups.forEach(group => {
+            // If a future response omits a parent, keep its remaining fields visible below.
+            if (!remaining.has(group.main)) return;
+            [group.main, ...group.details].forEach(key => {
+                if (!remaining.has(key)) return;
+                ordered.push({...remaining.get(key), group:group.key, detail:key !== group.main});
+                remaining.delete(key);
+            });
+        });
+        return [...ordered, ...remaining.values()];
+    },
+    toggleGroup(key) {
+        if (!this.groups.some(g => g.key === key)) return;
+        if (this.expandedGroups.has(key)) this.expandedGroups.delete(key);
+        else this.expandedGroups.add(key);
+        this.syncGroups();
+    },
+    setGroups(expanded) {
+        this.expandedGroups = new Set(expanded ? this.groups.map(g => g.key) : []);
+        this.syncGroups();
+    },
+    syncGroups() {
+        const box = document.getElementById('brief-content');
+        if (!box) return;
+        box.querySelectorAll('[data-brief-detail]').forEach(cell => {
+            cell.hidden = !this.expandedGroups.has(cell.dataset.briefDetail);
+        });
+        box.querySelectorAll('[data-brief-toggle]').forEach(button => {
+            const expanded = this.expandedGroups.has(button.dataset.briefToggle);
+            button.setAttribute('aria-expanded', String(expanded));
+            button.querySelector('.brief-group-action').textContent = expanded ? '收起明细' : `展开 ${button.dataset.detailCount} 项`;
+        });
+    },
 
     escape(value) {
         return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
@@ -76,6 +118,8 @@ const BriefPage = {
         const sc = box.querySelector('.brief-scroll');
         const position = {left:sc?.scrollLeft || 0, top:sc?.scrollTop || 0};
         const data = this.result, rows = data?.rows || [], e = v => this.escape(v);
+        const columns = this.tableColumns(data?.columns || []);
+        const columnAttrs = c => `data-brief-column="${e(c.key)}"${c.detail ? ` data-brief-detail="${c.group}"${this.expandedGroups.has(c.group) ? '' : ' hidden'}` : ''}`;
         box.innerHTML = `
             <div class="panel brief-toolbar"><div class="panel-body">
                 <div class="brief-controls">
@@ -89,16 +133,23 @@ const BriefPage = {
                 ${this.error ? `<p class="brief-error" role="alert">${e(this.error)}${data ? ' 当前保留上次读取结果。' : ''}</p>` : ''}
             </div></div>
             <div class="panel">
-                <div class="panel-header"><h3>小时推测明细</h3>
-                    <span class="brief-muted">共 ${data?.total ?? 0} 行 · 最新在前 · 左右滑动查看全部指标</span></div>
+                <div class="panel-header brief-table-header"><h3>小时推测明细</h3>
+                    <span class="brief-muted">共 ${data?.total ?? 0} 行 · 最新在前 · 点击灰分表头展开相关指标</span>
+                    <div class="brief-group-actions"><button class="btn btn-sm" onclick="BriefPage.setGroups(true)">展开全部</button><button class="btn btn-sm" onclick="BriefPage.setGroups(false)">收起全部</button></div></div>
                 <div class="panel-body" style="padding:0">
                     ${rows.length ? `<div class="brief-scroll"><table class="data-table brief-table hourly-brief-table">
-                        <thead><tr><th>整点时间</th>${data.columns.map(c => `<th>${e(c.label)}${c.unit ? `<small>${e(c.unit)}</small>` : ''}</th>`).join('')}</tr></thead>
+                        <thead><tr><th scope="col">整点时间</th>${columns.map(c => {
+                            const group = c.group && !c.detail, expanded = this.expandedGroups.has(c.group);
+                            const count = columns.filter(detail => detail.group === c.group && detail.detail).length;
+                            return `<th scope="col" ${columnAttrs(c)} class="${c.group ? `brief-group-${c.group} ${group ? 'brief-group-heading' : 'brief-group-detail'}` : ''}">${group ?
+                                `<button class="brief-group-toggle" data-brief-toggle="${c.group}" data-detail-count="${count}" aria-expanded="${expanded}" onclick="BriefPage.toggleGroup('${c.group}')"><span class="brief-group-label"><span class="brief-group-caret" aria-hidden="true">▸</span>${e(c.label)}${c.unit ? ` <span class="brief-group-unit">(${e(c.unit)})</span>` : ''}</span><small class="brief-group-action">${expanded ? '收起明细' : `展开 ${count} 项`}</small></button>` :
+                                `${e(c.label)}${c.unit ? `<small>${e(c.unit)}</small>` : ''}`}</th>`;
+                        }).join('')}</tr></thead>
                         <tbody>${rows.map((row, index) => `<tr>
                             <td><button class="brief-hour" onclick="BriefPage.showSources(${index})" aria-label="查看 ${e(this.localTime(row.hour))} 数据来源">${e(this.localTime(row.hour).slice(0,16))}</button></td>
-                            ${data.columns.map(c => {
+                            ${columns.map(c => {
                                 const cell = row.cells[c.key], note = this.note(cell);
-                                return `<td class="brief-cell-${e(cell?.status || 'missing')}" title="${e([c.label, note, cell?.source, this.localTime(cell?.observed_at)].filter(Boolean).join(' · '))}">
+                                return `<td ${columnAttrs(c)} class="brief-cell-${e(cell?.status || 'missing')} ${c.group ? `brief-group-${c.group} ${c.detail ? 'brief-group-detail' : 'brief-group-summary'}` : ''}" title="${e([c.label, note, cell?.source, this.localTime(cell?.observed_at)].filter(Boolean).join(' · '))}">
                                     ${this.valueHTML(cell, c.key)}
                                     ${note ? `<small class="brief-cell-note">${e(note)}</small>` : ''}</td>`;
                             }).join('')}</tr>`).join('')}</tbody>
