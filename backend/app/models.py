@@ -234,3 +234,11 @@ class AutoState(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[dict | list | str | float | int | bool | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+class DecisionSourceRevision(Base):
+    """Append-only shared decision sources; independent of whole-store mirrors."""
+    __tablename__ = "decision_source_revisions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    effective_at: Mapped[str] = mapped_column(String(32), index=True)
+    config: Mapped[dict] = mapped_column(JSON)

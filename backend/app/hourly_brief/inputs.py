@@ -35,8 +35,9 @@ def business_time(value):
 
 
 class Inputs:
-    def __init__(self, db, hour):
+    def __init__(self, db, hour, live=False):
         self.db, self.hour = db, hour
+        self.live = live
         self.cutoff = iso_time(hour)
         self.points = {}
         for p in db.scalars(select(TelemetryPoint).where(TelemetryPoint.enabled.is_(True))):
@@ -52,8 +53,10 @@ class Inputs:
         self.settings = {r.key: r.value for r in db.scalars(select(Setting))
                          if business_time(r.updated_at) <= hour}
 
-    def point(self, item):
+    def point(self, item, source_id=None):
         points = self.points.get(item, [])
+        if source_id is not None:
+            points = [p for p in points if p.source_id == source_id]
         return points[0] if len(points) == 1 else None
 
     def before(self, sample):
@@ -76,6 +79,10 @@ class Inputs:
     def usable(self, point, sample):
         if not usable_at_receipt(sample, point.config):
             return False
+        if self.live:
+            source = self.sources.get(point.source_id)
+            if not source or source.state != 'connected' or not source.lease_until or parse_time(source.lease_until) <= self.hour:
+                return False
         # The current connection can change just AFTER the boundary. Judge the
         # already received sample at the hour, not a future source-state update.
         return availability(sample, point.config, True, self.hour)[0]
@@ -96,8 +103,8 @@ class Inputs:
                 break
         return max(candidates, key=lambda s: parse_time(s["received_at"]), default=None)
 
-    def telemetry(self, item, zero_hold=False, unit=None):
-        p = self.point(item)
+    def telemetry(self, item, zero_hold=False, unit=None, source_id=None, point=None):
+        p = point or self.point(item, source_id)
         if not p:
             return cell(reason="未配置测点或同名测点来源不唯一", item_id=item)
         s = self.latest(p)
@@ -128,8 +135,8 @@ class Inputs:
                     effective["status"], effective["reason"], sample=effective,
                     components=effective["components"], policy=effective["policy"])
 
-    def group(self, members):
-        parts = {label: self.telemetry(item) for label, item in members}
+    def group(self, members, source_id=None):
+        parts = {label: self.telemetry(item, source_id=source_id) for label, item in members}
         values = {label: c["value"] if isinstance(c["value"], bool) else None for label, c in parts.items()}
         missing = [label for label, v in values.items() if v is None]
         samples = [c.get("sample") or {} for c in parts.values()]

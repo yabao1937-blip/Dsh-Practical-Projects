@@ -130,13 +130,12 @@ def build_snapshot(db, hour, unavailable_reason=None):
     if unavailable_reason:
         return dict(cells={key: cell(reason=unavailable_reason) for key, _, _ in COLUMNS},
                     reason=unavailable_reason, policy="hour-boundary-v2")
-    inputs = Inputs(db, hour)
-    cells = inputs.collect()
-    store, model_metadata = settings_and_model(db, hour, inputs)
-    features, guide = calculate(cells, store, model_metadata, hour)
-    return dict(cells=cells, model=model_metadata, model_inputs=features, guidance=guide,
-                settings={key: store.get(key) for key in ("ashTarget", "ashTargetTol", "guideScheme", "densityGuide")},
-                policy="hour-boundary-v2")
+    from ..services.decision_sources import shared_snapshot
+    result = shared_snapshot(db, hour)
+    return dict(cells={key:result['cells'][key] for key, _, _ in COLUMNS},
+                model=result['model'], model_inputs={k:result['inputs'][k]['value'] for k in MLR_FEATURES},
+                guidance=result['guidance'], sources=result['sources'], target=result['target'],
+                density_label=result['density_label'], policy='hour-boundary-shared-v3')
 
 
 def tick(now=None, sessions=SessionLocal):

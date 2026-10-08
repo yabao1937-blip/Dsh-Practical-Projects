@@ -101,6 +101,28 @@ window.Api = {
         return result;
     },
 
+    async decisionSources(body) {
+        const headers = {};
+        if (body) {
+            headers['Content-Type'] = 'application/json';
+            const token = this.writeToken();
+            if (token) headers['X-DMCS-Token'] = token;
+        }
+        const response = await fetch(this.base + '/decision/sources', {method:body ? 'PATCH' : 'GET', headers,
+            ...(body ? {body:JSON.stringify(body)} : {}), signal:AbortSignal.timeout(5000), cache:'no-store'});
+        const result = await response.json();
+        if (!response.ok) throw new Error(typeof result.detail === 'string' ? result.detail : '来源配置未保存，请刷新后重试');
+        if (!Number.isInteger(result.revision) || !result.resolved_choices) throw new Error('共享来源配置响应异常');
+        return result;
+    },
+    async getDecisionCurrent() {
+        const response = await fetch(this.base + '/decision/current', {signal:AbortSignal.timeout(8000),cache:'no-store'});
+        if (!response.ok) throw new Error('共享决策计算暂不可用');
+        const result = await response.json();
+        if (result.policy !== 'decision-live-v1' || !result.cells || !result.sources) throw new Error('共享决策计算响应异常');
+        return result;
+    },
+
     async reconnectTelemetry() {
         const token = this.writeToken();
         const response = await fetch(this.base + '/telemetry/reconnect', {

@@ -1,0 +1,46 @@
+{
+  "verified_at": "2026-10-08T08:30:36.026+00:00",
+  "source_config": {
+    "revision": 2,
+    "effective_at": "2026-10-08T08:26:42.720+00:00",
+    "choices": {
+      "heavy-ash": "[\"manual-measurements\",\"heavy_clean_coal_ash\"]",
+      "raw-ash": "[\"kepserver-main\",\"tag_7909d678396ccde5c0d2\"]",
+      "coal-rate": "[\"kepserver-main\",\"tag_f87050e7c1b861b8ee9d\"]",
+      "tail-level": "[\"kepserver-main\",\"tag_543c440c9a90e0e2daae\"]",
+      "system-switches": "[\"kepserver-main\",\"four_system_status\"]",
+      "desliming": "[\"kepserver-main\",\"desliming_status\"]",
+      "density-current": "[\"kepserver-main\",\"tag_90a110a2c83b3bf19dd7\"]"
+    },
+    "target_min": 8.5,
+    "target_max": 9.0,
+    "resolved_choices": {
+      "raw-ash": "[\"kepserver-main\",\"tag_7909d678396ccde5c0d2\"]",
+      "coal-rate": "[\"kepserver-main\",\"tag_f87050e7c1b861b8ee9d\"]",
+      "tail-level": "[\"kepserver-main\",\"tag_543c440c9a90e0e2daae\"]",
+      "system-switches": "[\"kepserver-main\",\"four_system_status\"]",
+      "desliming": "[\"kepserver-main\",\"desliming_status\"]",
+      "heavy-ash": "[\"manual-measurements\",\"heavy_clean_coal_ash\"]",
+      "float-ash": "",
+      "float-amount": "",
+      "coarse-amount": "",
+      "density-current": "[\"kepserver-main\",\"tag_90a110a2c83b3bf19dd7\"]",
+      "float-press": "[\"kepserver-main\",\"float_press_status\"]",
+      "float-unmodeled": "",
+      "coarse-slime": ""
+    },
+    "density_label": "A304"
+  },
+  "next_hour": "2026-10-08T09:00:00.000+00:00",
+  "preserved_historical_rows": 7,
+  "current_density": {
+    "value": 1.4709954261779785,
+    "status": "held",
+    "reason": "读数为 1.000 · 沿用本路最近非 1 有效值",
+    "source": "KEPServer · A304",
+    "item_id": "TIA_4_1.TIA_4_1.A304/MD"
+  },
+  "backend_tests": 54,
+  "ds_baseline_tests": 9,
+  "frontend_verification_scripts": 6
+}

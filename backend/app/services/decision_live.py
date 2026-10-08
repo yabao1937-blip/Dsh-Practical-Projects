@@ -13,7 +13,7 @@ LABELS = dict(raw_ash='原煤灰分', coal_amount='入洗原煤量', level='精�
     sysA='A系统', sysB='B系统', sys401='401系统', sys402='402系统',
     desliming473='473脱粉', desliming474='474脱粉', is_stoppage='停机状态',
     heavy_ash='重介精煤灰分', float_ash='浮精灰分', float_amount='浮精量',
-    coarse_amount='粗精煤泥量', belt501='501瞬时带煤量', belt502='502瞬时带煤量', density='A304密度')
+    coarse_amount='粗精煤泥量', belt501='501瞬时带煤量', belt502='502瞬时带煤量', density='当前分选密度')
 
 
 def numeric(value):
@@ -32,7 +32,7 @@ def gpt_group(store):
     return saved if is_gpt(saved) else None
 
 
-def calculate(cells, store, target_min=8.5, target_max=9.0, now=None):
+def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sources=False):
     now = now or datetime.now(timezone.utc)
     cells = deepcopy(cells)
     stamp = now.isoformat(timespec='milliseconds')
@@ -57,8 +57,11 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None):
         if v < 0 or (expected == '%' and v > 100) or (not expected and v not in (0, 1)):
             return f'{LABELS[key]}超出有效范围'
         if key == 'density' and (v <= 0 or abs(v-1) <= 1e-9):
-            return 'A304 暂无有效非 1 密度'
-        if key == 'density' and c.get('item_id') != 'TIA_4_1.TIA_4_1.A304/MD':
+            return '当前分选密度暂无有效非 1 读数' if shared_sources else 'A304 暂无有效非 1 密度'
+        if key == 'density' and shared_sources and c.get('item_id') not in (
+                'TIA_4_1.TIA_4_1.A303/MD', 'TIA_4_1.TIA_4_1.A304/MD', 'a303_a304_density_average'):
+            return '当前分选密度须选择实际密度采集点'
+        if key == 'density' and not shared_sources and c.get('item_id') != 'TIA_4_1.TIA_4_1.A304/MD':
             return '当前密度必须采用 A304 实际密度'
         return None
     warnings = [f'{LABELS[k]}：{c.get("source") or c["status"]}' for k,c in cells.items()

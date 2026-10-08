@@ -59,6 +59,7 @@ const DecisionRealtime = {
     },
     update(page) {
         if (!this.active(page)) {this.currentKey=null;return;}
+        if(typeof DecisionSources!=='undefined' && DecisionSources.enabled(page)) { this.updateShared(page); return; }
         const body=this.capture(page), key=JSON.stringify(body);
         this.currentKey=key;
         if (this.resultKey!==key) {
@@ -92,6 +93,29 @@ const DecisionRealtime = {
             }
         })();
     },
+    updateShared(page) {
+        if(this.inFlight || DecisionSources.saving || Date.now()-this.lastAttempt<4500) return;
+        this.lastAttempt=Date.now();
+        const epoch=DecisionSources.epoch;
+        this.inFlight=(async()=>{
+            try {
+                await DecisionSources.ensure(page);
+                const result=await Api.getDecisionCurrent();
+                if(epoch!==DecisionSources.epoch) return;
+                this.result=result; this.previousResult=null; this.completedAt=Date.now(); this.error='';
+                DecisionSources.apply(page,result.sources);
+            } catch(error) {
+                if(epoch!==DecisionSources.epoch) return;
+                this.result=null; this.previousResult=null; this.error=error.message;
+            } finally {
+                this.inFlight=null;
+                if(page.active() && this.active(page)) {
+                    page.renderGraph(); page.renderContext(); page.renderInspector();
+                    if(epoch!==DecisionSources.epoch) {this.lastAttempt=0; this.updateShared(page);}
+                }
+            }
+        })();
+    },
     display(page,node) {
         const key=node.id==='coarse'?'coarse_ash':'suggested_density', result=this.presentation(),pending=this.pending();
         const output=result?.[key], value=output?.value;
@@ -101,7 +125,7 @@ const DecisionRealtime = {
         const inputs=inputKeys.map(key=>{
             const c=result?.inputs?.[key] || {};
             const feature=result?.features?.find(f=>f.key===key);
-            return {node:{title:App.FEATURE_LABELS[key] || ({density:'A304 当前密度',heavy_ash:'重介精煤灰分',float_ash:'浮精灰分',float_amount:'浮精量',coarse_amount:'粗精煤泥量'})[key]},
+            return {node:{title:App.FEATURE_LABELS[key] || ({density:'当前分选密度',heavy_ash:'重介精煤灰分',float_ash:'浮精灰分',float_amount:'浮精量',coarse_amount:'粗精煤泥量'})[key]},
                 display:{value:page.number(c.value,3,c.unit),source:(c.source || '等待输入')+(feature?.clipped ? `；模型限幅后 ${feature.used}` : ''),sampleAt:c.observed_at,enteredAt:c.entered_at}};
         });
         if(node.id==='density') inputs.unshift(

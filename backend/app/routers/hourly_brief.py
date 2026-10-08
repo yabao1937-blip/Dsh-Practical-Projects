@@ -10,6 +10,7 @@ from ..hourly_brief.columns import COLUMNS
 from ..hourly_brief.inputs import LOCAL
 from ..hourly_brief.models import HourlyBriefRow, HourlyBriefSchedule
 from ..telemetry.domain import iso_time, utc_now
+from ..services.decision_sources import config_view
 
 router = APIRouter(prefix="/hourly-brief", tags=["小时推测简报"])
 
@@ -40,5 +41,6 @@ def list_rows(day: date | None = None, limit: int = Query(100, ge=1, le=500),
         "limit": limit, "offset": offset, "server_time": iso_time(utc_now()),
         "activated_at": schedule.activated_at if schedule else None,
         "next_hour": schedule.next_hour if schedule else None,
+        "shared_sources": config_view(db),
         "policy": "从启用后的下一整点开始；取整点前已收到的最近记录；手工值缺失时使用已配置仪表默认值。",
     }

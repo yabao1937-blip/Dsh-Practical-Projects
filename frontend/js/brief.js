@@ -129,6 +129,7 @@ const BriefPage = {
                     <span class="brief-muted">${this.loading ? '正在读取…' : data ? '后台自动生成 · 每小时一行' : ''}</span>
                 </div>
                 <p class="brief-policy">取整点前最近的已接收数据；无手工值时使用已配置的在线仪表默认值。点击时间查看来源和缺项原因。</p>
+                ${data?.shared_sources ? `<p class="brief-policy">与决策总览共享来源 · 当前密度 <strong>${e(data.shared_sources.density_label)}</strong> · 新生成小时采用；历史行保留当时来源。</p>` : ''}
                 <div class="brief-state-legend" aria-label="设备状态图例"><span><i class="brief-state-dot is-running" aria-hidden="true"></i>运行</span><span><i class="brief-state-dot is-stopped" aria-hidden="true"></i>停止</span><span><i class="brief-state-dot is-unknown" aria-hidden="true"></i>无有效数据</span></div>
                 ${this.error ? `<p class="brief-error" role="alert">${e(this.error)}${data ? ' 当前保留上次读取结果。' : ''}</p>` : ''}
             </div></div>
@@ -151,6 +152,7 @@ const BriefPage = {
                                 const cell = row.cells[c.key], note = this.note(cell);
                                 return `<td ${columnAttrs(c)} class="brief-cell-${e(cell?.status || 'missing')} ${c.group ? `brief-group-${c.group} ${c.detail ? 'brief-group-detail' : 'brief-group-summary'}` : ''}" title="${e([c.label, note, cell?.source, this.localTime(cell?.observed_at)].filter(Boolean).join(' · '))}">
                                     ${this.valueHTML(cell, c.key)}
+                                    ${c.key === 'density' ? `<small class="brief-cell-note">${e(row.density_label || cell?.source || '来源未记录')}</small>` : ''}
                                     ${note ? `<small class="brief-cell-note">${e(note)}</small>` : ''}</td>`;
                             }).join('')}</tr>`).join('')}</tbody>
                     </table></div>` : `<div class="brief-empty">
