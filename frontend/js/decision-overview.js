@@ -19,6 +19,45 @@ const DecisionOverviewPage = {
     },
     active() { return !!document.getElementById('page-decision')?.classList.contains('active'); },
     liveMode() { return typeof DecisionRealtime !== 'undefined' && DecisionRealtime.active(this); },
+    renderHTML(id, html) {
+        const host=document.getElementById(id);
+        // Keep the legacy production view unchanged. GPT refreshes patch existing
+        // text/attributes so focused controls and running SVG animations survive.
+        if (!this.liveMode() || !document.createElement) { host.innerHTML=html; host._decisionHTML=null; return; }
+        if (host._decisionHTML===html) return;
+        const template=document.createElement('template'); template.innerHTML=html;
+        const previous=new Map([...host.querySelectorAll('.decision-node-value')].map(el=>[el,el.textContent]));
+        const key=n=>n.nodeType===1 ? n.getAttribute('data-decision-key') || n.getAttribute('data-decision-node') || n.id : null;
+        const compatible=(a,b)=>a && a.nodeType===b.nodeType && a.nodeName===b.nodeName && key(a)===key(b);
+        const sync=(parent,next)=>{
+            let index=0;
+            for(const wanted of [...next.childNodes]) {
+                let current=parent.childNodes[index];
+                if(!compatible(current,wanted)) {
+                    const found=key(wanted) && [...parent.childNodes].slice(index+1).find(n=>compatible(n,wanted));
+                    if(found) { parent.insertBefore(found,current || null); current=found; }
+                    else { parent.insertBefore(wanted.cloneNode(true),current || null); index++; continue; }
+                }
+                if(wanted.nodeType===1) {
+                    for(const attr of [...current.attributes]) if(!wanted.hasAttribute(attr.name)) current.removeAttribute(attr.name);
+                    for(const attr of [...wanted.attributes]) if(current.getAttribute(attr.name)!==attr.value) current.setAttribute(attr.name,attr.value);
+                    sync(current,wanted);
+                    // User interaction dirties option.selected; attributes alone
+                    // cannot restore the next card's actual selected source.
+                    if(current.nodeName==='SELECT' && current.value!==wanted.value) current.value=wanted.value;
+                } else if(current.nodeValue!==wanted.nodeValue) current.nodeValue=wanted.nodeValue;
+                index++;
+            }
+            while(parent.childNodes.length>index) parent.lastChild.remove();
+        };
+        sync(host,template.content); host._decisionHTML=html;
+        if(!this.motionReduced && !this.motionPrinting && !document.hidden) for(const [el,text] of previous) {
+            if(el.isConnected && el.textContent!==text && el.animate) {
+                el._decisionTransition?.cancel();
+                el._decisionTransition=el.animate([{opacity:.6},{opacity:1}],{duration:220,easing:'ease-out'});
+            }
+        }
+    },
     fixedSource(id) { return this.summaryChildren.has(id) || id === 'heavy-amount'; },
     sourceLocked(id) { return this.fixedSource(id) || (this.liveMode() && ['coarse','density','density-current'].includes(id)); },
     loadPointChoices() {
@@ -388,7 +427,7 @@ const DecisionOverviewPage = {
         if (closeFocused) document.querySelector('[data-decision-close]')?.focus({preventScroll:true});
     },
     select(id) {
-        this.selected = id; this.renderGraph(); this.renderInspector();
+        this.selected = id; this.renderGraph(); this.renderInspector(true);
         document.getElementById('decision-inspector').classList.add('is-open');
         this.positionInspector(true);
         document.querySelector('[data-decision-close]')?.focus({preventScroll:true});
@@ -474,6 +513,9 @@ const DecisionOverviewPage = {
     fit() {
         const viewport = document.getElementById('decision-canvas-scroll');
         const scale = this.zoom ?? Math.min(1, Math.max(.65, viewport.clientWidth / 1540));
+        const geometryKey=`${scale}|${viewport.clientWidth}|${innerHeight}`;
+        if(this.liveMode() && this.fitKey===geometryKey) { this.queueInspectorPosition(); return; }
+        this.fitKey=geometryKey;
         this.actualZoom = scale;
         document.getElementById('decision-board').style.transform = `scale(${scale})`;
         const space = document.getElementById('decision-canvas-space');
@@ -606,14 +648,14 @@ const DecisionOverviewPage = {
         if(modeLabel) modeLabel.textContent=this.liveMode()?'实时计算 · 人工执行':'只读决策视图';
         if(modeNote) modeNote.textContent=this.liveMode()?'GPT 链路：当前输入 → 粗精煤泥灰分预测 → 三组分总灰分 → 建议密度。当前密度采用 A304；输入变化后重新计算，缺失时显示原因。建议由人工确认执行。虚线表示尚未进入模型的工况参考。':'点击节点选择采集点，卡片随读数更新；点击画布空白处收起。采集显示不改变建议计算，相关连线作为虚线对照。建议密度保留计算值，点位显示为采集对照。';
         if (this.liveMode()) {
-            const result=DecisionRealtime.result;
-            document.getElementById('decision-context').innerHTML=`<span>计算链 <strong>GPT 实时预测 → 总灰分 → 建议密度</strong></span><span>密度基准 <strong>A304</strong></span><span>模型 <strong>${this.escape(result?.model?.method?.toUpperCase() || '等待模型')}</strong></span><span>计算时间 <strong>${this.escape(result?this.time(result.generated_at):DecisionRealtime.error || '正在计算')}</strong></span><span>当前输入已参与计算 · 建议由人工执行</span>`;
+            const result=DecisionRealtime.presentation(),pending=DecisionRealtime.pending();
+            this.renderHTML('decision-context',`<span>计算链 <strong>GPT 实时预测 → 总灰分 → 建议密度</strong></span><span>密度基准 <strong>A304</strong></span><span>模型 <strong>${this.escape(result?.model?.method?.toUpperCase() || '等待模型')}</strong></span><span>${pending?'上次计算':'计算时间'} <strong>${this.escape(result?this.time(result.generated_at):DecisionRealtime.error || '正在计算')}</strong></span><span class="decision-refresh-status" role="status">${pending?'更新中 · 上轮结果仅供对照':'当前输入已参与计算 · 建议由人工执行'}</span>`);
             return;
         }
         const s = this.snapshot, sources = {manual:'人工总灰分',formula:'三组分公式',entry:'501 导入 / 录入',ash501:'501 灰分取值'};
         const message = s.componentFeeds ? '三组分参与当前建议计算' : '三组分显示公式核算对照，建议由所选总灰分驱动';
         const bound = this.nodes.filter(node => !this.fixedSource(node.id) && this.pointChoices[node.id]).length;
-        document.getElementById('decision-context').innerHTML = `<span>指导口径 <strong>${s.guide.scheme === 'heavy' ? '重介精煤版' : '总灰分版'}</strong></span><span>生产模型 <strong>${this.escape(s.engineLabel)}</strong></span><span>总灰分来源 <strong>${this.escape(sources[s.total.source])}</strong></span><span>${message}</span><span>实时采集 <strong>${bound ? bound+' 张卡片已选点' : '选择点位后更新卡片'}</strong> · 展示不改变建议计算</span>`;
+        this.renderHTML('decision-context',`<span>指导口径 <strong>${s.guide.scheme === 'heavy' ? '重介精煤版' : '总灰分版'}</strong></span><span>生产模型 <strong>${this.escape(s.engineLabel)}</strong></span><span>总灰分来源 <strong>${this.escape(sources[s.total.source])}</strong></span><span>${message}</span><span>实时采集 <strong>${bound ? bound+' 张卡片已选点' : '选择点位后更新卡片'}</strong> · 展示不改变建议计算</span>`);
     },
 
     // Short right-angle routes with small rounded corners; aligned nodes stay straight.
@@ -658,18 +700,19 @@ const DecisionOverviewPage = {
         const ancestorIds = new Set([this.selected]);
         let current = selected;
         while (current?.parent) { ancestorIds.add(current.parent); current = this.nodes.find(n => n.id === current.parent); }
-        const flowingIds = new Set(), now = Date.now()/1000;
+        const flowingIds = new Set(), now = this.liveMode() ? (this.motionEpoch ??= Date.now()/1000) : Date.now()/1000;
         const displays = new Map(this.nodes.map(node => [node.id,this.pointDisplay(node)]));
         const displayOnly = node => displays.get(node.id).aggregate ? displays.get(node.id).summaryParts.some(p => p.display.bound || p.display.calculated) : displays.get(node.id).calculated || !!this.pointChoices[node.id];
         const paths = this.routeConnections().map(({node,parent,path},index) => {
             const highlight = ancestorIds.has(node.id) && ancestorIds.has(parent.id);
             const summaryLink = this.summaryChildren.get(parent.id)?.includes(node.id);
             const displayReference = this.liveMode() ? ['float-press','float-unmodeled','coarse-slime'].includes(node.id) : !summaryLink && (node.reference || (node.id !== 'density' && displayOnly(node)) || (parent.id !== 'density' && displayOnly(parent)));
-            const flows = !displayReference && (this.liveMode() ? this.displayAvailable(displays.get(node.id)) && this.displayAvailable(displays.get(parent.id)) : summaryLink ? this.displayAvailable(displays.get(node.id)) : node.value !== '—' && parent.value !== '—');
+            const flowReady=d=>this.displayAvailable(d) || (d.pending && Number.isFinite(d.numericValue));
+            const flows = !displayReference && (this.liveMode() ? flowReady(displays.get(node.id)) && flowReady(displays.get(parent.id)) : summaryLink ? this.displayAvailable(displays.get(node.id)) : node.value !== '—' && parent.value !== '—');
             if (flows) { flowingIds.add(node.id); flowingIds.add(parent.id); }
-            // Negative phase keeps motion continuous when the five-second snapshot rebuilds the graph.
+            // GPT retains elements and phase; the legacy view still rebuilds from wall-clock phase.
             const phase = -((now+index*.37)%4).toFixed(3);
-            const trace = flows ? `<path class="decision-flow${highlight ? ' is-highlight' : ''}" d="${path}" pathLength="100" style="--dm-flow-color:${colors[node.family]};animation-delay:${phase}s"/>` : '';
+            const trace = flows || this.liveMode() ? `<path data-decision-key="flow-${node.id}" class="decision-flow${highlight ? ' is-highlight' : ''}${flows?'':' is-inactive'}" d="${path}" pathLength="100" style="--dm-flow-color:${colors[node.family]};animation-delay:${phase}s"/>` : '';
             return `<path class="decision-edge${displayReference ? ' is-reference' : ''}${highlight ? ' is-highlight' : ''}" data-decision-from="${node.id}" data-decision-to="${parent.id}" d="${path}" stroke="${colors[node.family]}" marker-end="url(#decision-arrow-${node.family})"/>${trace}`;
         }).join('');
         const markers = Object.entries(colors).map(([key,color]) => `<marker id="decision-arrow-${key}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8" fill="${color}"/></marker>`).join('');
@@ -683,11 +726,12 @@ const DecisionOverviewPage = {
             const badge = display.aggregate || display.calculated ? `<span class="decision-badge">${display.badge}</span>` : display.bound && !root ? `<span class="decision-badge">${display.manual ? (display.held ? '待刷新' : display.available ? '补录' : '无补录') : display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
             const compare = display.bound && root ? `<span class="decision-live-comparison">采集对照 ${this.escape(display.value)}${display.available ? '' : '（不可用）'}</span>` : '';
             const groupHtml = display.components && !root ? `<span class="decision-state-grid">${display.components.map(c => `<span>${this.escape(c.label)} ${c.available && !window.Operations?.telemetryFailed ? c.value ? '开' : '关' : '未知'}</span>`).join('')}</span>` : this.escape(root && !this.liveMode() ? node.value : display.value);
-            return `<button type="button" class="decision-node${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${(display.bound || display.aggregate || display.calculated) && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}"${display.bound || display.aggregate || display.calculated ? ` title="${this.escape(display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-pulse-delay:${phase}s"><span class="decision-node-heading">${this.escape(node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(root && !this.liveMode() ? node.source : display.source)}</span>${sub}${preview}${compare}</span></button>`;
+            return `<button type="button" class="decision-node${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${display.pending ? ' is-updating' : ''}${(display.bound || display.aggregate || display.calculated) && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" aria-busy="${!!display.pending}"${display.bound || display.aggregate || display.calculated ? ` title="${this.escape(display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-pulse-delay:${phase}s"><span class="decision-node-heading">${this.escape(node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(root && !this.liveMode() ? node.source : display.source)}</span>${sub}${preview}${compare}</span></button>`;
         }).join('');
-        const totalReason=this.liveMode() ? DecisionRealtime.result?.total_ash?.reason || DecisionRealtime.error || '正在计算' : '';
-        const total=this.liveMode()?`<strong>预测总灰分 ${this.number(DecisionRealtime.result?.total_ash?.value,2,'%')}</strong><span title="${this.escape(totalReason)}">${this.escape(totalReason.length>45?'输入待补充，点击建议密度查看原因':totalReason)}</span>`:`公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}`;
-        document.getElementById('decision-board').innerHTML = `<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 970"><defs>${markers}</defs>${paths}</svg>${cards}<div class="decision-formula"><strong>三组分质量平衡</strong>总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量<br>${total}</div>`;
+        const shown=this.liveMode()?DecisionRealtime.presentation():null,pending=this.liveMode() && DecisionRealtime.pending();
+        const totalReason=this.liveMode() ? pending?'更新中 · 上轮结果仅供对照':shown?.total_ash?.reason || DecisionRealtime.error || '正在计算' : '';
+        const total=this.liveMode()?`<strong>${pending?'上轮总灰分':'预测总灰分'} ${this.number(shown?.total_ash?.value,2,'%')}</strong><span title="${this.escape(totalReason)}">${this.escape(totalReason.length>45?'输入待补充，点击建议密度查看原因':totalReason)}</span>`:`公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}`;
+        this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 970"><defs>${markers}</defs>${paths}</svg>${cards}<div class="decision-formula"><strong>三组分质量平衡</strong>总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量<br>${total}</div>`);
     },
 
     telemetryState(item, failed = window.Operations?.telemetryFailed) {
@@ -696,8 +740,10 @@ const DecisionOverviewPage = {
         return failed ? '查询中断 · 最后读数不可用' : `${item.sample?.quality || '无质量信息'} · ${labels[item.status] || '不可用'}`;
     },
     pointIdentity(item) { return JSON.stringify([item.source_id,item.key]); },
-    renderInspector() {
+    renderInspector(force=false) {
         if (!this.snapshot) return;
+        const inspector=document.getElementById('decision-inspector');
+        if(this.liveMode() && !force && inspector.classList && !inspector.classList.contains('is-open')) return;
         const scrollTop = document.getElementById('decision-inspector').scrollTop || 0;
         const node = this.nodes.find(n => n.id === this.selected) || this.nodes[0], s = this.snapshot;
         const display = this.pointDisplay(node);
@@ -712,7 +758,7 @@ const DecisionOverviewPage = {
             const calculation = display.calculated ? `<dl class="decision-facts"><dt>计算公式</dt><dd>${this.escape(display.formula)}</dd><dt>计算结果</dt><dd>${this.escape(display.value)}</dd></dl>${display.reason ? `<p class="decision-unavailable">${this.escape(display.reason)}</p>` : ''}` : '';
             const description=display.live ? node.id==='coarse' ? '使用当前各输入卡片的同一份数据调用 GPT 保存模型，输出粗精煤泥灰分。' : '以 A304 实测密度为基准，使用本次预测总灰分给出建议，由人工执行。' : node.description;
             const warnings=display.live && DecisionRealtime.result?.warnings?.length ? `<p>${this.escape('输入提示：'+DecisionRealtime.result.warnings.join('；'))}</p>` : '';
-            document.getElementById('decision-inspector').innerHTML = `<div class="decision-inspector-header"><span>汇总与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${display.badge}</span></div><p>${this.escape(description)}</p>${calculation}${warnings}</div>${details}`;
+            this.renderHTML('decision-inspector',`<div class="decision-inspector-header"><span>汇总与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${display.badge}</span></div><p>${this.escape(description)}</p>${calculation}${warnings}</div>${details}`);
             document.getElementById('decision-inspector').scrollTop = scrollTop;
             this.queueInspectorPosition();
             return;
@@ -755,7 +801,7 @@ const DecisionOverviewPage = {
         const live = item?.kind === 'manual_measurement' ? `<dl class="decision-facts"><dt>补录记录</dt><dd>${this.escape(sample.record_id ? '#' + sample.record_id : '暂无补录')}</dd><dt>保存位置</dt><dd>SQLite · manual_measurements</dd><dt>补录信息名</dt><dd>${this.escape(item.name)}</dd><dt>值</dt><dd>${this.escape(value)} ${this.escape(item.unit)}</dd><dt>测量时间</dt><dd>${this.escape(this.time(sample.observed_at))}</dd><dt>录入时间</dt><dd>${this.escape(this.time(sample.created_at))}</dd><dt>读取状态</dt><dd>${this.escape(this.telemetryState(item))}</dd></dl>` : item ? `<dl class="decision-facts"><dt>原始读数（回退前）</dt><dd class="${available ? '' : 'decision-unavailable'}">${this.escape(value)} ${this.escape(App.telemetryDisplayUnit(item))}${available ? '' : '（不可用）'}</dd><dt>质量 / 时效</dt><dd>${this.escape(this.telemetryState(item))}</dd><dt>数据来源</dt><dd>${this.escape(item.item_id || item.source_id + '/' + item.key)}</dd><dt>源时间</dt><dd>${this.escape(this.time(sample.source_at))}</dd><dt>服务器时间</dt><dd>${this.escape(this.time(sample.server_at))}</dd><dt>接收时间</dt><dd>${this.escape(this.time(sample.received_at))}</dd></dl>` : `<p>${choice ? '已选点位暂未返回，卡片保持不可用，等待数据恢复。' : participates ? '选择点位后，用对应读数重新计算整条决策链；缺失输入将显示原因。' : '选择点位后，该卡片立即显示对应读数；清空选择恢复原业务显示。'}</p>`;
         const memberDetails = item?.kind === 'state_group' ? `<dl class="decision-facts">${(sample.components || []).map(c => `<dt>${this.escape(c.label)} ${this.escape(item.member_label || '系统')}</dt><dd>${this.escape(c.available && !window.Operations?.telemetryFailed ? c.value ? '开' : '关' : '未知')} · ${this.escape(c.item_id)}<br>接收 ${this.escape(this.time(c.received_at))} · ${this.escape(c.status || '未知')}${!c.available && typeof c.value === 'boolean' ? `<br>最后读数 ${c.value ? '1' : '0'}（不可用）` : ''}</dd>`).join('')}</dl>` : item?.kind === 'numeric_average' ? `<dl class="decision-facts"><dt>计算方式</dt><dd>${this.escape(sample.formula)} · 每路 50%<br>本系统计算，保留原始采集点。</dd>${(sample.components || []).map(c => `<dt>${this.escape(c.label)} 原始密度</dt><dd>${this.escape(Number.isFinite(c.value) ? c.value : '—')} ${this.escape(App.telemetryDisplayUnit(c) || '（单位未配置）')}${c.available && !window.Operations?.telemetryFailed ? '' : '（不可用）'}<br>${this.escape(c.item_id)}<br>接收 ${this.escape(this.time(c.received_at))} · ${this.escape(c.status || '未知')}</dd>`).join('')}</dl>` : '';
         const collector = `${items.filter(p => p.available && !this.pointFailed(p)).length} / ${items.length} 个点位可用（含组合与手工补录）${window.Operations?.telemetryFailed ? '；采集查询中断，KEP 最后读数不可用' : ''}${window.Operations?.manualMeasurementsFailed ? '；补录查询失败，待刷新' : ''}`;
-        document.getElementById('decision-inspector').innerHTML = `<div class="decision-inspector-header"><span>因素与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${display.manual ? '手工补录' : participates ? '计算输入' : node.reference ? '对照 / 预留' : '业务取值'}</span></div><p>${this.escape(display.manual ? '读取已保存的手工补录，按测量时间取最新记录。' : node.description)}</p><dl class="decision-facts">${facts}</dl></div><div class="decision-detail decision-source-panel"><h4>卡片数据 → 数据来源</h4><p class="decision-live-state">${this.escape(collector)}。${participates ? '所选读数参与本页实时计算。' : this.liveMode() ? '此项用作工况参考。' : '所选读数用于卡片展示，尚未参与本页计算。'}</p><label for="decision-source-point">选择卡片显示点位${node.id === 'density' ? '（采集对照）' : ''}</label><select id="decision-source-point"><option value="">不使用采集值</option>${options}</select>${live}${memberDetails}</div>`;
+        this.renderHTML('decision-inspector',`<div class="decision-inspector-header"><span>因素与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${display.manual ? '手工补录' : participates ? '计算输入' : node.reference ? '对照 / 预留' : '业务取值'}</span></div><p>${this.escape(display.manual ? '读取已保存的手工补录，按测量时间取最新记录。' : node.description)}</p><dl class="decision-facts">${facts}</dl></div><div class="decision-detail decision-source-panel"><h4>卡片数据 → 数据来源</h4><p class="decision-live-state">${this.escape(collector)}。${participates ? '所选读数参与本页实时计算。' : this.liveMode() ? '此项用作工况参考。' : '所选读数用于卡片展示，尚未参与本页计算。'}</p><label for="decision-source-point">选择卡片显示点位${node.id === 'density' ? '（采集对照）' : ''}</label><select id="decision-source-point"><option value="">不使用采集值</option>${options}</select>${live}${memberDetails}</div>`);
         document.getElementById('decision-inspector').scrollTop = scrollTop;
         this.queueInspectorPosition();
     },

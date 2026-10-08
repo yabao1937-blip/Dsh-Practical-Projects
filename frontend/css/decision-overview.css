@@ -25,6 +25,9 @@
 .decision-edge.is-highlight { opacity: 1; stroke-width: 3; }
 .decision-flow { fill: none; stroke: var(--dm-flow-color); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 8 92; filter: drop-shadow(0 0 3px var(--dm-flow-color)); opacity: .8; pointer-events: none; animation: decision-flow 4s linear infinite; }
 .decision-flow.is-highlight { stroke-width: 4; opacity: 1; }
+.decision-flow.is-inactive { opacity: 0; }
+.decision-node.is-updating .decision-badge { opacity: .75; }
+.decision-refresh-status { min-width: 250px; }
 @keyframes decision-flow { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
 .decision-edge-label { fill: var(--dm-muted); font-size: 12px; }
 .decision-edge-label-bg { fill: var(--dm-bg); }

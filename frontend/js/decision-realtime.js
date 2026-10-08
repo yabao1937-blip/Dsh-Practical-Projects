@@ -1,6 +1,12 @@
 /* Decision-only live input orchestration. The server evaluates one immutable input snapshot. */
 const DecisionRealtime = {
-    result:null, resultKey:null, currentKey:null, inFlight:null, lastAttempt:0, error:'',
+    result:null, resultKey:null, currentKey:null, inFlight:null, lastAttempt:0, error:'', previousResult:null, completedAt:0, previewUntil:0,
+    pending() { return !this.result && !!this.inFlight && !this.error; },
+    presentation() {
+        if(this.result) return this.result;
+        // This is a labelled visual preview only, never the current valid result.
+        return this.pending() && Date.now()<this.previewUntil && Date.now()-this.completedAt<30000 ? this.previousResult : null;
+    },
     defaults:{'raw-ash':'TIA_3_1.TIA_3_1.202/ASH_R_INS','coal-rate':'TIA_3_1.TIA_3_1.301/COAL_CAP',
         'tail-level':'TIA_3_5.TIA_3_5.JMCWC/LEVEL_B','system-switches':'four_system_status','desliming':'desliming_status'},
     active(page) { return page.view === 'gpt'; },
@@ -55,20 +61,27 @@ const DecisionRealtime = {
         if (!this.active(page)) {this.currentKey=null;return;}
         const body=this.capture(page), key=JSON.stringify(body);
         this.currentKey=key;
-        if (this.resultKey!==key) this.result=null;
+        if (this.resultKey!==key) {
+            if(this.result) { this.previousResult=this.result; this.previewUntil=Date.now()+5000; }
+            this.result=null;
+        }
+        const safePreview=Object.values(body.cells).every(c=>Number.isFinite(c.value) && !['missing','held','stopped'].includes(c.status) &&
+            (c.status!=='good' || (Date.now()-Date.parse(c.observed_at)>=-5000 && Date.now()-Date.parse(c.observed_at)<=30000))) &&
+            body.cells.is_stoppage.value===0 && body.cells.density.value>0 && body.cells.density.value!==1;
+        if(!safePreview) this.previousResult=null;
         if (this.inFlight || (this.resultKey===key && Date.now()-this.lastAttempt<4500)) return;
         this.lastAttempt=Date.now(); this.error='';
         if (!window.Api?.calculateDecision || !window.location.protocol.startsWith('http')) {
-            this.result=null;this.error='请通过服务器地址打开页面以运行实时决策';return;
+            this.result=null;this.previousResult=null;this.error='请通过服务器地址打开页面以运行实时决策';return;
         }
         this.inFlight=(async()=>{
             try {
                 const result=await window.Api.calculateDecision(body);
                 if (this.currentKey!==key) return;
-                this.result=result;this.resultKey=key;
+                this.result=result;this.resultKey=key;this.previousResult=null;this.completedAt=Date.now();
             } catch(error) {
                 if (this.currentKey!==key) return;
-                this.result=null;this.resultKey=null;this.error=error.message || '后台计算暂不可用';
+                this.result=null;this.previousResult=null;this.resultKey=null;this.error=error.message || '后台计算暂不可用';
             } finally {
                 this.inFlight=null;
                 if (page.active() && this.active(page)) {
@@ -80,10 +93,10 @@ const DecisionRealtime = {
         })();
     },
     display(page,node) {
-        const key=node.id==='coarse'?'coarse_ash':'suggested_density', result=this.result;
+        const key=node.id==='coarse'?'coarse_ash':'suggested_density', result=this.presentation(),pending=this.pending();
         const output=result?.[key], value=output?.value;
-        const reason=output?.reason || this.error || '正在按当前输入计算';
-        const available=Number.isFinite(value) && output.status!=='held';
+        const reason=pending ? result ? '正在更新；显示上一轮结果，仅供对照，本轮完成后自动替换' : '正在按当前输入计算' : output?.reason || this.error || '正在按当前输入计算';
+        const available=!pending && Number.isFinite(value) && output.status!=='held';
         const inputKeys=node.id==='coarse' ? App.MLR_FEATURES : ['density','heavy_ash','float_ash','float_amount','coarse_amount'];
         const inputs=inputKeys.map(key=>{
             const c=result?.inputs?.[key] || {};
@@ -97,10 +110,10 @@ const DecisionRealtime = {
             {node:{title:'重介精煤量'},display:{value:page.number(result?.heavy_amount?.value,3,'t/h'),source:'501 + 502 − 浮精量 − 粗精煤泥量'}});
         const amount=page.pointDisplay(page.nodes.find(n=>n.id==='coarse-amount'));
         const guide=result?.guidance;
-        return {live:true,calculated:true,bound:false,numericValue:Number.isFinite(value)?value:null,available,held:output?.status==='held',inputs,
+        return {live:true,calculated:true,pending,bound:false,numericValue:Number.isFinite(value)?value:null,available,held:output?.status==='held',inputs,
             value:page.number(value,node.id==='coarse'?2:3,node.id==='coarse'?'%':''),
-            badge:available ? node.id==='coarse'?'预测':'建议' : Number.isFinite(value)?'沿用输入':/暂缓|已按|刚调整/.test(reason)?'暂缓':'待计算',
-            source:node.id==='coarse' ? `煤量 ${amount.value} · GPT${output?.status==='held'?'沿用输入预测':'实时预测'}` :
+            badge:pending?'更新中':available ? node.id==='coarse'?'预测':'建议' : Number.isFinite(value)?'沿用输入':/暂缓|已按|刚调整/.test(reason)?'暂缓':'待计算',
+            source:pending ? result ? '上轮结果 · 等待本轮计算' : '等待本轮计算' : node.id==='coarse' ? `煤量 ${amount.value} · GPT${output?.status==='held'?'沿用输入预测':'实时预测'}` :
                 Number.isFinite(value) ? guide?.direction==='down'?'本步建议 · 下调':guide?.direction==='up'?'本步建议 · 上调':'密度保持' : '等待有效输入',
             formula:node.id==='coarse'?`GPT / ${result?.model?.method?.toUpperCase() || '保存模型'} · ${result?.model?.id || '等待模型'}`:`总灰分 ${page.number(result?.target?.min ?? 8.5,1)}–${page.number(result?.target?.max ?? 9.0,1)}% 范围内保持，范围外向最近边界调整`,
             reason,title:reason,sampleAt:result?.generated_at};

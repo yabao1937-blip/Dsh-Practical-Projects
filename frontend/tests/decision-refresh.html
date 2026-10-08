@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>Decision refresh DOM regression</title>
+<link rel="stylesheet" href="../css/decision-overview.css">
+<style>body{font:16px sans-serif;margin:24px}#fixture{height:200px;overflow:auto}#fixture button{position:static}svg{width:400px;height:50px}pre{white-space:pre-wrap}</style>
+<h1>决策刷新 DOM 回归（隔离、无网络数据写入）</h1>
+<pre id="result">运行中</pre><div class="decision-workspace is-light"><div id="fixture"></div></div>
+<script>const DecisionRealtime={active:page=>page.view==='gpt'};</script>
+<script src="../js/decision-overview.js"></script>
+<script>
+// Exercise the actual renderer against browser DOM; no App or server API is loaded.
+(async()=>{
+    const checks=[],assert=(test,name)=>{if(!test)throw Error(name);checks.push(name);};
+    const page=DecisionOverviewPage,host=document.getElementById('fixture');
+    const markup=(value,choice='乙')=>`<svg><path data-decision-key="flow-raw" class="decision-flow" d="M0 20 H380" pathLength="100" style="--dm-flow-color:green;animation-delay:-1s"/></svg><button data-decision-node="raw" class="decision-node"><span class="decision-node-value">${value} %</span></button><label>来源<select id="point"><option${choice==='甲'?' selected':''}>甲</option><option${choice==='乙'?' selected':''}>乙</option></select></label><div style="height:400px">详情</div>`;
+    page.renderHTML('fixture',markup('40.00'));
+    const card=host.querySelector('button'),value=card.firstChild,svg=host.querySelector('svg'),flow=host.querySelector('path'),select=host.querySelector('select');
+    const animation=flow.getAnimations()[0];
+    select.focus();host.scrollTop=20;
+    const observer=new MutationObserver(()=>{});observer.observe(host,{childList:true,subtree:true});
+    for(let i=0;i<50;i++) page.renderHTML('fixture',markup((40+i/100).toFixed(2)));
+    assert(card===host.querySelector('button') && value===card.firstChild,'50 次更新保留卡片与数值节点');
+    assert(svg===host.querySelector('svg') && flow===host.querySelector('path'),'50 次更新保留 SVG 与连线节点');
+    assert(animation && animation===flow.getAnimations()[0],'连线动画实例持续运行');
+    assert(document.activeElement===select && select.value==='乙','来源控件及焦点保持');
+    assert(host.scrollTop===20,'详情滚动位置保持');
+    assert(value.textContent==='40.49 %','数值直接更新到真实值，不生成插值读数');
+    assert(!observer.takeRecords().some(r=>[...r.removedNodes].some(n=>[card,value,svg,flow,select].includes(n))),'未移除持续显示的节点');
+    select.value='甲';page.renderHTML('fixture',markup('40.50','甲'));page.renderHTML('fixture',markup('40.51','乙'));
+    assert(select.value==='乙','手动选点后切换卡片，同步实际下拉选项');
+    const lastTransition=value._decisionTransition;
+    page.motionReduced=true;page.renderHTML('fixture',markup('41.00'));
+    assert(value._decisionTransition===lastTransition,'减少动态模式不创建新数值动画');
+    page.view='production';page.renderHTML('fixture','<p>旧生产视图</p>');page.view='gpt';page.renderHTML('fixture',markup('41.00'));
+    assert(host.querySelector('.decision-node-value')?.textContent==='41.00 %','切换生产视图后 GPT 正确重建');
+    observer.disconnect();document.getElementById('result').textContent=JSON.stringify({passed:checks.length,checks},null,2);
+})().catch(error=>{document.getElementById('result').textContent='FAIL: '+error.message;console.error(error);});
+</script></html>

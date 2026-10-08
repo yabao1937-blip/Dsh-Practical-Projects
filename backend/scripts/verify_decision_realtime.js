@@ -23,7 +23,7 @@ const page=vm.runInContext('DecisionOverviewPage',ctx), live=vm.runInContext('De
 const initial=JSON.stringify(App.store);
 const node=id=>page.nodes.find(n=>n.id===id);
 page.snapshot=page.buildSnapshot(); page.nodes=page.buildNodes(page.snapshot);
-const stamp='2026-10-08T06:00:00Z';
+const stamp=new Date().toISOString();
 const point=(key,item_id,value,unit='')=>({source_id:'kep',key,item_id,available:true,status:'good',unit,
     sample:{value,quality:'good',received_at:stamp,batch_id:'batch1'}});
 const raw=point('raw',live.defaults['raw-ash'],40),coal=point('coal',live.defaults['coal-rate'],600),level=point('level',live.defaults['tail-level'],50);
@@ -73,8 +73,19 @@ async function verifyRequests() {
     assert.equal(live.result.coarse_ash.value,9.3);
     assert.equal(live.display(page,node('coarse')).value,'9.30 %');
     raw.sample.value=42; live.update(page); assert.equal(live.result,null);
+    assert.equal(live.presentation().coarse_ash.value,9.3,'Only the presentation keeps the previous result during a short update');
+    assert.equal(live.display(page,node('density')).badge,'更新中');
+    assert.equal(live.display(page,node('density')).available,false,'Previous advice never becomes current advice');
+    const until=live.previewUntil; live.previewUntil=0;
+    assert.equal(live.presentation(),null,'A preview has a hard time limit'); live.previewUntil=until;
     requests[2].reject(new Error('离线')); await live.inFlight;
     assert.equal(live.result,null); assert.match(live.display(page,node('density')).reason,/离线/);
+    assert.equal(live.presentation(),null,'Failure removes the preview');
+    raw.sample.value=43;live.update(page);
+    requests[3].resolve({coarse_ash:{value:9.4,status:'predicted'},suggested_density:{value:1.49,status:'calculated'}});await live.inFlight;
+    ops.telemetryFailed=true;live.update(page);
+    assert.equal(live.presentation(),null,'Unavailable new inputs remove previous advice immediately');
+    requests[4].reject(new Error('采集失效'));await live.inFlight;ops.telemetryFailed=false;
     assert.equal(JSON.stringify(App.store),initial,'Live calculation never writes legacy model/store state');
     console.log('Decision realtime: input mapping, A304, retained zero, missing states, source changes, async ordering, failure clearing and read isolation passed.');
 }
