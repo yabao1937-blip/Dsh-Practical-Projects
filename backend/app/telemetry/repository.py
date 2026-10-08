@@ -8,6 +8,8 @@ from .config import CollectorConfig
 from .domain import availability, definition_id, iso_time, parse_time, utc_now
 from .models import TelemetryPoint, TelemetryReading, TelemetrySource
 from .derived import density_average_points, system_status_points
+from .retained import (raw_sample, point_memory, remember_point, remember_density,
+                       density_rows, density_memory, density_definition)
 
 
 class CollectorBusy(RuntimeError):
@@ -99,9 +101,10 @@ class TelemetryRepository:
                 # 重放旧批次/旧点位定义可以保留历史，但不能回退当前快照。
                 matches = sample.get("definition_id") == definition_id(point.config)
                 if matches and (not point.latest or received >= point.latest["received_at"]):
-                    point.latest = sample
+                    point.latest = remember_point(db, point, {**sample, "batch_id": batch["batch_id"]})
                 if not source.last_sample_at or received > source.last_sample_at:
                     source.last_sample_at = received
+            remember_density(db, cfg.source_id)
             db.commit()
 
     def prune(self, cfg):
@@ -132,10 +135,18 @@ def latest_view(db, source_id=None, now=None):
     items = []
     for row in db.scalars(points_query):
         usable, reason = availability(row.latest, row.config, online.get(row.source_id, False), now)
+        memory = point_memory(db, row)
         items.append({"source_id": row.source_id, "key": row.key, "name": row.config["name"],
             "device": row.config.get("device", ""), "tag_name": row.config.get("tag_name", ""),
             "description": row.config.get("description", ""), "item_id": row.config.get("item_id", ""),
-            "unit": row.config["unit"], "sample": row.latest, "available": usable, "status": reason})
+            "unit": row.config["unit"], "sample": raw_sample(row.latest), "available": usable, "status": reason,
+            "last_valid_sample": memory["last_valid"], "last_nonzero_sample": memory["last_nonzero"]})
+    averages = density_average_points(items)
+    for item in averages:
+        rows = density_rows(db, item["source_id"])
+        if all(rows):
+            item["sample"]["definition_id"] = density_definition(rows)
+            item["last_valid_sample"] = density_memory(db, rows)
     return {"checked_at": iso_time(now), "sources": sources, "items": items,
-            "derived_items": system_status_points(items) + density_average_points(items),
+            "derived_items": system_status_points(items) + averages,
             "summary": {"points": len(items), "available": sum(p["available"] for p in items)}}

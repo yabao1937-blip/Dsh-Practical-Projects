@@ -60,6 +60,9 @@ def density_average_points(items):
                     pass
         complete = len(times) == 2 and all(c["point_key"] for c in components)
         same_batch = complete and len(set(times)) == 1
+        batch_ids = [(by_id.get(item_id, {}).get("sample") or {}).get("batch_id") for _, item_id in DENSITY_AVERAGE_MEMBERS]
+        if any(batch_ids):
+            same_batch = same_batch and bool(batch_ids[0]) and len(set(batch_ids)) == 1
         same_unit = len({c["unit"] for c in components}) == 1
         available = same_batch and same_unit and all(c["available"] for c in components)
         issue = None if available else "incomplete_components" if not complete else "member_unavailable" if not all(c["available"] for c in components) else "mixed_batches" if not same_batch else "unit_mismatch"
