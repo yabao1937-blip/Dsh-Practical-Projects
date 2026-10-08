@@ -8,7 +8,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, text,
+    JSON, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -92,6 +92,27 @@ class ManualEntry(Base):
     operator: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class ManualMeasurement(Base):
+    """Append-only manual process readings; excluded from legacy /state mirrors."""
+    __tablename__ = "manual_measurements"
+    __table_args__ = (
+        UniqueConstraint("client_id", name="uq_manual_measurements_client_id"),
+        Index("ix_manual_measurement_metric_id", "metric", "id"),
+        CheckConstraint("value >= 0", name="ck_manual_measurement_nonnegative"),
+        CheckConstraint("metric IN ('heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_amount')", name="ck_manual_measurement_metric"),
+        CheckConstraint("metric = 'coarse_slime_amount' OR value <= 100", name="ck_manual_measurement_percentage"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    metric: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str] = mapped_column(String(16), nullable=False)
+    observed_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    client_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
 class HeavySample(Base):

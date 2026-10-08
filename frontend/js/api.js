@@ -11,6 +11,73 @@
 window.Api = {
     base: '/api/v1',
 
+    async manualMeasurementsRequest(path = '', body, timeoutMs = 20000) {
+        const headers = {};
+        if (body !== undefined) {
+            headers['Content-Type'] = 'application/json';
+            const token = this.writeToken();
+            if (token) headers['X-DMCS-Token'] = token;
+        }
+        let response;
+        try {
+            response = await fetch(this.base + '/manual-measurements' + path, {
+                method: body === undefined ? 'GET' : 'POST', headers,
+                ...(body === undefined ? {} : {body: JSON.stringify(body)}),
+                cache: 'no-store', signal: AbortSignal.timeout(timeoutMs),
+            });
+        } catch (_) {
+            throw new Error('未收到补录服务响应，请刷新记录核对后重试。');
+        }
+        const result = await response.json().catch(() => null);
+        if (!response.ok) {
+            const message = [401,403].includes(response.status) ? '没有补录权限，请重新打开服务器网页。'
+                : response.status === 422 ? '请核对补录时间、信息名和值；百分比为 0–100，煤量不得为负。'
+                : typeof result?.detail === 'string' ? result.detail : `补录服务请求失败（HTTP ${response.status}）`;
+            throw new Error(message);
+        }
+        return result;
+    },
+
+    async getManualMeasurementMetrics() {
+        const result = await this.manualMeasurementsRequest('/metrics');
+        if (!Array.isArray(result?.items) || !result.items.length) throw new Error('补录信息列表返回异常');
+        return result.items;
+    },
+
+    async getManualMeasurements(options = {}) {
+        const query = new URLSearchParams({limit: String(options.limit || 20), offset: String(options.offset || 0)});
+        if (options.metric) query.set('metric', options.metric);
+        const result = await this.manualMeasurementsRequest('?' + query);
+        if (!Array.isArray(result?.items) || !Number.isInteger(result.total)) throw new Error('补录记录返回异常');
+        return result;
+    },
+
+    async getManualMeasurementPoints() {
+        const result = await this.manualMeasurementsRequest('/latest', undefined, 5000);
+        if (!Array.isArray(result?.items) || !result.items.length || result.items.some(item =>
+            item.source_id !== 'manual-measurements' || item.kind !== 'manual_measurement' ||
+            typeof item.key !== 'string' || typeof item.unit !== 'string' ||
+            (item.available && (!Number.isFinite(item.sample?.value) || !Number.isInteger(item.sample?.record_id) ||
+                !Number.isFinite(Date.parse(item.sample?.observed_at)) || !Number.isFinite(Date.parse(item.sample?.created_at)))))) {
+            throw new Error('最新补录点位返回异常');
+        }
+        return result;
+    },
+
+    async saveManualMeasurement(body, definition) {
+        const result = await this.manualMeasurementsRequest('', body);
+        if (!Number.isInteger(result?.id) || result.id <= 0 || !Number.isFinite(result.value)
+                || result.value !== body.value || result.metric !== body.metric
+                || typeof result.observed_at !== 'string' || !Number.isFinite(Date.parse(result.observed_at))
+                || typeof result.created_at !== 'string' || !Number.isFinite(Date.parse(result.created_at))
+                || typeof result.name !== 'string' || !result.name.trim() || typeof result.unit !== 'string' || !result.unit.trim()
+                || (definition && (result.name !== definition.name || result.unit !== definition.unit))
+                || (body.observed_at && Date.parse(result.observed_at) !== Date.parse(body.observed_at))) {
+            throw new Error('未收到明确保存确认，请刷新记录核对后重试。');
+        }
+        return result;
+    },
+
     async getHealth() {
         const response = await fetch(this.base + '/health', {signal: AbortSignal.timeout(5000), cache: 'no-store'});
         return {ok: response.ok, ...(await response.json())};

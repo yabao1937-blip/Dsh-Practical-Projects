@@ -12,7 +12,7 @@ from .routers.hourly_brief import router as hourly_brief_router
 from .config import APP_VERSION, FRONTEND_DIR
 from .database import Base, engine
 from .observability import install_observability
-from .routers import (assistant, health, import_api, inputs, manual_entries, migration, overview,
+from .routers import (assistant, health, import_api, inputs, manual_entries, manual_measurements, migration, overview,
                       records, samples, settings, state, telemetry, training)
 
 Base.metadata.create_all(bind=engine)
@@ -48,6 +48,7 @@ app.include_router(inputs.router, prefix="/api/v1")
 app.include_router(records.router, prefix="/api/v1")
 app.include_router(samples.router, prefix="/api/v1")
 app.include_router(manual_entries.router, prefix="/api/v1")
+app.include_router(manual_measurements.router, prefix="/api/v1")
 app.include_router(overview.router, prefix="/api/v1")
 app.include_router(state.router, prefix="/api/v1")
 app.include_router(import_api.router, prefix="/api/v1")

@@ -1,0 +1,24 @@
+#manual-measurements-panel .measurement-fields { display: grid; grid-template-columns: 1.3fr 1fr .8fr; gap: 20px; border: 0; margin: 0; padding: 0; min-width: 0; }
+#manual-measurements-panel .measurement-fields .form-group { min-width: 0; }
+#manual-measurements-panel input, #manual-measurements-panel select { width: 100%; min-width: 0; box-sizing: border-box; }
+#manual-measurements-panel .measurement-help { color: var(--text-muted); font-size: 12px; line-height: 1.7; margin: 8px 0; }
+#manual-measurements-panel .measurement-message { min-height: 20px; margin: 12px 0; font-size: 13px; }
+#manual-measurements-panel .measurement-message[data-status="success"] { color: var(--accent-green); }
+#manual-measurements-panel .measurement-message[data-status="error"] { color: var(--accent-red); }
+#manual-measurements-panel .measurement-history-heading { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; border-top: 1px solid var(--border-color); padding-top: 20px; margin-top: 16px; }
+#manual-measurements-panel .measurement-history-heading h4 { margin: 0; }
+#manual-measurements-panel .measurement-history-heading label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+#manual-measurements-panel .measurement-history-heading select { width: auto; max-width: 220px; }
+#manual-measurements-panel .measurement-history-scroll { max-height: 420px; overflow: auto; }
+#manual-measurements-panel .data-table { min-width: 670px; }
+#manual-measurements-panel .measurement-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; color: var(--text-muted); font-size: 12px; }
+#manual-measurements-panel button:disabled { opacity: .6; cursor: default; }
+@media (max-width: 800px) {
+    #page-collect { min-width: 0; }
+    #page-collect .panel-row { flex-direction: column; }
+    #page-collect .panel-half { min-width: 0; }
+    #page-collect .panel-header, #page-collect .panel-header-info { flex-wrap: wrap; max-width: 100%; }
+    #page-collect #instrument-panel-body { overflow: auto; }
+    #manual-measurements-panel .measurement-fields { grid-template-columns: 1fr; gap: 0; }
+    #manual-measurements-panel .panel-header { flex-wrap: wrap; gap: 10px; }
+}

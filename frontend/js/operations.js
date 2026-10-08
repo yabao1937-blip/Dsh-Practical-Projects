@@ -2,6 +2,9 @@
 window.Operations = {
     health: null,
     telemetry: null,
+    manualMeasurements: null,
+    manualMeasurementsFailed: false,
+    _manualInFlight: null,
     serverState: 'checking',
     telemetryFailed: false,
     checkedAt: null,
@@ -115,10 +118,32 @@ window.Operations = {
         }
     },
 
+    refreshManualMeasurements() {
+        if (!window.location.protocol.startsWith('http')) return Promise.resolve();
+        if (this._manualInFlight) return this._manualInFlight;
+        this._manualInFlight = window.Api.getManualMeasurementPoints().then(result => {
+            this.manualMeasurements = result;
+            this.manualMeasurementsFailed = false;
+        }).catch(() => {
+            this.manualMeasurementsFailed = true;
+        }).finally(() => {
+            this._manualInFlight = null;
+            if (typeof DecisionOverviewPage !== 'undefined') DecisionOverviewPage.telemetryUpdated();
+        });
+        return this._manualInFlight;
+    },
+
+    async manualMeasurementSaved() {
+        // A poll started before POST committed may still carry the old record.
+        if (this._manualInFlight) await this._manualInFlight;
+        return this.refreshManualMeasurements();
+    },
+
     refresh() {
         if (!window.location.protocol.startsWith('http')) { this.render(); return Promise.resolve(); }
         if (this._inFlight) return this._inFlight;
         if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+        this.refreshManualMeasurements();
         this._inFlight = Promise.allSettled([window.Api.getHealth(), window.Api.getTelemetry()]).then(results => {
             const [health, telemetry] = results;
             if (health.status === 'fulfilled') {

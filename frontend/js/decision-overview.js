@@ -22,6 +22,7 @@ const DecisionOverviewPage = {
             const saved = JSON.parse(localStorage.getItem(this.choicesKey) || '{}'), choices = Object.create(null);
             if (saved && typeof saved === 'object' && !Array.isArray(saved)) for (const [id,value] of Object.entries(saved)) {
                 if (id === 'stoppage' || !/^[a-z][a-z0-9-]{0,63}$/.test(id) || typeof value !== 'string' || value.length > 160) continue;
+                if (value === '') { choices[id] = ''; continue; }
                 let identity;
                 try { identity = JSON.parse(value); } catch (_) { continue; }
                 if (Array.isArray(identity) && identity.length === 2 && identity.every(v => typeof v === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(v))) choices[id] = value;
@@ -61,7 +62,26 @@ const DecisionOverviewPage = {
         }
         return retained;
     },
-    displayPoints() { return [...(window.Operations?.telemetry?.items || []), ...(window.Operations?.telemetry?.derived_items || [])]; },
+    displayPoints() { return [...(window.Operations?.manualMeasurements?.items || []), ...(window.Operations?.telemetry?.items || []), ...(window.Operations?.telemetry?.derived_items || [])]; },
+    applyDefaultManualPoint() {
+        if (Object.prototype.hasOwnProperty.call(this.pointChoices, 'heavy-ash') || window.Operations?.manualMeasurementsFailed) return;
+        const point = window.Operations?.manualMeasurements?.items?.find(p => p.key === 'heavy_clean_coal_ash' && p.available);
+        if (point) { this.pointChoices['heavy-ash'] = this.pointIdentity(point); this.savePointChoices(); }
+    },
+    pointFailed(item) {
+        return item?.kind === 'manual_measurement' ? !!window.Operations?.manualMeasurementsFailed : !!window.Operations?.telemetryFailed;
+    },
+    manualDisplay(item) {
+        const sample = item?.sample || {}, failed = !!window.Operations?.manualMeasurementsFailed;
+        const valid = !!item?.available && Number.isFinite(sample.value);
+        const held = valid && failed;
+        const state = failed ? '补录查询失败 · 待刷新' : valid ? '已保存到 SQLite' : '暂无已到时的有效补录';
+        return {bound:true, manual:true, item, available:valid && !failed, held, stopped:false, components:null,
+            value:valid ? new Intl.NumberFormat('zh-CN', {maximumFractionDigits:3, useGrouping:false}).format(sample.value) + ' ' + item.unit : '—',
+            sampleAt:sample.observed_at || null, enteredAt:sample.created_at || null,
+            source:valid ? `${held ? '补录查询失败 · 上次读取值' : '手工补录'} · ${this.time(sample.observed_at)}` : state,
+            title:`SQLite 手工补录；${state}；测量时间 ${this.time(sample.observed_at)}；录入时间 ${this.time(sample.created_at)}`};
+    },
     groupValue(components) { return (components || []).map(c => `${c.label} ${c.available && !window.Operations?.telemetryFailed ? c.value ? '开' : '关' : '未知'}`).join(' · '); },
     densityDisplay(item) {
         // Business density is resolved per channel on the server. Never reuse the
@@ -83,6 +103,7 @@ const DecisionOverviewPage = {
         const choice = this.pointChoices[node.id];
         if (!choice) return {bound:false,value:node.value,source:node.source,sampleAt:node.sampleAt};
         const item = this.displayPoints().find(p => this.pointIdentity(p) === choice);
+        if (item?.kind === 'manual_measurement' || choice.startsWith('["manual-measurements",')) return this.manualDisplay(item);
         if (node.id === 'density-current' && (!item || item.key === 'a303_a304_density_average' ||
             ['TIA_4_1.TIA_4_1.A303/MD','TIA_4_1.TIA_4_1.A304/MD'].includes(item?.item_id))) return this.densityDisplay(item);
         const sample = item?.sample || {};
@@ -121,6 +142,7 @@ const DecisionOverviewPage = {
     },
     telemetryUpdated() {
         if (!this.initialized || !this.active() || document.hidden || !this.snapshot) return;
+        this.applyDefaultManualPoint();
         let migrated = false;
         for (const [nodeId,groupKey] of [['system-switches','four_system_status'],['desliming','desliming_status'],['float-press','float_press_status']]) {
             const old = (window.Operations?.telemetry?.items || []).find(p => this.pointIdentity(p) === this.pointChoices[nodeId]);
@@ -228,7 +250,6 @@ const DecisionOverviewPage = {
         document.getElementById('decision-inspector').addEventListener('change', event => {
             if (event.target.id === 'decision-source-point') {
                 this.pointChoices[this.selected] = event.target.value;
-                if (!event.target.value) delete this.pointChoices[this.selected];
                 this.savePointChoices();
                 this.sourceInteractionUntil = Date.now() + 500;
                 this.renderGraph(); this.renderContext(); this.renderInspector();
@@ -265,6 +286,7 @@ const DecisionOverviewPage = {
         if (!this.initialized) return;
         this.syncMotion();
         if (!this.active()) { this.closeInspector(false); return; }
+        this.applyDefaultManualPoint();
         const focused = document.activeElement?.dataset?.decisionNode;
         const sourceFocused = document.activeElement?.id === 'decision-source-point';
         const closeFocused = document.activeElement?.hasAttribute('data-decision-close');
@@ -559,7 +581,7 @@ const DecisionOverviewPage = {
             const unit = node.id === 'density' ? '<span class="decision-root-unit">g/cm³</span>' : '';
             const sub = node.id === 'density' ? `<span>当前 ${this.number(s.guide.rhoCur,3)}</span><span>目标灰分范围 ${targetAshRange}</span>` : '';
             const phase = -((now+index*.41)%5).toFixed(3);
-            const badge = display.bound && !root ? `<span class="decision-badge">${display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
+            const badge = display.bound && !root ? `<span class="decision-badge">${display.manual ? (display.held ? '待刷新' : display.available ? '补录' : '无补录') : display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
             const compare = display.bound && root ? `<span class="decision-live-comparison">采集对照 ${this.escape(display.value)}${display.available ? '' : '（不可用）'}</span>` : '';
             const groupHtml = display.components && !root ? `<span class="decision-state-grid">${display.components.map(c => `<span>${this.escape(c.label)} ${c.available && !window.Operations?.telemetryFailed ? c.value ? '开' : '关' : '未知'}</span>`).join('')}</span>` : this.escape(root ? node.value : display.value);
             return `<button type="button" class="decision-node${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${display.bound && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}"${display.bound ? ` title="${this.escape(display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-pulse-delay:${phase}s"><span class="decision-node-heading">${this.escape(node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(root ? node.source : display.source)}</span>${sub}${preview}${compare}</span></button>`;
@@ -568,6 +590,7 @@ const DecisionOverviewPage = {
     },
 
     telemetryState(item, failed = window.Operations?.telemetryFailed) {
+        if (item?.kind === 'manual_measurement') return window.Operations?.manualMeasurementsFailed ? '补录查询失败 · 显示上次读取值，待刷新' : item.available ? '已保存到 SQLite · 按测量时间取最新' : '暂无已到时的有效补录';
         const labels = {good:'可用',no_data:'无数据',bad_quality:'坏质量',uncertain_quality:'质量不确定',stale:'接收超时',source_stale:'源时间过期',collector_offline:'采集离线',out_of_range:'超出量程',invalid_value_type:'类型不匹配',non_finite_value:'数值无效',future_source_time:'源时钟异常',incomplete_components:'组合数据未齐',member_unavailable:'部分成员不可用',mixed_batches:'成员接收批次不一致',unit_mismatch:'成员单位不一致'};
         return failed ? '查询中断 · 最后读数不可用' : `${item.sample?.quality || '无质量信息'} · ${labels[item.status] || '不可用'}`;
     },
@@ -577,11 +600,14 @@ const DecisionOverviewPage = {
         const scrollTop = document.getElementById('decision-inspector').scrollTop || 0;
         const node = this.nodes.find(n => n.id === this.selected) || this.nodes[0], s = this.snapshot;
         const display = this.pointDisplay(node);
-        const pairs = [['当前业务值',node.value + (node.id === 'density' ? ' g/cm³' : '')],['当前来源',node.source],['采样 / 记录时间',this.time(node.sampleAt)],['人工录入时间',this.time(node.enteredAt)],['化验结果可用时间','未记录（不由采样时刻推断）'],['实时业务绑定','尚未接入']];
-        if (display.bound) pairs.unshift([node.id === 'density' ? '采集对照值' : '卡片显示值',display.value + (display.held ? '（沿用上次有效值）' : display.available ? '' : '（不可用）')],
+        const pairs = display.manual ? [['卡片显示值',display.value + (display.held ? '（待刷新）' : display.available ? '' : '（不可用）')],
+            ['数据来源','SQLite · 手工补录'],['测量时间',this.time(display.sampleAt)],['录入时间',this.time(display.enteredAt)],
+            ['状态',display.item ? this.telemetryState(display.item) : '补录点位尚未返回'],['读取规则','按测量时间取最新；同一时间取最后录入']] :
+            [['当前业务值',node.value + (node.id === 'density' ? ' g/cm³' : '')],['当前来源',node.source],['采样 / 记录时间',this.time(node.sampleAt)],['人工录入时间',this.time(node.enteredAt)],['化验结果可用时间','未记录（不由采样时刻推断）'],['实时业务绑定','尚未接入']];
+        if (display.bound && !display.manual) pairs.unshift([node.id === 'density' ? '采集对照值' : '卡片显示值',display.value + (display.held ? '（沿用上次有效值）' : display.available ? '' : '（不可用）')],
             ['卡片状态',display.stopped ? '设备停机' : display.held ? '采集异常 · 沿用历史值' : display.available ? '实时采集' : '不可用'],
             ['卡片采集来源',display.item?.item_id || display.item?.name || '已选点位未返回'],['显示数值原接收时间',this.time(display.sampleAt)],['单位',display.components ? '运行状态 · 无单位' : App.telemetryDisplayUnit(display.item) || '未配置']);
-        if (display.held) pairs.splice(4, 0, ['沿用数值原源时间', this.time(display.valueSourceAt)]);
+        if (display.held && !display.manual) pairs.splice(4, 0, ['沿用数值原源时间', this.time(display.valueSourceAt)]);
         if (node.id === 'density-current' && display.item?.effective_density) {
             const effective = display.item.effective_density;
             pairs.splice(2, 0, ['密度采用规则', effective.reason || '有效非 1 读数']);
@@ -604,14 +630,14 @@ const DecisionOverviewPage = {
         const choice = this.pointChoices[node.id] || '';
         const item = items.find(p => this.pointIdentity(p) === choice);
         const missingOption = choice && !item ? `<option value="${this.escape(choice)}" selected>已选点位暂未返回</option>` : '';
-        const options = missingOption + items.slice().sort((a,b) => String(a.item_id || a.name).localeCompare(String(b.item_id || b.name),'zh-CN',{numeric:true})).map(p => `<option value="${this.escape(this.pointIdentity(p))}"${this.pointIdentity(p) === choice ? ' selected' : ''}>${this.escape(p.device && p.tag_name ? `${p.device} · ${p.tag_name} · ${p.description || ''}` : p.name)}</option>`).join('');
+        const options = missingOption + items.slice().sort((a,b) => Number(b.kind === 'manual_measurement') - Number(a.kind === 'manual_measurement') || String(a.item_id || a.name).localeCompare(String(b.item_id || b.name),'zh-CN',{numeric:true})).map(p => `<option value="${this.escape(this.pointIdentity(p))}"${this.pointIdentity(p) === choice ? ' selected' : ''}>${this.escape(p.device && p.tag_name ? `${p.device} · ${p.tag_name} · ${p.description || ''}` : p.name)}</option>`).join('');
         const sample = item?.sample || {};
         const value = item?.kind === 'state_group' ? this.groupValue(sample.components) : typeof sample.value === 'boolean' ? (sample.value ? '开' : '关') : sample.value ?? '—';
-        const available = item && item.available && !window.Operations?.telemetryFailed;
-        const live = item ? `<dl class="decision-facts"><dt>原始读数（回退前）</dt><dd class="${available ? '' : 'decision-unavailable'}">${this.escape(value)} ${this.escape(App.telemetryDisplayUnit(item))}${available ? '' : '（不可用）'}</dd><dt>质量 / 时效</dt><dd>${this.escape(this.telemetryState(item))}</dd><dt>数据来源</dt><dd>${this.escape(item.item_id || item.source_id + '/' + item.key)}</dd><dt>源时间</dt><dd>${this.escape(this.time(sample.source_at))}</dd><dt>服务器时间</dt><dd>${this.escape(this.time(sample.server_at))}</dd><dt>接收时间</dt><dd>${this.escape(this.time(sample.received_at))}</dd></dl>` : `<p>${choice ? '已选点位暂未返回，卡片保持不可用，等待采集恢复。' : '选择点位后，该卡片立即显示采集值；清空选择恢复原业务显示。建议密度只增加采集对照值。'}</p>`;
+        const available = item && item.available && !this.pointFailed(item);
+        const live = item?.kind === 'manual_measurement' ? `<dl class="decision-facts"><dt>补录记录</dt><dd>${this.escape(sample.record_id ? '#' + sample.record_id : '暂无补录')}</dd><dt>保存位置</dt><dd>SQLite · manual_measurements</dd><dt>补录信息名</dt><dd>${this.escape(item.name)}</dd><dt>值</dt><dd>${this.escape(value)} ${this.escape(item.unit)}</dd><dt>测量时间</dt><dd>${this.escape(this.time(sample.observed_at))}</dd><dt>录入时间</dt><dd>${this.escape(this.time(sample.created_at))}</dd><dt>读取状态</dt><dd>${this.escape(this.telemetryState(item))}</dd></dl>` : item ? `<dl class="decision-facts"><dt>原始读数（回退前）</dt><dd class="${available ? '' : 'decision-unavailable'}">${this.escape(value)} ${this.escape(App.telemetryDisplayUnit(item))}${available ? '' : '（不可用）'}</dd><dt>质量 / 时效</dt><dd>${this.escape(this.telemetryState(item))}</dd><dt>数据来源</dt><dd>${this.escape(item.item_id || item.source_id + '/' + item.key)}</dd><dt>源时间</dt><dd>${this.escape(this.time(sample.source_at))}</dd><dt>服务器时间</dt><dd>${this.escape(this.time(sample.server_at))}</dd><dt>接收时间</dt><dd>${this.escape(this.time(sample.received_at))}</dd></dl>` : `<p>${choice ? '已选点位暂未返回，卡片保持不可用，等待数据恢复。' : '选择点位后，该卡片立即显示对应读数；清空选择恢复原业务显示。建议密度只增加采集对照值。'}</p>`;
         const memberDetails = item?.kind === 'state_group' ? `<dl class="decision-facts">${(sample.components || []).map(c => `<dt>${this.escape(c.label)} ${this.escape(item.member_label || '系统')}</dt><dd>${this.escape(c.available && !window.Operations?.telemetryFailed ? c.value ? '开' : '关' : '未知')} · ${this.escape(c.item_id)}<br>接收 ${this.escape(this.time(c.received_at))} · ${this.escape(c.status || '未知')}${!c.available && typeof c.value === 'boolean' ? `<br>最后读数 ${c.value ? '1' : '0'}（不可用）` : ''}</dd>`).join('')}</dl>` : item?.kind === 'numeric_average' ? `<dl class="decision-facts"><dt>计算方式</dt><dd>${this.escape(sample.formula)} · 每路 50%<br>本系统计算，保留原始采集点。</dd>${(sample.components || []).map(c => `<dt>${this.escape(c.label)} 原始密度</dt><dd>${this.escape(Number.isFinite(c.value) ? c.value : '—')} ${this.escape(App.telemetryDisplayUnit(c) || '（单位未配置）')}${c.available && !window.Operations?.telemetryFailed ? '' : '（不可用）'}<br>${this.escape(c.item_id)}<br>接收 ${this.escape(this.time(c.received_at))} · ${this.escape(c.status || '未知')}</dd>`).join('')}</dl>` : '';
-        const collector = window.Operations?.telemetryFailed ? '采集查询中断，最后读数不可用' : !items.length ? (window.Operations?.serverState === 'local' ? '单机模式 · 通过服务器地址查看采集' : '暂无点位 · 等待现场配置与联调') : `${items.filter(p => p.available).length} / ${items.length} 个点位可用（含组合点）`;
-        document.getElementById('decision-inspector').innerHTML = `<div class="decision-inspector-header"><span>因素与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${node.reference ? '对照 / 预留' : '业务取值'}</span></div><p>${this.escape(node.description)}</p><dl class="decision-facts">${facts}</dl></div><div class="decision-detail decision-source-panel"><h4>卡片数据 → 采集来源</h4><p class="decision-live-state">${this.escape(collector)}。所选读数用于卡片展示，尚未参与本页计算。</p><label for="decision-source-point">选择卡片显示点位${node.id === 'density' ? '（采集对照）' : ''}</label><select id="decision-source-point"><option value="">不使用采集值</option>${options}</select>${live}${memberDetails}</div>`;
+        const collector = `${items.filter(p => p.available && !this.pointFailed(p)).length} / ${items.length} 个点位可用（含组合与手工补录）${window.Operations?.telemetryFailed ? '；采集查询中断，KEP 最后读数不可用' : ''}${window.Operations?.manualMeasurementsFailed ? '；补录查询失败，待刷新' : ''}`;
+        document.getElementById('decision-inspector').innerHTML = `<div class="decision-inspector-header"><span>因素与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${display.manual ? '手工补录' : node.reference ? '对照 / 预留' : '业务取值'}</span></div><p>${this.escape(display.manual ? '读取已保存的手工补录，按测量时间取最新记录。' : node.description)}</p><dl class="decision-facts">${facts}</dl></div><div class="decision-detail decision-source-panel"><h4>卡片数据 → 数据来源</h4><p class="decision-live-state">${this.escape(collector)}。所选读数用于卡片展示，尚未参与本页计算。</p><label for="decision-source-point">选择卡片显示点位${node.id === 'density' ? '（采集对照）' : ''}</label><select id="decision-source-point"><option value="">不使用采集值</option>${options}</select>${live}${memberDetails}</div>`;
         document.getElementById('decision-inspector').scrollTop = scrollTop;
         this.queueInspectorPosition();
     },

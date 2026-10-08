@@ -1,7 +1,9 @@
 """Pydantic 模型（API 请求/响应）"""
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .services.manual_measurements import METRICS, normalize_time
 
 
 class HealthResponse(BaseModel):
@@ -131,3 +133,43 @@ class ManualEntryOut(BaseModel):
     remark: str | None = None
     operator: str | None = None
     status: str | None = None
+
+
+# ---------- Single-value manual process measurements ----------
+ManualMetric = Literal["heavy_clean_coal_ash", "raw_coal_slime_content", "coarse_slime_amount"]
+
+
+class ManualMeasurementIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    metric: ManualMetric
+    value: float = Field(ge=0, strict=True, allow_inf_nan=False)
+    observed_at: str | None = Field(default=None, max_length=64)
+    client_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+
+    @field_validator("observed_at")
+    @classmethod
+    def validate_time(cls, value):
+        return normalize_time(value)
+
+    @model_validator(mode="after")
+    def validate_percentage(self):
+        maximum = METRICS[self.metric]["maximum"]
+        if maximum is not None and self.value > maximum:
+            raise ValueError("灰分和煤泥含量须在 0–100% 之间")
+        return self
+
+
+class ManualMeasurementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    metric: ManualMetric
+    name: str
+    value: float
+    unit: str
+    observed_at: str
+    created_at: str
+
+
+class ManualMeasurementList(BaseModel):
+    total: int
+    items: list[ManualMeasurementOut]

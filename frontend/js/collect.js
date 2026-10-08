@@ -80,6 +80,7 @@ const CollectPage = {
     refreshAll() {
         this.renderTable();
         this.loadHistory();
+        if (typeof ManualMeasurements !== 'undefined') ManualMeasurements.refresh();
         if (window.Operations) window.Operations.refresh();
         App.showToast('已刷新业务输入，正在检查采集连接', 'info');
     },

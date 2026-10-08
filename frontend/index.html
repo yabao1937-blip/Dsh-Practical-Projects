@@ -7,6 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css?v=11">
     <link rel="stylesheet" href="css/decision-overview.css?v=14">
+    <link rel="stylesheet" href="css/manual-measurements.css?v=1">
     <!-- 无外部依赖，图表使用纯Canvas 2D绘制 -->
     <script src="js/xlsx-lite.js?v=8"></script>
     <script src="js/chart-lite.js?v=7"></script>
@@ -356,6 +357,55 @@
                 </div>
             </div>
 
+            <div class="panel" id="manual-measurements-panel">
+                <div class="panel-header">
+                    <h3>业务指标补录</h3>
+                    <button type="button" class="btn btn-sm" id="measurement-refresh">刷新补录记录</button>
+                </div>
+                <div class="panel-body">
+                    <form id="measurement-form">
+                        <fieldset id="measurement-fields" class="measurement-fields">
+                            <div class="form-group">
+                                <label for="measurement-time">时间（北京时间，可留空）</label>
+                                <input type="datetime-local" id="measurement-time" step="1">
+                                <p class="measurement-help">留空时使用提交时的服务器当前时间。</p>
+                            </div>
+                            <div class="form-group">
+                                <label for="measurement-metric">补录信息名</label>
+                                <select id="measurement-metric" required><option value="">正在加载补录信息…</option></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="measurement-value">值 <span id="measurement-unit"></span></label>
+                                <input type="number" id="measurement-value" min="0" step="any" required placeholder="请输入数值">
+                            </div>
+                        </fieldset>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary" id="measurement-submit" disabled>保存补录</button>
+                            <button type="button" class="btn" id="measurement-reset">重置</button>
+                        </div>
+                        <p id="measurement-message" class="measurement-message" role="status" aria-live="polite"></p>
+                    </form>
+                    <div class="measurement-history-heading">
+                        <h4>业务指标补录记录</h4>
+                        <label>信息名 <select id="measurement-filter"><option value="">全部信息</option></select></label>
+                    </div>
+                    <p class="measurement-help">按录入顺序显示，最新补录在前。</p>
+                    <div class="table-scroll measurement-history-scroll">
+                        <table class="data-table">
+                            <thead><tr><th>时间（北京时间）</th><th>补录信息名</th><th>值</th><th>单位</th><th>录入时间</th></tr></thead>
+                            <tbody id="measurement-history"><tr><td colspan="5">尚未加载补录记录</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div class="measurement-pagination">
+                        <span id="measurement-count" aria-live="polite"></span>
+                        <div>
+                            <button type="button" class="btn btn-sm" id="measurement-prev" disabled>上一页</button>
+                            <button type="button" class="btn btn-sm" id="measurement-next" disabled>下一页</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- 上半部分：自动采集健康状态 -->
             <div class="panel">
                 <div class="panel-header" style="cursor:pointer" onclick="CollectPage.toggleInstruments()">
@@ -389,7 +439,7 @@
             <div class="panel-row">
                 <div class="panel panel-half">
                     <div class="panel-header">
-                        <h3>手工补录表单</h3>
+                        <h3>仪表与采样补录</h3>
                     </div>
                     <div class="panel-body">
                         <div class="form-group">
@@ -421,7 +471,7 @@
                 </div>
                 <div class="panel panel-half">
                     <div class="panel-header">
-                        <h3>补录历史记录</h3>
+                        <h3>仪表与采样记录</h3>
                         <div class="panel-header-info">
                             <input type="text" id="manual-history-search" placeholder="搜索时间/指标值..." oninput="CollectPage.loadHistory()" style="width:160px;padding:4px 8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-darker);color:var(--text-primary);font-size:12px;">
                             <select id="manual-history-filter" onchange="CollectPage.loadHistory()">
@@ -939,6 +989,7 @@
     <script src="js/decision-coarse-charts.js?v=4"></script>
     <script src="js/decision-float-analysis.js?v=1"></script>
     <script src="js/decision-overview.js?v=16"></script>
+    <script src="js/manual-measurements.js?v=1"></script>
     <script src="js/collect.js?v=25"></script>
     <script src="js/coarse.js?v=24"></script>
     <script src="js/float.js?v=15"></script>
