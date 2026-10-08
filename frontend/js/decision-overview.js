@@ -2,6 +2,7 @@
 const DecisionOverviewPage = {
     initialized: false, view: 'gpt', selected: 'density', zoom: null, snapshot: null,
     pointChoices: {}, nodes: [], timer: null,
+    summaryChildren: new Map([['heavy',['heavy-ash','heavy-amount']],['float',['float-ash','float-amount']]]),
     sourceInteractionUntil: 0,
     inspectorFrame: null,
     motionReduced: false, motionPrinting: false,
@@ -21,14 +22,14 @@ const DecisionOverviewPage = {
         try {
             const saved = JSON.parse(localStorage.getItem(this.choicesKey) || '{}'), choices = Object.create(null);
             if (saved && typeof saved === 'object' && !Array.isArray(saved)) for (const [id,value] of Object.entries(saved)) {
-                if (id === 'stoppage' || id === 'heavy' || !/^[a-z][a-z0-9-]{0,63}$/.test(id) || typeof value !== 'string' || value.length > 160) continue;
+                if (id === 'stoppage' || this.summaryChildren.has(id) || !/^[a-z][a-z0-9-]{0,63}$/.test(id) || typeof value !== 'string' || value.length > 160) continue;
                 if (value === '') { choices[id] = ''; continue; }
                 let identity;
                 try { identity = JSON.parse(value); } catch (_) { continue; }
                 if (Array.isArray(identity) && identity.length === 2 && identity.every(v => typeof v === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(v))) choices[id] = value;
             }
             this.pointChoices = choices;
-            if (Object.prototype.hasOwnProperty.call(saved || {}, 'heavy')) this.savePointChoices();
+            if ([...this.summaryChildren.keys()].some(id => Object.prototype.hasOwnProperty.call(saved || {}, id))) this.savePointChoices();
         } catch (_) { /* An invalid or unavailable local preference does not alter business data. */ }
     },
     savePointChoices() {
@@ -101,8 +102,8 @@ const DecisionOverviewPage = {
             title:detail || reason || '暂无有效密度'};
     },
     pointDisplay(node) {
-        if (node.id === 'heavy') {
-            const summaryParts = ['heavy-ash','heavy-amount'].map(id => {
+        if (this.summaryChildren.has(node.id)) {
+            const summaryParts = this.summaryChildren.get(node.id).map(id => {
                 const child = this.nodes.find(n => n.id === id);
                 return {node:child,display:child ? this.pointDisplay(child) : {bound:false,value:'—',source:'暂无数据'}};
             });
@@ -263,7 +264,7 @@ const DecisionOverviewPage = {
             if (!event.target.closest('.decision-formula,button,a,input,select,textarea,label,[contenteditable="true"]')) this.closeInspector(false);
         });
         document.getElementById('decision-inspector').addEventListener('change', event => {
-            if (event.target.id === 'decision-source-point' && this.selected !== 'heavy') {
+            if (event.target.id === 'decision-source-point' && !this.summaryChildren.has(this.selected)) {
                 this.pointChoices[this.selected] = event.target.value;
                 this.savePointChoices();
                 this.sourceInteractionUntil = Date.now() + 500;
@@ -497,7 +498,7 @@ const DecisionOverviewPage = {
                 s.guide.reason,{x:670,y:343,w:245,h:207,type:'root',unit:'g/cm³',sampleAt:s.reader.ashMeasurementInfo(s.guide.scheme).sampleAt}),
             n('heavy','重介精煤',ash(s.ashes.heavy),`煤量 ${rate(s.amounts.heavy)}`,'汇总左侧重介精煤灰分和重介精煤量，随左侧数据同步更新。',
                 {...family('heavy',380,170,{w:220,h:148}),type:'component',parent:'density',reference:!s.componentFeeds,page:'page-overview',sampleAt:heavyMeasurement.sampleAt,enteredAt:heavyMeasurement.enteredAt}),
-            n('float','浮精',ash(s.ashes.float),`煤量 ${rate(s.amounts.float)}`,`浮精灰分与煤量共同进入三组分质量平衡；压滤机状态为工况参考。`,
+            n('float','浮精',ash(s.ashes.float),`煤量 ${rate(s.amounts.float)}`,'汇总左侧浮精灰分和浮精量，随左侧数据同步更新。',
                 {...family('float',380,612,{w:220,h:148}),type:'component',parent:'density',reference:!s.componentFeeds,page:'page-float',sampleAt:s.floating?.timestamp}),
             n('coarse','粗精煤泥',ash(s.ashes.coarse),`煤量 ${rate(s.amounts.coarse)} · 生产 ${s.engineLabel}`,`${coarseSource}。当前生产采用值与下面的 GPT 原始预测分开显示；共享 EMA 不作为 GPT 预测值。`,
                 {...family('coarse',965,358.5,{w:220,h:176}),type:'component',parent:'density',reference:!s.componentFeeds,page:'page-coarse',sampleAt:coarseManual ? null : s.coarse?.timestamp,enteredAt:coarseManual ? s.store.coarseAshInput?.manualAt : null}),
@@ -531,7 +532,7 @@ const DecisionOverviewPage = {
     renderContext() {
         const s = this.snapshot, sources = {manual:'人工总灰分',formula:'三组分公式',entry:'501 导入 / 录入',ash501:'501 灰分取值'};
         const message = s.componentFeeds ? '三组分参与当前建议计算' : '三组分显示公式核算对照，建议由所选总灰分驱动';
-        const bound = this.nodes.filter(node => node.id !== 'heavy' && this.pointChoices[node.id]).length;
+        const bound = this.nodes.filter(node => !this.summaryChildren.has(node.id) && this.pointChoices[node.id]).length;
         document.getElementById('decision-context').innerHTML = `<span>指导口径 <strong>${s.guide.scheme === 'heavy' ? '重介精煤版' : '总灰分版'}</strong></span><span>生产模型 <strong>${this.escape(s.engineLabel)}</strong></span><span>总灰分来源 <strong>${this.escape(sources[s.total.source])}</strong></span><span>${message}</span><span>实时采集 <strong>${bound ? bound+' 张卡片已选点' : '选择点位后更新卡片'}</strong> · 展示不改变建议计算</span>`;
     },
 
@@ -579,10 +580,10 @@ const DecisionOverviewPage = {
         while (current?.parent) { ancestorIds.add(current.parent); current = this.nodes.find(n => n.id === current.parent); }
         const flowingIds = new Set(), now = Date.now()/1000;
         const displays = new Map(this.nodes.map(node => [node.id,this.pointDisplay(node)]));
-        const displayOnly = node => node.id === 'heavy' ? displays.get(node.id).summaryParts.some(p => p.display.bound) : !!this.pointChoices[node.id];
+        const displayOnly = node => displays.get(node.id).aggregate ? displays.get(node.id).summaryParts.some(p => p.display.bound) : !!this.pointChoices[node.id];
         const paths = this.routeConnections().map(({node,parent,path},index) => {
             const highlight = ancestorIds.has(node.id) && ancestorIds.has(parent.id);
-            const summaryLink = parent.id === 'heavy';
+            const summaryLink = this.summaryChildren.get(parent.id)?.includes(node.id);
             const displayReference = !summaryLink && (node.reference || (node.id !== 'density' && displayOnly(node)) || (parent.id !== 'density' && displayOnly(parent)));
             const flows = !displayReference && (summaryLink ? this.displayAvailable(displays.get(node.id)) : node.value !== '—' && parent.value !== '—');
             if (flows) { flowingIds.add(node.id); flowingIds.add(parent.id); }
