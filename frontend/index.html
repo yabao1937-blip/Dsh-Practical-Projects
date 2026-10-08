@@ -82,7 +82,7 @@
                 <div class="page-header decision-masthead">
                     <div><p class="decision-eyebrow">PROCESS INTELLIGENCE / 01</p><h2 id="decision-title">决策总览</h2><p class="decision-intro">从建议密度追溯组分、计算因素与数据来源</p></div>
                     <div class="page-header-actions">
-                        <span class="decision-readonly">只读决策视图</span>
+                        <span class="decision-readonly" id="decision-mode-label">实时计算 · 人工执行</span>
                         <button class="btn" id="decision-theme" type="button">深色视图</button>
                         <button class="btn btn-primary" id="decision-refresh" type="button">刷新数据</button>
                     </div>
@@ -105,7 +105,7 @@
                         <div class="decision-canvas-space" id="decision-canvas-space"><div class="decision-board" id="decision-board"></div></div>
                     </div>
                     <div class="decision-inspector" id="decision-inspector" aria-label="节点详情"></div>
-                    <p class="decision-footnote">点击节点选择采集点，卡片随读数更新；点击画布空白处收起。采集显示不改变建议计算，相关连线作为虚线对照。建议密度保留计算值，点位显示为采集对照。</p>
+                    <p class="decision-footnote" id="decision-mode-note">GPT 链路：当前输入 → 粗精煤泥灰分预测 → 三组分总灰分 → 建议密度。当前密度采用 A304；输入变化后重新计算，缺失时显示原因。建议由人工确认执行。虚线表示尚未进入模型的工况参考。</p>
                 </div>
                 <section class="decision-coarse-analysis" id="decision-coarse-analysis" aria-labelledby="decision-coarse-title">
                     <div class="decision-analysis-header">
@@ -130,7 +130,7 @@
                             <div class="decision-chart-plot"><canvas id="decision-coarse-level" role="img" tabindex="0" aria-describedby="decision-level-tooltip" aria-label="当前统计口径的历史液位与实测和GPT预测灰分散点对照。方向键查看数据，Home和End跳到首尾，Escape收起提示；图表数据见下方表格。"></canvas><div class="decision-chart-tooltip" id="decision-level-tooltip" aria-live="off" hidden></div></div>
                         </article>
                     </div>
-                    <p class="decision-analysis-note">按日：因子与实测灰分取自然日采样均值，使用独立缓存的 GPT 日级分析模型，每日一点；按采样：使用 GPT 采样保存模型，每条有效历史记录一点。三图随口径同步切换，日级模型不替换生产模型。液位缺失时不显示对应散点，日均开关比例不代表全天运行时长。历史回算不是新的独立验证，化验报告时间尚未记录；尚未接入 KEPServer 实时预测。</p>
+                    <p class="decision-analysis-note">按日：因子与实测灰分取自然日采样均值，使用独立缓存的 GPT 日级分析模型，每日一点；按采样：使用 GPT 采样保存模型，每条有效历史记录一点。三图随口径同步切换，日级模型不替换生产模型。液位缺失时不显示对应散点，日均开关比例不代表全天运行时长。历史回算不是新的独立验证，化验报告时间尚未记录。本区只显示历史分析；上方决策链使用 KEPServer 当前数据实时预测。</p>
                     <details class="decision-analysis-data"><summary>查看图表数据</summary><div class="decision-analysis-table-wrap"><table><thead><tr><th>日期 / 采样时间</th><th>采样数</th><th>实测灰分 (%)</th><th>GPT 预测 (%)</th><th>液位 (%)</th><th>液位有值采样数</th><th>液位图实测 (%)</th><th>液位图预测 (%)</th></tr></thead><tbody id="decision-coarse-table"></tbody></table></div></details>
                 </section>
                 <section class="decision-coarse-analysis decision-float-analysis" id="decision-float-analysis" aria-labelledby="decision-float-title">
@@ -989,6 +989,7 @@
     <script src="js/decision-coarse-charts.js?v=4"></script>
     <script src="js/decision-float-analysis.js?v=1"></script>
     <script src="js/decision-overview.js?v=16"></script>
+    <script src="js/decision-realtime.js?v=1"></script>
     <script src="js/manual-measurements.js?v=1"></script>
     <script src="js/collect.js?v=25"></script>
     <script src="js/coarse.js?v=24"></script>

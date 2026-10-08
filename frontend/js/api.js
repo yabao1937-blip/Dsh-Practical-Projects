@@ -91,6 +91,16 @@ window.Api = {
         return value;
     },
 
+    async calculateDecision(body) {
+        const response = await fetch(this.base + '/decision/snapshots', {method:'POST',
+            headers:{'Content-Type':'application/json'}, body:JSON.stringify(body),
+            signal:AbortSignal.timeout(5000),cache:'no-store'});
+        if (!response.ok) throw new Error(`决策计算请求失败（HTTP ${response.status}）`);
+        const result = await response.json();
+        if (result?.policy !== 'decision-live-v1' || !result.coarse_ash || !result.total_ash || !result.suggested_density) throw new Error('决策计算响应异常');
+        return result;
+    },
+
     async reconnectTelemetry() {
         const token = this.writeToken();
         const response = await fetch(this.base + '/telemetry/reconnect', {

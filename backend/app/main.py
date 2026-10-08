@@ -9,6 +9,7 @@ from .telemetry import models as telemetry_models  # noqa: F401
 from .hourly_brief import models as hourly_brief_models  # noqa: F401
 from .hourly_brief.worker import lifespan as hourly_brief_lifespan
 from .routers.hourly_brief import router as hourly_brief_router
+from .routers.decision import router as decision_router
 from .config import APP_VERSION, FRONTEND_DIR
 from .database import Base, engine
 from .observability import install_observability
@@ -41,6 +42,7 @@ install_observability(app)
 
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(hourly_brief_router, prefix="/api/v1")
+app.include_router(decision_router, prefix="/api/v1")
 app.include_router(assistant.router, prefix="/api/v1")   # AI解读助手(只读)
 app.include_router(migration.router, prefix="/api/v1")
 app.include_router(settings.router, prefix="/api/v1")

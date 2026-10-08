@@ -1269,6 +1269,8 @@ const App = {
         if (configured) return configured;
         const belt = /^TIA_3_4\.TIA_3_4\.(501|502)\/COAL_CAP$/.exec(item?.item_id || '');
         if (belt) return (typeof CollectPage !== 'undefined' ? CollectPage.instruments.find(i => i.id === `scale_${belt[1]}`)?.unit : null) || 't/h';
+        if (item?.item_id === 'TIA_3_1.TIA_3_1.301/COAL_CAP') return 't/h';
+        if (['TIA_3_1.TIA_3_1.202/ASH_R_INS','TIA_3_5.TIA_3_5.JMCWC/LEVEL_B'].includes(item?.item_id)) return '%';
         const density = item?.key === 'a303_a304_density_average' ||
             /^TIA_4_1\.TIA_4_1\.A30[34]\/MD(?:_SET)?$/.test(item?.item_id || '');
         if (!density) return '';

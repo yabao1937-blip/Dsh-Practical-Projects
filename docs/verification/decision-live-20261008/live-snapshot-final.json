@@ -1,0 +1,549 @@
+{
+  "verified": true,
+  "request": {
+    "cells": {
+      "raw_ash": {
+        "value": 41.83083724975586,
+        "status": "good",
+        "unit": "%",
+        "source": "KEP · 202/ASH_R_INS · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_1.TIA_3_1.202/ASH_R_INS",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "coal_amount": {
+        "value": 642.2836303710938,
+        "status": "good",
+        "unit": "t/h",
+        "source": "KEP · 301/COAL_CAP · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_1.TIA_3_1.301/COAL_CAP",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "level": {
+        "value": 70.05207824707031,
+        "status": "good",
+        "unit": "%",
+        "source": "KEP · JMCWC/LEVEL_B · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_5.TIA_3_5.JMCWC/LEVEL_B",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "heavy_ash": {
+        "value": 8.5,
+        "status": "manual",
+        "unit": "%",
+        "source": "手工补录 · 2026/10/8 11:04:13",
+        "reason": "",
+        "observed_at": "2026-10-08T03:04:13.579Z",
+        "entered_at": "2026-10-08T03:04:13.579Z",
+        "item_id": "",
+        "source_id": "manual-measurements",
+        "batch_id": null
+      },
+      "float_ash": {
+        "value": 8.95,
+        "status": "historical",
+        "unit": "%",
+        "source": "历史业务记录 · 导入 / 补录",
+        "reason": "",
+        "observed_at": "2026-09-19T23:18:00.000Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "",
+        "batch_id": null
+      },
+      "float_amount": {
+        "value": 40,
+        "status": "manual",
+        "unit": "t/h",
+        "source": "人工输入",
+        "reason": "",
+        "observed_at": null,
+        "entered_at": "2026-09-18T01:39:29.957Z",
+        "item_id": "",
+        "source_id": "",
+        "batch_id": null
+      },
+      "coarse_amount": {
+        "value": 20,
+        "status": "manual",
+        "unit": "t/h",
+        "source": "人工输入",
+        "reason": "",
+        "observed_at": null,
+        "entered_at": "2026-09-21T06:19:39.149Z",
+        "item_id": "",
+        "source_id": "",
+        "batch_id": null
+      },
+      "density": {
+        "value": 1.478865623474121,
+        "status": "good",
+        "unit": "g/cm³",
+        "source": "KEP · A304/MD · 当前密度",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_4_1.TIA_4_1.A304/MD",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "sys401": {
+        "value": 1,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 四系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "sys402": {
+        "value": 1,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 四系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "sysA": {
+        "value": 0,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 四系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "sysB": {
+        "value": 1,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 四系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "desliming473": {
+        "value": 0,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 脱粉系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "desliming474": {
+        "value": 0,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 脱粉系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "is_stoppage": {
+        "value": 0,
+        "status": "good",
+        "unit": "",
+        "source": "KEP · 301/COAL_CAP · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_1.TIA_3_1.301/COAL_CAP",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "belt501": {
+        "value": 136.51620483398438,
+        "status": "good",
+        "unit": "t/h",
+        "source": "KEP · TIA_3_4.TIA_3_4.501/COAL_CAP · good · 可用；单位沿用在线皮带秤",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_4.TIA_3_4.501/COAL_CAP",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "belt502": {
+        "value": 103.29861450195312,
+        "status": "good",
+        "unit": "t/h",
+        "source": "KEP · TIA_3_4.TIA_3_4.502/COAL_CAP · good · 可用；单位沿用在线皮带秤",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_4.TIA_3_4.502/COAL_CAP",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      }
+    },
+    "target_min": 8.5,
+    "target_max": 9
+  },
+  "result": {
+    "policy": "decision-live-v1",
+    "generated_at": "2026-10-08T06:56:27.876+00:00",
+    "inputs": {
+      "raw_ash": {
+        "value": 41.83083724975586,
+        "status": "good",
+        "unit": "%",
+        "source": "KEP · 202/ASH_R_INS · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_1.TIA_3_1.202/ASH_R_INS",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "coal_amount": {
+        "value": 642.2836303710938,
+        "status": "good",
+        "unit": "t/h",
+        "source": "KEP · 301/COAL_CAP · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_1.TIA_3_1.301/COAL_CAP",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "level": {
+        "value": 70.05207824707031,
+        "status": "good",
+        "unit": "%",
+        "source": "KEP · JMCWC/LEVEL_B · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_5.TIA_3_5.JMCWC/LEVEL_B",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "heavy_ash": {
+        "value": 8.5,
+        "status": "manual",
+        "unit": "%",
+        "source": "手工补录 · 2026/10/8 11:04:13",
+        "reason": "",
+        "observed_at": "2026-10-08T03:04:13.579Z",
+        "entered_at": "2026-10-08T03:04:13.579Z",
+        "item_id": "",
+        "source_id": "manual-measurements",
+        "batch_id": null
+      },
+      "float_ash": {
+        "value": 8.95,
+        "status": "historical",
+        "unit": "%",
+        "source": "历史业务记录 · 导入 / 补录",
+        "reason": "",
+        "observed_at": "2026-09-19T23:18:00.000Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "",
+        "batch_id": null
+      },
+      "float_amount": {
+        "value": 40,
+        "status": "manual",
+        "unit": "t/h",
+        "source": "人工输入",
+        "reason": "",
+        "observed_at": null,
+        "entered_at": "2026-09-18T01:39:29.957Z",
+        "item_id": "",
+        "source_id": "",
+        "batch_id": null
+      },
+      "coarse_amount": {
+        "value": 20,
+        "status": "manual",
+        "unit": "t/h",
+        "source": "人工输入",
+        "reason": "",
+        "observed_at": null,
+        "entered_at": "2026-09-21T06:19:39.149Z",
+        "item_id": "",
+        "source_id": "",
+        "batch_id": null
+      },
+      "density": {
+        "value": 1.478865623474121,
+        "status": "good",
+        "unit": "g/cm³",
+        "source": "KEP · A304/MD · 当前密度",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_4_1.TIA_4_1.A304/MD",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "sys401": {
+        "value": 1,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 四系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "sys402": {
+        "value": 1,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 四系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "sysA": {
+        "value": 0,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 四系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "sysB": {
+        "value": 1,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 四系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "desliming473": {
+        "value": 0,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 脱粉系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "desliming474": {
+        "value": 0,
+        "status": "good",
+        "unit": "",
+        "source": "组合 · 脱粉系统运行状态 · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "",
+        "source_id": "kepserver-main",
+        "batch_id": null
+      },
+      "is_stoppage": {
+        "value": 0,
+        "status": "good",
+        "unit": "",
+        "source": "KEP · 301/COAL_CAP · 14:56:27",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_1.TIA_3_1.301/COAL_CAP",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "belt501": {
+        "value": 136.51620483398438,
+        "status": "good",
+        "unit": "t/h",
+        "source": "KEP · TIA_3_4.TIA_3_4.501/COAL_CAP · good · 可用；单位沿用在线皮带秤",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_4.TIA_3_4.501/COAL_CAP",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      },
+      "belt502": {
+        "value": 103.29861450195312,
+        "status": "good",
+        "unit": "t/h",
+        "source": "KEP · TIA_3_4.TIA_3_4.502/COAL_CAP · good · 可用；单位沿用在线皮带秤",
+        "reason": "",
+        "observed_at": "2026-10-08T06:56:27.282Z",
+        "entered_at": null,
+        "item_id": "TIA_3_4.TIA_3_4.502/COAL_CAP",
+        "source_id": "kepserver-main",
+        "batch_id": "9ac7bd14853943e6a2265b2da9787dc0"
+      }
+    },
+    "model": {
+      "engine": "gpt",
+      "method": "mlr",
+      "trained_at": "2026-09-22 09:24:38",
+      "id": "2c1ad6e08f416f6d"
+    },
+    "features": [
+      {
+        "key": "raw_ash",
+        "raw": 41.83083724975586,
+        "used": 41.83083724975586,
+        "clipped": false
+      },
+      {
+        "key": "coal_amount",
+        "raw": 642.2836303710938,
+        "used": 642.2836303710938,
+        "clipped": false
+      },
+      {
+        "key": "sysA",
+        "raw": 0,
+        "used": 0,
+        "clipped": false
+      },
+      {
+        "key": "sysB",
+        "raw": 1,
+        "used": 1,
+        "clipped": false
+      },
+      {
+        "key": "sys401",
+        "raw": 1,
+        "used": 1,
+        "clipped": false
+      },
+      {
+        "key": "sys402",
+        "raw": 1,
+        "used": 1,
+        "clipped": false
+      },
+      {
+        "key": "desliming473",
+        "raw": 0,
+        "used": 0,
+        "clipped": false
+      },
+      {
+        "key": "desliming474",
+        "raw": 0,
+        "used": 0,
+        "clipped": false
+      },
+      {
+        "key": "is_stoppage",
+        "raw": 0,
+        "used": 0,
+        "clipped": false
+      },
+      {
+        "key": "level",
+        "raw": 70.05207824707031,
+        "used": 70.05207824707031,
+        "clipped": false
+      }
+    ],
+    "coarse_ash": {
+      "value": 14.030991173436977,
+      "status": "predicted",
+      "reason": "GPT 保存模型实时预测"
+    },
+    "heavy_amount": {
+      "value": 179.8148193359375,
+      "status": "calculated",
+      "reason": ""
+    },
+    "total_ash": {
+      "value": 9.036329755704406,
+      "status": "calculated",
+      "reason": "三组分灰分按煤量加权"
+    },
+    "suggested_density": {
+      "value": 1.479,
+      "status": "calculated",
+      "reason": "预测总灰分 9.04% 超出目标范围，但偏差未超过原算法死区 0.05 个百分点，密度保持"
+    },
+    "guidance": {
+      "valid": true,
+      "rhoCur": 1.478865623474121,
+      "K": 0.075,
+      "heavyAsh": 8.5,
+      "kSource": "default",
+      "targetTotal": 9,
+      "actualTotal": 9.036329755704406,
+      "scheme": "total",
+      "targetHeavy": null,
+      "deltaAHeavy": null,
+      "deltaA": 0.036,
+      "deltaRho": 0,
+      "rhoNew": 1.479,
+      "direction": "stable",
+      "reason": "预测总灰分 9.04% 超出目标范围，但偏差未超过原算法死区 0.05 个百分点，密度保持",
+      "deadband": 0,
+      "maxStep": 0.02,
+      "placeholderManual": false,
+      "hold": false,
+      "holdReason": "",
+      "driveKey": "total|calc|1791442587282|9.036",
+      "deltaRhoFull": 0,
+      "rhoTargetFull": 1.479,
+      "steps": 1,
+      "stepwise": false,
+      "deltaRhoPredict": -0.0024,
+      "rhoPredict": 1.476,
+      "expertRangeDA": 0.45,
+      "predictBeyondRange": false
+    },
+    "warnings": [
+      "浮精灰分：历史业务记录 · 导入 / 补录"
+    ],
+    "target": {
+      "min": 8.5,
+      "max": 9
+    }
+  }
+}
