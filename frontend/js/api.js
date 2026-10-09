@@ -123,6 +123,14 @@ window.Api = {
         return result;
     },
 
+    async getDecisionHourly() {
+        const response=await fetch(this.base+'/decision/hourly',{signal:AbortSignal.timeout(8000),cache:'no-store'});
+        if(!response.ok) throw new Error('小时统计暂不可用，请重试');
+        const result=await response.json();
+        if(result.policy!=='decision-hourly-v1' || !result.cells || !result.period || !result.coverage) throw new Error('小时统计响应异常');
+        return result;
+    },
+
     async reconnectTelemetry() {
         const token = this.writeToken();
         const response = await fetch(this.base + '/telemetry/reconnect', {

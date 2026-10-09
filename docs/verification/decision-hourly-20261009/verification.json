@@ -1,0 +1,112 @@
+{
+  "verified_at": "2026-10-09T07:00:51.112215+00:00",
+  "contract": {
+    "mode": "previous complete natural hour, Asia/Shanghai, [start,end)",
+    "numeric": "arithmetic mean of distinct valid observations",
+    "manual": "mean distinct saved records; if no records in hour, carry latest prior value with observed time",
+    "computed": "mean archived per-cycle GPT outputs, never recompute historical decisions with current model",
+    "advice": "mean signed per-cycle recommended-density minus actual-density, based on last valid actual density before hour end",
+    "max_adjustment": 0.03,
+    "minimum_advice_coverage": 0.9,
+    "maximum_gap_seconds": 60,
+    "end_density_max_age_seconds": 30
+  },
+  "storage": {
+    "cycle_cadence_seconds": 5,
+    "detail_retention_days": 7,
+    "hours_and_contexts": "retained",
+    "sample_count": 144,
+    "context_count": 1,
+    "hour_count": 2,
+    "history_before_start": "raw/manual averages only; no fabricated model outputs"
+  },
+  "validation": {
+    "regression_command": "pytest tests/test_decision_hourly.py tests/test_decision_sources.py tests/test_decision_live.py tests/test_hourly_brief.py tests/test_training.py tests/test_telemetry_migrations.py -q",
+    "regression_passed_before_boundary_additions": 81,
+    "final_hourly_tests_passed": 24,
+    "migration_tests_passed": 3,
+    "DS_original_golden": "passed; train_js.json and shared training/prediction algorithms unchanged",
+    "node_checks": [
+      "verify_decision_hourly.js",
+      "verify_decision_realtime.js",
+      "verify_decision_overview.js",
+      "verify_decision_sources.js"
+    ],
+    "browser": "real production page: hourly averages/carry timestamps/state percentages/detail explanations; instant restores live A304 and historical charts; no console errors",
+    "live_hour_rollover": {
+      "measured_hour": "2026-10-09 14:00-15:00 Asia/Shanghai",
+      "applies_to": "15:00-16:00",
+      "valid_decisions": 129,
+      "coverage_percent": 17.9166666667,
+      "coarse_ash_mean": 15.07717887794624,
+      "total_ash_mean": 8.90907426638184,
+      "advice": null,
+      "reason": "First partial hour since activation; coverage below policy. API and UI agree."
+    }
+  },
+  "post_timer_fix": {
+    "samples": 69,
+    "first": "2026-10-09T06:55:10.984+00:00",
+    "last": "2026-10-09T07:00:50.098+00:00",
+    "missing_slots": 0
+  },
+  "service": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "pid": 11444,
+    "max_step_setting": 0.03,
+    "responses": {
+      "127.0.0.1": {
+        "http": 200,
+        "period": {
+          "start": "2026-10-09T06:00:00.000+00:00",
+          "end": "2026-10-09T07:00:00.000+00:00",
+          "apply_start": "2026-10-09T07:00:00.000+00:00",
+          "apply_end": "2026-10-09T08:00:00.000+00:00",
+          "label": "10-09 14:00–15:00",
+          "apply_label": "15:00–16:00"
+        },
+        "density_source": "A304",
+        "coverage": {
+          "valid_count": 129,
+          "recorded_count": 133,
+          "expected_count": 720,
+          "ratio": 0.17916666666666667,
+          "longest_gap_seconds": 2870,
+          "required_ratio": 0.9,
+          "max_gap_seconds": 60,
+          "cadence_seconds": 5,
+          "up": 0,
+          "down": 7,
+          "stable": 122
+        }
+      },
+      "10.255.249.30": {
+        "http": 200,
+        "period": {
+          "start": "2026-10-09T06:00:00.000+00:00",
+          "end": "2026-10-09T07:00:00.000+00:00",
+          "apply_start": "2026-10-09T07:00:00.000+00:00",
+          "apply_end": "2026-10-09T08:00:00.000+00:00",
+          "label": "10-09 14:00–15:00",
+          "apply_label": "15:00–16:00"
+        },
+        "density_source": "A304",
+        "coverage": {
+          "valid_count": 129,
+          "recorded_count": 133,
+          "expected_count": 720,
+          "ratio": 0.17916666666666667,
+          "longest_gap_seconds": 2870,
+          "required_ratio": 0.9,
+          "max_gap_seconds": 60,
+          "cadence_seconds": 5,
+          "up": 0,
+          "down": 7,
+          "stable": 122
+        }
+      }
+    }
+  },
+  "screenshot": "hourly-live.png"
+}

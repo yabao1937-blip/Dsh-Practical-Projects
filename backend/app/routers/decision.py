@@ -130,3 +130,11 @@ def current_decision(db: Session = Depends(get_db)):
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))
     return shared_snapshot(db)
+
+
+@router.get('/hourly')
+def hourly_decision(db: Session = Depends(get_db)):
+    from ..decision_hourly.service import read_hour
+    if db.bind.dialect.name == 'sqlite':
+        db.execute(text('BEGIN'))
+    return read_hour(db)

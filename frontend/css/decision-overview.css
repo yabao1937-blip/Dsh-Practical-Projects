@@ -250,3 +250,8 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .decision-float-analysis .decision-analysis-open:is(:hover,:focus-visible) { color: #ffffff; background: #1c0aeb; border-color: #1c0aeb; }
 .decision-float-analysis .decision-analysis-open:focus-visible, .decision-float-analysis .decision-analysis-data summary:focus-visible { outline-color: #1c0aeb; }
 .decision-float-analysis .decision-analysis-data summary { color: var(--ds-ink); }
+/* Hourly mode has its own time basis; historical analysis stays in instant view. */
+.decision-foreground.is-hourly .decision-coarse-analysis,
+.decision-foreground.is-hourly .decision-float-analysis { display:none; }
+.decision-view-switch button:disabled { opacity:.4; cursor:default; }
+.decision-hour-status { color:var(--dm-blue); }

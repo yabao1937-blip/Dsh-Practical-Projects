@@ -58,6 +58,7 @@ const DecisionRealtime = {
         return {cells,target_min:target?.min ?? 8.5,target_max:target?.max ?? 9.0};
     },
     update(page) {
+        if(page.hourMode?.()) { DecisionHourly.update(page); return; }
         if (!this.active(page)) {this.currentKey=null;return;}
         if(typeof DecisionSources!=='undefined' && DecisionSources.enabled(page)) { this.updateShared(page); return; }
         const body=this.capture(page), key=JSON.stringify(body);

@@ -89,6 +89,10 @@
                 </div>
                 <div class="decision-workspace is-light" id="decision-workspace">
                     <div class="decision-toolbar">
+                        <div class="decision-view-switch" role="group" aria-label="数据统计方式">
+                            <button type="button" data-decision-aggregation="instant" class="is-active" aria-pressed="true">即时</button>
+                            <button type="button" data-decision-aggregation="hourly" aria-pressed="false">累加</button>
+                        </div>
                         <div class="decision-view-switch" role="group" aria-label="粗精煤泥分析链路">
                             <button type="button" data-decision-model="gpt" class="is-active" aria-pressed="true">GPT 链路</button>
                             <button type="button" data-decision-model="production" aria-pressed="false">当前生产链路</button>
@@ -989,7 +993,8 @@
     <script src="js/decision-coarse-charts.js?v=4"></script>
     <script src="js/decision-float-analysis.js?v=1"></script>
     <script src="js/decision-overview.js?v=16"></script>
-    <script src="js/decision-realtime.js?v=1"></script>
+    <script src="js/decision-realtime.js?v=2"></script>
+    <script src="js/decision-hourly.js?v=1"></script>
     <script src="js/manual-measurements.js?v=1"></script>
     <script src="js/collect.js?v=25"></script>
     <script src="js/coarse.js?v=24"></script>

@@ -7,6 +7,7 @@ from . import auth
 from . import models  # noqa: F401  确保建表前模型已注册
 from .telemetry import models as telemetry_models  # noqa: F401
 from .hourly_brief import models as hourly_brief_models  # noqa: F401
+from .decision_hourly import models as decision_hourly_models  # noqa: F401
 from .hourly_brief.worker import lifespan as hourly_brief_lifespan
 from .routers.hourly_brief import router as hourly_brief_router
 from .routers.decision import router as decision_router

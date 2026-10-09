@@ -1,7 +1,7 @@
 /* GPT live decision map; snapshots never mutate App.store, saved models or PLC values. */
 const DecisionOverviewPage = {
     initialized: false, view: 'gpt', selected: 'density', zoom: null, snapshot: null,
-    pointChoices: {}, nodes: [], timer: null,
+    pointChoices: {}, nodes: [], timer: null, aggregationMode:'instant',
     summaryChildren: new Map([['heavy',['heavy-ash','heavy-amount']],['float',['float-ash','float-amount']]]),
     sourceInteractionUntil: 0,
     inspectorFrame: null,
@@ -19,6 +19,7 @@ const DecisionOverviewPage = {
     },
     active() { return !!document.getElementById('page-decision')?.classList.contains('active'); },
     liveMode() { return typeof DecisionRealtime !== 'undefined' && DecisionRealtime.active(this); },
+    hourMode() { return this.view==='gpt' && this.aggregationMode==='hourly' && typeof DecisionHourly!=='undefined'; },
     renderHTML(id, html) {
         const host=document.getElementById(id);
         // Keep the legacy production view unchanged. GPT refreshes patch existing
@@ -60,7 +61,7 @@ const DecisionOverviewPage = {
     },
     fixedSource(id) { return this.summaryChildren.has(id) || id === 'heavy-amount'; },
     sharedSources() { return typeof DecisionSources!=='undefined' && DecisionSources.enabled(this); },
-    densityLabel() { return this.sharedSources() ? DecisionRealtime.result?.density_label || '等待读取' : 'A304'; },
+    densityLabel() { return this.hourMode() ? DecisionHourly.presentation()?.density_label || '等待读取' : this.sharedSources() ? DecisionRealtime.result?.density_label || '等待读取' : 'A304'; },
     sourceLocked(id) { return this.fixedSource(id) || (this.liveMode() && (['coarse','density'].includes(id) || (id==='density-current' && !this.sharedSources()))); },
     loadPointChoices() {
         try {
@@ -150,6 +151,7 @@ const DecisionOverviewPage = {
             title:detail || reason || '暂无有效密度'};
     },
     pointDisplay(node) {
+        if(this.hourMode()) return DecisionHourly.display(this,node);
         if (this.liveMode()) {
             if (['coarse','density'].includes(node.id)) return DecisionRealtime.display(this,node);
             if(this.sharedSources()) {
@@ -348,6 +350,10 @@ const DecisionOverviewPage = {
         this.initialized = true;
         this.loadPointChoices();
         this.loadRetainedValues();
+        document.querySelectorAll('[data-decision-aggregation]').forEach(button=>button.addEventListener('click',()=>{
+            this.aggregationMode=button.dataset.decisionAggregation;
+            this.closeInspector(false); this.refresh();
+        }));
         if (typeof DecisionBackground !== 'undefined') this.background = new DecisionBackground(document.getElementById('decision-background-flow'));
         document.getElementById('decision-refresh').addEventListener('click', () => {
             this.sourceInteractionUntil = 0;
@@ -434,6 +440,12 @@ const DecisionOverviewPage = {
         if (!this.initialized) return;
         this.syncMotion();
         if (!this.active()) { this.closeInspector(false); return; }
+        document.getElementById('decision-workspace').closest('.decision-foreground').classList.toggle('is-hourly',this.hourMode());
+        document.querySelectorAll('[data-decision-aggregation]').forEach(button=>{
+            button.disabled=this.view!=='gpt';
+            const selected=button.dataset.decisionAggregation===(this.hourMode()?'hourly':'instant');
+            button.classList.toggle('is-active',selected); button.setAttribute('aria-pressed',String(selected));
+        });
         this.applyDefaultManualPoint();
         if (this.liveMode() && !this.sharedSources()) DecisionRealtime.bindDefaults(this);
         const focused = document.activeElement?.dataset?.decisionNode;
@@ -667,6 +679,7 @@ const DecisionOverviewPage = {
     },
 
     renderContext() {
+        if(this.hourMode()) { DecisionHourly.context(this); return; }
         const modeLabel=document.getElementById('decision-mode-label'),modeNote=document.getElementById('decision-mode-note');
         if(modeLabel) modeLabel.textContent=this.liveMode()?'实时计算 · 人工执行':'只读决策视图';
         if(modeNote) modeNote.textContent=this.liveMode()?'GPT 链路：当前输入 → 粗精煤泥灰分预测 → 三组分总灰分 → 建议密度。数据来源与后续小时简报共享；输入变化后重新计算，缺失时显示原因。建议由人工确认执行。虚线表示尚未进入模型的工况参考。':'点击节点选择采集点，卡片随读数更新；点击画布空白处收起。采集显示不改变建议计算，相关连线作为虚线对照。建议密度保留计算值，点位显示为采集对照。';
@@ -718,7 +731,8 @@ const DecisionOverviewPage = {
     renderGraph() {
         const s = this.snapshot, selected = this.nodes.find(n => n.id === this.selected);
         const targetAsh = (typeof CollectPage !== 'undefined' ? CollectPage.instruments.find(i => i.id === 'total_ash') : null);
-        const targetAshRange = `${this.number(targetAsh?.min ?? 8.5,1)}–${this.number(targetAsh?.max ?? 9.0,1)}%`;
+        const hourly=this.hourMode(),hourResult=hourly?DecisionHourly.presentation():null;
+        const targetAshRange = `${this.number((hourly?hourResult?.target?.min:targetAsh?.min) ?? 8.5,1)}–${this.number((hourly?hourResult?.target?.max:targetAsh?.max) ?? 9.0,1)}%`;
         const colors = {heavy:'var(--dm-blue)',float:'var(--dm-orange)',coarse:'var(--dm-green)'};
         const ancestorIds = new Set([this.selected]);
         let current = selected;
@@ -744,17 +758,17 @@ const DecisionOverviewPage = {
             const display = displays.get(node.id), root = node.id === 'density';
             const preview = node.id === 'coarse' && !this.liveMode() ? `<span>查看${this.view === 'gpt' ? ' GPT' : '生产'}预测 ${this.number(s.prediction,2,'%')}${!s.model ? ' · 未训练' : s.previewOnly ? ' · 对照' : ' · 未平滑'}</span>` : '';
             const unit = node.id === 'density' ? '<span class="decision-root-unit">g/cm³</span>' : '';
-            const sub = node.id === 'density' ? `<span>当前 ${this.number(this.liveMode()?displays.get('density-current').numericValue:s.guide.rhoCur,3)}${this.liveMode()?' · '+this.escape(this.densityLabel()):''}</span><span>目标灰分范围 ${targetAshRange}</span>` : '';
+            const sub = node.id === 'density' ? `<span>${hourly?'小时末':'当前'} ${this.number(hourly?hourResult?.guidance?.rhoCur:this.liveMode()?displays.get('density-current').numericValue:s.guide.rhoCur,3)}${this.liveMode()?' · '+this.escape(this.densityLabel()):''}</span><span>目标灰分范围 ${targetAshRange}</span>` : '';
             const phase = -((now+index*.41)%5).toFixed(3);
             const badge = display.aggregate || display.calculated || display.shared ? `<span class="decision-badge">${display.badge}</span>` : display.bound && !root ? `<span class="decision-badge">${display.manual ? (display.held ? '待刷新' : display.available ? '补录' : '无补录') : display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
             const compare = display.bound && root ? `<span class="decision-live-comparison">采集对照 ${this.escape(display.value)}${display.available ? '' : '（不可用）'}</span>` : '';
-            const groupHtml = display.components && !root ? `<span class="decision-state-grid">${display.components.map(c => `<span>${this.escape(c.label)} ${c.available && (display.shared || !window.Operations?.telemetryFailed) ? c.value ? '开' : '关' : '未知'}</span>`).join('')}</span>` : this.escape(root && !this.liveMode() ? node.value : display.value);
-            return `<button type="button" class="decision-node${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${display.pending ? ' is-updating' : ''}${(display.bound || display.aggregate || display.calculated) && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" aria-busy="${!!display.pending}"${display.bound || display.aggregate || display.calculated ? ` title="${this.escape(display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-pulse-delay:${phase}s"><span class="decision-node-heading">${this.escape(node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(root && !this.liveMode() ? node.source : display.source)}</span>${sub}${preview}${compare}</span></button>`;
+            const groupHtml = display.components && !root ? `<span class="decision-state-grid">${display.components.map(c => `<span>${this.escape(c.label)} ${c.available && (display.shared || !window.Operations?.telemetryFailed) ? c.fraction ? this.number(c.value*100,0,'%') : c.value ? '开' : '关' : '未知'}</span>`).join('')}</span>` : this.escape(root && !this.liveMode() ? node.value : display.value);
+            return `<button type="button" class="decision-node${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${display.pending ? ' is-updating' : ''}${(display.bound || display.aggregate || display.calculated) && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" aria-busy="${!!display.pending}"${display.bound || display.aggregate || display.calculated ? ` title="${this.escape(display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-pulse-delay:${phase}s"><span class="decision-node-heading">${this.escape(hourly && root?'本小时建议密度':hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(root && !this.liveMode() ? node.source : display.source)}</span>${sub}${preview}${compare}</span></button>`;
         }).join('');
-        const shown=this.liveMode()?DecisionRealtime.presentation():null,pending=this.liveMode() && DecisionRealtime.pending();
-        const totalReason=this.liveMode() ? pending?'更新中 · 上轮结果仅供对照':shown?.total_ash?.reason || DecisionRealtime.error || '正在计算' : '';
-        const total=this.liveMode()?`<strong>${pending?'上轮总灰分':'预测总灰分'} ${this.number(shown?.total_ash?.value,2,'%')}</strong><span title="${this.escape(totalReason)}">${this.escape(totalReason.length>45?'输入待补充，点击建议密度查看原因':totalReason)}</span>`:`公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}`;
-        this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 970"><defs>${markers}</defs>${paths}</svg>${cards}<div class="decision-formula"><strong>三组分质量平衡</strong>总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量<br>${total}</div>`);
+        const shown=hourly?hourResult:this.liveMode()?DecisionRealtime.presentation():null,pending=hourly?DecisionHourly.pending():this.liveMode() && DecisionRealtime.pending();
+        const totalReason=this.liveMode() ? pending?'更新中 · 上轮结果仅供对照':shown?.total_ash?.reason || (hourly?DecisionHourly.error:DecisionRealtime.error) || '正在计算' : '';
+        const total=this.liveMode()?`<strong>${hourly?'小时平均总灰分':pending?'上轮总灰分':'预测总灰分'} ${this.number(shown?.total_ash?.value,2,'%')}</strong><span title="${this.escape(totalReason)}">${this.escape(totalReason.length>45?'输入待补充，点击建议密度查看原因':totalReason)}</span>`:`公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}`;
+        this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 970"><defs>${markers}</defs>${paths}</svg>${cards}<div class="decision-formula"><strong>${hourly?'逐次质量平衡 · 小时平均':'三组分质量平衡'}</strong>${hourly?'先按各次组分灰分和煤量计算总灰分，再对有效结果求平均':'总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量'}<br>${total}</div>`);
     },
 
     telemetryState(item, failed = window.Operations?.telemetryFailed) {
@@ -770,6 +784,7 @@ const DecisionOverviewPage = {
         const scrollTop = document.getElementById('decision-inspector').scrollTop || 0;
         const node = this.nodes.find(n => n.id === this.selected) || this.nodes[0], s = this.snapshot;
         const display = this.pointDisplay(node);
+        if(this.hourMode()) { DecisionHourly.inspector(this,node); return; }
         if (display.aggregate || display.calculated) {
             const details = (display.summaryParts || display.inputs).map(part => {
                 const d = part.display;

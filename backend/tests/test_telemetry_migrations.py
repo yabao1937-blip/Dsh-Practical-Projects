@@ -25,8 +25,10 @@ def test_migration_preserves_existing_business_and_telemetry(tmp_path, auto_crea
         run(env, "-c", "from app.main import app; from app.database import engine; from sqlalchemy import text; conn=engine.connect(); conn.execute(text(\"INSERT INTO telemetry_sources (source_id,name,state,retry_seconds) VALUES ('test','test','stopped',0)\")); conn.commit(); conn.close()")
     run(env, "-m", "alembic", "upgrade", "head")
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "c3a610090001"
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "c3a610090002"
         assert [r[1] for r in db.execute("PRAGMA table_info(hourly_brief_feedback)")] == ["id", "hour", "content", "created_at", "client_id"]
+        assert [r[1] for r in db.execute("PRAGMA table_info(decision_cycle_samples)")] == ["slot", "sampled_at", "context_key", "fingerprint", "snapshot"]
+        assert db.execute("SELECT count(*) FROM decision_cycle_hours").fetchone()[0] == 0
         assert [r[1] for r in db.execute("PRAGMA table_info(online_instruments)")] == ["设备", "标签名", "说明", "ItemID", "值", "时间"]
         assert db.execute("SELECT value FROM settings WHERE key='migration-test'").fetchone()[0] == 8.5
         assert db.execute("SELECT count(*) FROM telemetry_sources").fetchone()[0] == int(auto_created)
