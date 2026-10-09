@@ -145,7 +145,7 @@ const BriefPage = {
                             return `<th scope="col" ${columnAttrs(c)} class="${c.group ? `brief-group-${c.group} ${group ? 'brief-group-heading' : 'brief-group-detail'}` : ''}">${group ?
                                 `<button class="brief-group-toggle" data-brief-toggle="${c.group}" data-detail-count="${count}" aria-expanded="${expanded}" onclick="BriefPage.toggleGroup('${c.group}')"><span class="brief-group-label"><span class="brief-group-caret" aria-hidden="true">▸</span>${e(c.label)}${c.unit ? ` <span class="brief-group-unit">(${e(c.unit)})</span>` : ''}</span><small class="brief-group-action">${expanded ? '收起明细' : `展开 ${count} 项`}</small></button>` :
                                 `${e(c.label)}${c.unit ? `<small>${e(c.unit)}</small>` : ''}`}</th>`;
-                        }).join('')}</tr></thead>
+                        }).join('')}<th scope="col" class="brief-feedback-cell" data-brief-column="feedback">反馈</th></tr></thead>
                         <tbody>${rows.map((row, index) => `<tr>
                             <td><button class="brief-hour" onclick="BriefPage.showSources(${index})" aria-label="查看 ${e(this.localTime(row.hour))} 数据来源">${e(this.localTime(row.hour).slice(0,16))}</button></td>
                             ${columns.map(c => {
@@ -154,7 +154,7 @@ const BriefPage = {
                                     ${this.valueHTML(cell, c.key)}
                                     ${c.key === 'density' ? `<small class="brief-cell-note">${e(row.density_label || cell?.source || '来源未记录')}</small>` : ''}
                                     ${note ? `<small class="brief-cell-note">${e(note)}</small>` : ''}</td>`;
-                            }).join('')}</tr>`).join('')}</tbody>
+                            }).join('')}${BriefFeedback.cell(row, index)}</tr>`).join('')}</tbody>
                     </table></div>` : `<div class="brief-empty">
                         <strong>${this.loading ? '正在读取小时简报' : this.error ? '暂时无法读取简报' : '暂无小时记录'}</strong>
                         <p>${data?.next_hour ? `后台将在 ${e(this.localTime(data.next_hour))} 生成下一行。` : '等待后台任务就绪。'}</p>
@@ -204,7 +204,7 @@ const BriefPage = {
             link.click();
             link.remove();
             setTimeout(() => URL.revokeObjectURL(url), 10000);
-            App.showToast('已导出当前页 ' + data.rows.length + ' 行及来源说明', 'success');
+            App.showToast('已导出当前页 ' + data.rows.length + ' 行、来源说明及反馈记录', 'success');
         } catch (error) { App.showToast(error.message || '导出失败', 'error'); }
     },
 };

@@ -294,8 +294,8 @@ def test_get_is_read_only_and_day_filter_uses_beijing_midnight(sessions):
         export = client.get("/api/v1/hourly-brief/export", params={"hour":iso_time(HOUR)})
         assert export.status_code == 200 and export.content.startswith(b"PK")
         workbook = load_workbook(BytesIO(export.content))
-        assert workbook.sheetnames == ["小时推测简报", "数据来源与说明"]
-        assert workbook.worksheets[0].max_column == 18
+        assert workbook.sheetnames == ["小时推测简报", "数据来源与说明", "人工经验反馈"]
+        assert workbook.worksheets[0].max_column == 19
         assert workbook.worksheets[0].max_row == 2
         assert workbook.worksheets[1].max_row == 18
         assert workbook.worksheets[0]["A2"].value == "2026-10-08 10:00:00"

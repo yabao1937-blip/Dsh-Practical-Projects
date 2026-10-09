@@ -23,15 +23,23 @@ def display(value):
     return value
 
 
-def generate_workbook(rows):
+def generate_workbook(rows, feedback=()):
     wb = Workbook()
     main = wb.active
     main.title = "小时推测简报"
     sources = wb.create_sheet("数据来源与说明")
-    main.append(["整点时间（北京时间）"] + [label + (f"（{unit}）" if unit else "") for _, label, unit in COLUMNS])
+    history = wb.create_sheet("人工经验反馈")
+    history.append(["反馈编号", "简报整点（北京时间）", "录入时间（北京时间）", "反馈内容"])
+    by_hour = {}
+    for record in sorted(feedback, key=lambda item: item.id, reverse=True):
+        by_hour.setdefault(record.hour, []).append(record)
+        history.append([record.id, local_time(record.hour), local_time(record.created_at), record.content])
+    main.append(["整点时间（北京时间）"] + [label + (f"（{unit}）" if unit else "") for _, label, unit in COLUMNS] + ["反馈（最新）"])
     sources.append(["整点时间", "指标", "值", "单位", "来源", "采样时间", "状态", "说明"])
     for row in rows:
-        main.append([local_time(row.hour)] + [display(row.snapshot["cells"][key]["value"]) for key, _, _ in COLUMNS])
+        entries = by_hour.get(row.hour, [])
+        summary = f"{entries[0].content}\n{local_time(entries[0].created_at)} · 共 {len(entries)} 条" if entries else "—"
+        main.append([local_time(row.hour)] + [display(row.snapshot["cells"][key]["value"]) for key, _, _ in COLUMNS] + [summary])
         for j, (key, label, unit) in enumerate(COLUMNS, start=2):
             data = row.snapshot["cells"][key]
             reason = data.get("reason", "")
@@ -66,6 +74,11 @@ def generate_workbook(rows):
     sources.column_dimensions["E"].width = 28
     sources.column_dimensions["F"].width = 24
     sources.column_dimensions["H"].width = 85
+    main.column_dimensions[get_column_letter(len(COLUMNS) + 2)].width = 55
+    history.column_dimensions["A"].width = 14
+    history.column_dimensions["B"].width = 24
+    history.column_dimensions["C"].width = 24
+    history.column_dimensions["D"].width = 85
     output = BytesIO()
     wb.save(output)
     return output.getvalue()

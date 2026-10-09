@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-09",
+  "feature": "小时推测简报末列人工经验反馈",
+  "table": "hourly_brief_feedback",
+  "columns": ["id", "hour", "content", "created_at", "client_id"],
+  "semantics": "按规范 UTC 整点关联原始简报；每次反馈追加保存；不改原预测快照，不自动训练模型。",
+  "backend_check": {
+    "command": "backend/.venv/Scripts/python.exe -m pytest backend/tests/test_hourly_feedback.py backend/tests/test_hourly_brief.py backend/tests/test_telemetry_migrations.py backend/tests/test_training.py -q",
+    "passed": 42,
+    "coverage": ["反馈保存与小时隔离", "空白/超长/非法时间校验", "并发幂等和冲突", "分页与最新摘要", "写鉴权", "普通及 force 状态镜像保留反馈", "XLSX 完整历史及文本类型", "新建库和已有表迁移", "DS 原版对拍"]
+  },
+  "frontend_check": {
+    "command": "node backend/scripts/verify_brief_feedback.js",
+    "result": "passed",
+    "coverage": ["自动刷新和关闭窗口保留草稿", "网络失败保留内容并复用提交标识", "重复点击不重复提交", "切换小时的请求与草稿隔离", "过期历史响应不覆盖当前窗口", "反馈转义", "反馈列不随指标折叠"]
+  },
+  "browser_check": {
+    "isolated_database": "backend/data/verification/hourly-ui-20261009-092329.db",
+    "result": "通过表单保存一条明确标为独立测试样例的反馈，页面刷新后仍显示；直接读取 SQLite 核对一致。正式库未写入测试反馈。",
+    "production": "正式页面反馈末列和弹窗查询正常，显示暂无反馈；截图 feedback-live.png。",
+    "screenshots": ["feedback-saved.png", "feedback-live.png"]
+  },
+  "deployment": {
+    "backup": "backend/data/backups/before-feedback-20261009-091747.db",
+    "table_creation": "服务启动时 Base.metadata.create_all；另提供经隔离验证的 Alembic 0007 迁移。",
+    "snapshot_count": 24,
+    "snapshot_sha256_before_and_after": "1e3d78684793e8c2d2ddf43dc62a99bc7f01f2e61b6426c4e035a4b79d2960d8",
+    "max_step": 0.03,
+    "temporary_issue": "开发时前端静态文件先加载，旧后端尚未重启，新反馈路由返回 404。重启正式服务后接口返回 200，浏览器核验恢复。"
+  }
+}
