@@ -8,6 +8,8 @@ from . import models  # noqa: F401  确保建表前模型已注册
 from .telemetry import models as telemetry_models  # noqa: F401
 from .hourly_brief import models as hourly_brief_models  # noqa: F401
 from .decision_hourly import models as decision_hourly_models  # noqa: F401
+from .gpt_coarse import models as gpt_coarse_models  # noqa: F401
+from .gpt_coarse.router import router as gpt_coarse_router
 from .hourly_brief.worker import lifespan as hourly_brief_lifespan
 from .routers.hourly_brief import router as hourly_brief_router
 from .routers.decision import router as decision_router
@@ -42,6 +44,7 @@ install_observability(app)
 #   · PUT /state?force=true（整库覆盖/清空）**只接受本机来源**，拿到 token 也不能从别的机器洗库。
 
 app.include_router(health.router, prefix="/api/v1")
+app.include_router(gpt_coarse_router, prefix="/api/v1")
 app.include_router(hourly_brief_router, prefix="/api/v1")
 app.include_router(decision_router, prefix="/api/v1")
 app.include_router(assistant.router, prefix="/api/v1")   # AI解读助手(只读)

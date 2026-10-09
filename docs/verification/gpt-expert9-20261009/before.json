@@ -1,0 +1,36 @@
+{
+  "tables": {
+    "coarse_models": {
+      "count": 2,
+      "hash": "f226c0098c64b9761b9afb654aaf7c36d171e27aa3b6e5a4c6506e58a53a68f5",
+      "last_rowid": 2
+    },
+    "coal_records": {
+      "count": 779,
+      "hash": "449299c5a21e66f52adbca17f4f6542700dbb7ba835de709066a46a545115521",
+      "last_rowid": 779
+    },
+    "manual_measurements": {
+      "count": 3,
+      "hash": "f325a17774e4afc793a8f8b897874bca1112c553220e3a78eaf392cf6577f9c9",
+      "last_rowid": 3
+    },
+    "hourly_brief_rows": {
+      "count": 30,
+      "hash": "5d3cbd72877c33ff3b42b3331c9b8eac50fc6eb9a23deecda0c7b2a8b0f931e8",
+      "last_rowid": 30
+    },
+    "coarse_model_history": {
+      "count": 23,
+      "hash": "95f0a5a13cec9b3050a85ca96151188eb3649a94d3a08f4e9218ce65a1481a2b",
+      "last_rowid": 23
+    }
+  },
+  "ds_variant": "6ee148d31d54c40c56ff1014fdd27eb1b4868d60ed185575409aa38f91d25da6",
+  "ds_files": {
+    "backend/data/train_js.json": "aa09b7a4574ec19be5f840b68f3611394b0584f2ec435b0abd062416f8566bbd",
+    "backend/app/services/training.py": "25ae63af01f760f4a196d87467ea7d56d203d4853034c0c87c2787a09d0331de",
+    "backend/app/services/modeling.py": "11b05d83db4b7e736682894f6dfb34260dddd015041b04b206c9d6898ac7351d",
+    "backend/models/coarse_slime_ash_model.json": "ada805bb538075ff371c149814aa1bef85bcc2a9cdf871994ba045d095afc3e0"
+  }
+}

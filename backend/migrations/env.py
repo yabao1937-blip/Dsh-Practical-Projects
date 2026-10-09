@@ -27,6 +27,7 @@ from app import models  # noqa: E402,F401  注册全部模型供 autogenerate
 from app.telemetry import models as telemetry_models  # noqa: E402,F401
 from app.hourly_brief import models as hourly_brief_models  # noqa: E402,F401
 from app.decision_hourly import models as decision_hourly_models  # noqa: E402,F401
+from app.gpt_coarse import models as gpt_coarse_models  # noqa: E402,F401
 
 target_metadata = Base.metadata
 config.set_main_option("sqlalchemy.url", DATABASE_URL)

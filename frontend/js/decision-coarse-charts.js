@@ -36,6 +36,10 @@ const DecisionCoarseCharts = {
         return this.dailyCache.result;
     },
     build(store = App.store, mode = this.mode) {
+        if(typeof GptExpert9!=='undefined' && (!GptExpert9.loaded || GptExpert9.error ||
+            (GptExpert9.expectedArtifact && GptExpert9.expectedArtifact!==GptExpert9.group?.artifact_id)))
+            return {group:null,model:null,rows:[],factors:[],count:0,missing:0,excluded:0,mode,reason:'expert-loading'};
+        if(typeof GptExpert9!=='undefined' && GptExpert9.group) return GptExpert9.chartSnapshot(mode);
         const saved=this.modelGroup(store),empty=reason=>({group:null,model:null,rows:[],factors:[],count:0,missing:0,excluded:0,mode,reason});
         if(!this.validModel(saved)) return empty('gpt-model-missing');
         const group=mode==='day'?this.dailyModel(store,saved):saved;
@@ -99,7 +103,7 @@ const DecisionCoarseCharts = {
     refresh() {
         this.init();
         const group = this.modelGroup(App.store);
-        const signature = JSON.stringify([this.mode,group,App.store.coarseTolerance,
+        const signature = JSON.stringify([this.mode,typeof GptExpert9!=='undefined'?[GptExpert9.group?.artifact_id,GptExpert9.loaded,GptExpert9.error,GptExpert9.expectedArtifact]:null,group,App.store.coarseTolerance,
             (App.store.coarseCoal || []).map(r=>[r.timestamp,r.ash_content,...App.MLR_FEATURES.map(f=>r[f])])]);
         const colors = this.palette(), paletteKey = JSON.stringify(colors);
         if (signature === this.signature && paletteKey === this.paletteKey) return;
@@ -122,6 +126,16 @@ const DecisionCoarseCharts = {
         document.getElementById(this.rootId).querySelectorAll('[data-decision-series="actual"]').forEach(el=>el.textContent=daily?'实测日均值':'实测灰分');
         document.getElementById(this.rootId).querySelectorAll('[data-decision-series="predicted"]').forEach(el=>el.textContent=daily?'GPT 日级预测':'GPT 采样预测');
         document.getElementById('decision-coarse-factor-caption').textContent=daily?'日级分析模型的标准化系数，仅用于历史分析。':'采样保存模型的标准化系数，保留原生产模型。';
+        const note=document.getElementById(this.rootId).querySelector('.decision-analysis-note');
+        if(note && !note.dataset.legacyText) note.dataset.legacyText=note.textContent;
+        if(note) note.textContent=s.expert?'按采样：使用当前保存的专家九因子模型，对原表正常生产记录逐条回算；按日：先逐条预测，再将同日实测与预测分别求均值，不重新训练日级模型。日均误差可能因正负误差抵消而减小，不代表单次预测更准确。历史回算不是新的独立验证，化验报告时间尚未记录。上方决策链使用当前采集数据；液位25–75%以外显示边界估算并暂缓调密。':note.dataset.legacyText;
+        if(s.expert) {
+            meta.textContent=`GPT · 专家基准九因子 · ${s.count} 条历史记录 → ${s.rows.length} 个${mode} · 历史回算，非独立验收；按日为逐样本预测后求均值`;
+            document.getElementById('decision-coarse-factor-caption').textContent='参考工况单因素影响：连续量增加1个历史标准差（受范围限制），开关停止→运行；液位为专家设定，A系统样本不足取0。';
+            document.getElementById(this.rootId).querySelectorAll('[data-decision-series="predicted"]').forEach(el=>el.textContent=daily?'GPT 回算日均值':'GPT 逐样本回算');
+        }
+        this.canvas('factors').setAttribute('aria-label',s.expert?'GPT专家模型在参考工况下的单因素预测影响，不代表因果或准确率。方向键查看。':'GPT 当前统计口径模型的标准化系数关联强度，不代表因果或准确率。方向键查看系数。');
+        if(s.reason==='expert-loading') meta.textContent=GptExpert9.error || '正在同步专家模型版本，历史图表稍后显示';
         this.draw();
     },
     syncEngagement(id) {
@@ -188,7 +202,7 @@ const DecisionCoarseCharts = {
         if (id !== 'factors' && !this.snapshot.rows.length) { this.empty(surface,'暂无有效历史采样数据'); return; }
         this[id](surface);
     },
-    emptyReason() { return this.snapshot.reason==='daily-data-insufficient'?'日级数据不足，请切换按采样':'暂无可用 GPT 模型'; },
+    emptyReason() { return this.snapshot.reason==='expert-loading'?'专家模型同步中，暂不显示其他版本':this.snapshot.reason==='daily-data-insufficient'?'日级数据不足，请切换按采样':'暂无可用 GPT 模型'; },
     trend(surface) {
         const {ctx,w,h,c}=surface,rows=this.snapshot.rows,n=rows.length;
         const a=this.axes(surface,rows.flatMap(r=>[r.actual,r.pred,13]),this.mode==='day'?'采样日期 · 每日一点':'采样时间 · 每条记录一点');
@@ -216,9 +230,9 @@ const DecisionCoarseCharts = {
             ctx.fillStyle=f.value>=0?c.green:c.red;ctx.fillRect(left,y-7,bar,14);
             ctx.fillStyle=c.ink;ctx.textAlign='right';ctx.fillText(this.shortLabels[f.key],left-9,y+4);
             ctx.fillStyle=c.muted;ctx.textAlign='left';ctx.fillText((f.value>=0?'+':'')+f.value.toFixed(3),left+bar+6,y+4);
-            return {x:left+bar/2,y,text:`${f.name}\n标准化系数 ${this.number(f.value,3)}\n关联方向${f.value>=0?'为正':'为负'}；不代表因果或准确率`};
+            return {x:left+bar/2,y,text:this.snapshot.expert?`${f.name}\n单因素影响 ${this.number(f.value,3)} 个百分点\n${f.change}；非因果结论`:`${f.name}\n标准化系数 ${this.number(f.value,3)}\n关联方向${f.value>=0?'为正':'为负'}；不代表因果或准确率`};
         });
-        ctx.fillStyle=c.muted;ctx.textAlign='center';ctx.fillText('|标准化系数|',left+width/2,h-7);
+        ctx.fillStyle=c.muted;ctx.textAlign='center';ctx.fillText(this.snapshot.expert?'|参考工况单因素影响|（百分点）':'|标准化系数|',left+width/2,h-7);
     },
     level(surface) {
         const {ctx,w,h,c}=surface,rows=this.snapshot.rows.filter(r=>r.paired>0);

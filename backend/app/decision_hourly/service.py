@@ -49,8 +49,8 @@ def context_definition(result, store):
     for c in result['cells'].values():
         collect(c)
     return dict(policy='decision-hourly-v1', sources=result['sources']['resolved_choices'],point_definitions=definitions,
-        target=result['target'], model=result['model'], model_definition={k:deepcopy(model[k]) for k in
-        ('intercept','coefs','feature_names','featureNames','inputPolicy','inputBounds','imputeMeans') if k in model},
+        target=result['target'], model=result['model'], model_definition=deepcopy(model) if method == 'expert9' else
+        {k:deepcopy(model[k]) for k in ('intercept','coefs','feature_names','featureNames','inputPolicy','inputBounds','imputeMeans') if k in model},
         density_guide=store.get('densityGuide') or {})
 
 

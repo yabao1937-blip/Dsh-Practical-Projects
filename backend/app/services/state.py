@@ -6,6 +6,7 @@ services.density 等纯函数能直接消费。
 import json
 import hashlib
 from sqlalchemy import select
+from ..gpt_coarse.repository import active as active_gpt_expert
 
 from ..models import (
     AutoState, CalcLog, CoalRecord, CoarseModel, Setting, HeavySample,
@@ -65,7 +66,7 @@ def state_revision(db):
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
 
-def load_store(db) -> dict:
+def load_store(db, model_at=None) -> dict:
     store: dict = {
         "coarseCoal": [], "floatCoal": [], "calcLogs": [], "magneticTail": [],
         "amountInputs": {}, "ashInputs": {}, "instrumentInputs": {},
@@ -134,5 +135,6 @@ def load_store(db) -> dict:
     store['heavySamples'] = [{"id": s.id, "client_id": s.client_id, "timestamp": s.ts,
                               "rho": s.rho, "ash_content": s.ash_content, "source": s.source, "synced": True}
                              for s in db.query(HeavySample).order_by(HeavySample.ts, HeavySample.id)]
+    store['gptExpertModel'] = active_gpt_expert(db, model_at)
     store['_revision'] = state_revision(db)
     return store

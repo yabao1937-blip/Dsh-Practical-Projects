@@ -13,6 +13,7 @@ const CoarsePage = {
     _dailyModel: null,          // 日级模型缓存(懒加载,切换到按日视图时训练)
 
     init() {
+        if (typeof GptExpert9 !== 'undefined' && GptExpert9.active()) { GptExpert9.load(); this.refresh(); return; }
         this.refresh();
         this.initCharts();
         this.initControls();
@@ -176,6 +177,7 @@ const CoarsePage = {
     },
 
     refresh() {
+        if (typeof GptExpert9 !== 'undefined' && GptExpert9.panel()) { GptExpert9.load(); return; }
         this.syncControls();
         this.updateCards();
         this.updateAmountCard();
@@ -894,7 +896,18 @@ const CoarsePage = {
         this.refresh();
     },
     async switchEngine(engine) {
-        if (this._training || engine === App.coarseEngine()) return;
+        if (typeof GptExpert9 !== 'undefined') {
+            if (GptExpert9.choose(engine)) return;
+            // Leaving the independent GPT panel restores the existing DS page lifecycle.
+            document.getElementById('page-coarse').classList.remove('gpt-expert-active');
+            if (!this.trendChart) this.initCharts();
+        }
+        if (this._training) return;
+        if (engine === App.coarseEngine()) {
+            this.refresh();
+            if(typeof GptExpert9!=='undefined') GptExpert9.restoreLegacy();
+            return;
+        }
         this._training = true;
         this.syncControls();
         try {
@@ -905,6 +918,7 @@ const CoarsePage = {
         } finally {
             this._training = false;
             this.refresh();
+            if(typeof GptExpert9!=='undefined') GptExpert9.restoreLegacy();
         }
     },
     async retrain() {

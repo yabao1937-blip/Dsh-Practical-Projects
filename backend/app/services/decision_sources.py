@@ -166,7 +166,7 @@ def shared_snapshot(db, when=None):
     for c in captured.values():
         c['entered_at'] = c.get('created_at')
         c['batch_id'] = (c.get('sample') or {}).get('batch_id')
-    store = load_store(db)
+    store = load_store(db, model_at=when)
     current_models = list(db.scalars(select(CoarseModel)))
     if any(m.created_at and business_time(m.created_at) > when for m in current_models):
         store['coarseModel'] = None

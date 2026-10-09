@@ -79,6 +79,7 @@ const DecisionRealtime = {
         this.inFlight=(async()=>{
             try {
                 const result=await window.Api.calculateDecision(body);
+                if(typeof GptExpert9!=='undefined') GptExpert9.observe(result);
                 if (this.currentKey!==key) return;
                 this.result=result;this.resultKey=key;this.previousResult=null;this.completedAt=Date.now();
             } catch(error) {
@@ -102,6 +103,7 @@ const DecisionRealtime = {
             try {
                 await DecisionSources.ensure(page);
                 const result=await Api.getDecisionCurrent();
+                if(typeof GptExpert9!=='undefined') GptExpert9.observe(result);
                 if(epoch!==DecisionSources.epoch) return;
                 this.result=result; this.previousResult=null; this.completedAt=Date.now(); this.error='';
                 DecisionSources.apply(page,result.sources);
@@ -122,7 +124,7 @@ const DecisionRealtime = {
         const output=result?.[key], value=output?.value;
         const reason=pending ? result ? '正在更新；显示上一轮结果，仅供对照，本轮完成后自动替换' : '正在按当前输入计算' : output?.reason || this.error || '正在按当前输入计算';
         const available=!pending && Number.isFinite(value) && output.status!=='held';
-        const inputKeys=node.id==='coarse' ? App.MLR_FEATURES : ['density','heavy_ash','float_ash','float_amount','coarse_amount'];
+        const inputKeys=node.id==='coarse' ? result?.model?.method==='expert9'?result.features.map(f=>f.key):App.MLR_FEATURES : ['density','heavy_ash','float_ash','float_amount','coarse_amount'];
         const inputs=inputKeys.map(key=>{
             const c=result?.inputs?.[key] || {};
             const feature=result?.features?.find(f=>f.key===key);
@@ -138,7 +140,7 @@ const DecisionRealtime = {
         return {live:true,calculated:true,pending,bound:false,numericValue:Number.isFinite(value)?value:null,available,held:output?.status==='held',inputs,
             value:page.number(value,node.id==='coarse'?2:3,node.id==='coarse'?'%':''),
             badge:pending?'更新中':available ? node.id==='coarse'?'预测':'建议' : Number.isFinite(value)?'沿用输入':/暂缓|已按|刚调整/.test(reason)?'暂缓':'待计算',
-            source:pending ? result ? '上轮结果 · 等待本轮计算' : '等待本轮计算' : node.id==='coarse' ? `煤量 ${amount.value} · GPT${output?.status==='held'?'沿用输入预测':'实时预测'}` :
+            source:pending ? result ? '上轮结果 · 等待本轮计算' : '等待本轮计算' : node.id==='coarse' ? `煤量 ${amount.value} · GPT${output?.status==='held'?'沿用输入预测':result?.model?.method==='expert9'?'专家基准预测':'实时预测'}` :
                 Number.isFinite(value) ? guide?.direction==='down'?'本步建议 · 下调':guide?.direction==='up'?'本步建议 · 上调':'密度保持' : '等待有效输入',
             formula:node.id==='coarse'?`GPT / ${result?.model?.method?.toUpperCase() || '保存模型'} · ${result?.model?.id || '等待模型'}`:`总灰分 ${page.number(result?.target?.min ?? 8.5,1)}–${page.number(result?.target?.max ?? 9.0,1)}% 范围内保持，范围外向最近边界调整`,
             reason,title:reason,sampleAt:result?.generated_at};

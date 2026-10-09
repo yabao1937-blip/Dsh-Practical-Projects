@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from .density import calc_total_ash, compute_density_guidance, DENSITY_GUIDE
 from .guidance import density_guard_state
 from .modeling import MLR_FEATURES, predict_coarse_ash
+from ..gpt_coarse.predict import FEATURES as EXPERT_FEATURES, valid as valid_expert, explain as explain_expert
 
 LABELS = dict(raw_ash='原煤灰分', coal_amount='入洗原煤量', level='精磁尾液位',
     sysA='A系统', sysB='B系统', sys401='401系统', sys402='402系统',
@@ -21,6 +22,9 @@ def numeric(value):
 
 
 def gpt_group(store):
+    expert = store.get('gptExpertModel')
+    if isinstance(expert, dict) and expert.get('production') == 'expert9':
+        return expert
     def is_gpt(group):
         if not isinstance(group, dict):
             return False
@@ -69,6 +73,8 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
     group = gpt_group(store)
     method = (group or {}).get('production')
     model = (group or {}).get(method) or {}
+    expert = method == 'expert9'
+    features_used = EXPERT_FEATURES if expert else MLR_FEATURES
     names = model.get('feature_names', model.get('featureNames', MLR_FEATURES))
     valid_model = (method in ('mlr','pls') and numeric(model.get('intercept')) and names == MLR_FEATURES
                    and len(model.get('coefs') or []) == len(MLR_FEATURES) and all(numeric(v) for v in model['coefs']))
@@ -76,27 +82,41 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
     if model.get('inputPolicy') == 'clip-training-range':
         valid_model = valid_model and len(bounds) == len(MLR_FEATURES) and all(
             b is None or (isinstance(b,list) and len(b)==2 and all(numeric(v) for v in b) and b[0]<=b[1]) for b in bounds)
+    if expert:
+        valid_model = valid_expert(model)
     model_id = hashlib.sha256(json.dumps(model, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16] if valid_model else None
     result = dict(policy='decision-live-v1', generated_at=stamp, inputs=cells,
         model=dict(engine='gpt', method=method, trained_at=(group or {}).get('trainedAt'), id=model_id),
         features=[], coarse_ash=output(), heavy_amount=output(), total_ash=output(),
         suggested_density=output(), guidance=None, warnings=warnings,
         target=dict(min=target_min,max=target_max))
-    feature_errors = [error for k in MLR_FEATURES if (error := problem(k))]
+    if expert:
+        result['model'].update(revision=group.get('revision'), artifact_id=group.get('artifact_id'),
+                               activated_at=group.get('activated_at'), label='专家基准九因子 · 待现场验证')
+    expert_detail = None
+    feature_errors = [error for k in features_used if (error := problem(k))]
     if feature_errors:
         result['coarse_ash'] = output(reason='模型输入不完整：' + '；'.join(feature_errors))
     elif not valid_model:
         result['coarse_ash'] = output(reason='没有可用的 GPT 保存模型，或模型因子不匹配')
     else:
-        features = {k:cells[k]['value'] for k in MLR_FEATURES}
-        for j,k in enumerate(MLR_FEATURES):
+        features = {k:cells[k]['value'] for k in features_used}
+        for j,k in enumerate(features_used):
             raw = features[k]
             used = min(bounds[j][1],max(bounds[j][0],raw)) if model.get('inputPolicy') == 'clip-training-range' and bounds[j] else raw
             result['features'].append(dict(key=k, raw=raw, used=used, clipped=used!=raw))
-        prediction = predict_coarse_ash(features, model)
+        expert_detail = explain_expert(features, model) if expert else None
+        prediction = expert_detail['value'] if expert_detail else None if expert else predict_coarse_ash(features, model)
+        if expert_detail:
+            result['features'] = expert_detail['features']
+            result['expert_explanation'] = expert_detail
+            result['warnings'].append('GPT专家基准模型；历史标签与专家经验存在差异，尚待新化验验证')
+            if expert_detail['outside_expert_range']:
+                result['warnings'].append('液位超出专家基准25–75%，显示边界估算，暂缓调密')
         if numeric(prediction) and 0 <= prediction <= 100:
-            held = any(cells[k]['status'] in ('held','stopped') for k in MLR_FEATURES)
-            result['coarse_ash'] = output(prediction, 'held' if held else 'predicted', '采用沿用输入，仅供观察' if held else 'GPT 保存模型实时预测')
+            held = any(cells[k]['status'] in ('held','stopped') for k in features_used)
+            result['coarse_ash'] = output(prediction, 'held' if held else 'predicted', '采用沿用输入，仅供观察' if held else
+                                         'GPT专家基准九因子预测；待现场验证' if expert else 'GPT 保存模型实时预测')
         else:
             result['coarse_ash'] = output(reason='模型预测超出有效灰分范围')
     amount_keys = ('belt501','belt502','float_amount','coarse_amount')
@@ -136,6 +156,10 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
     if total_errors:
         result['total_ash'] = output(reason='；'.join(total_errors))
     advice_errors = []
+    if expert_detail and expert_detail['outside_expert_range']:
+        advice_errors.append('液位超出专家基准25–75%，边界估算仅供观察')
+    if expert and (error := problem('is_stoppage')):
+        advice_errors.append(error)
     if result['total_ash']['value'] is None:
         advice_errors.append(result['total_ash']['reason'])
     if error := problem('density'):

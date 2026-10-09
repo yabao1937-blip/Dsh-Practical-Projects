@@ -132,8 +132,14 @@ def build_snapshot(db, hour, unavailable_reason=None):
                     reason=unavailable_reason, policy="hour-boundary-v2")
     from ..services.decision_sources import shared_snapshot
     result = shared_snapshot(db, hour)
+    expert = result['model'].get('method') == 'expert9'
+    features = MLR_FEATURES
+    if expert:
+        from ..gpt_coarse.predict import FEATURES
+        features = FEATURES
     return dict(cells={key:result['cells'][key] for key, _, _ in COLUMNS},
-                model=result['model'], model_inputs={k:result['inputs'][k]['value'] for k in MLR_FEATURES},
+                model=result['model'], model_inputs={k:result['inputs'][k]['value'] for k in features},
+                **({'protection_inputs': {'is_stoppage':result['inputs']['is_stoppage']['value']}} if expert else {}),
                 guidance=result['guidance'], sources=result['sources'], target=result['target'],
                 density_label=result['density_label'], policy='hour-boundary-shared-v3')
 
