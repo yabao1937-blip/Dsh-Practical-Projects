@@ -395,6 +395,7 @@ const DecisionOverviewPage = {
         document.getElementById('decision-zoom-in').addEventListener('click', () => this.changeZoom(.15));
         document.getElementById('decision-zoom-out').addEventListener('click', () => this.changeZoom(-.15));
         document.getElementById('decision-canvas-scroll').addEventListener('click', event => {
+            if (event.target.closest('[data-ash-history]') && this.view === 'gpt') { DecisionAshHistory.open(this); return; }
             const node = event.target.closest('[data-decision-node]');
             if (node) { this.select(node.dataset.decisionNode); return; }
             if (!event.target.closest('.decision-formula,button,a,input,select,textarea,label,[contenteditable="true"]')) this.closeInspector(false);
@@ -768,7 +769,8 @@ const DecisionOverviewPage = {
         const shown=hourly?hourResult:this.liveMode()?DecisionRealtime.presentation():null,pending=hourly?DecisionHourly.pending():this.liveMode() && DecisionRealtime.pending();
         const totalReason=this.liveMode() ? pending?'更新中 · 上轮结果仅供对照':shown?.total_ash?.reason || (hourly?DecisionHourly.error:DecisionRealtime.error) || '正在计算' : '';
         const total=this.liveMode()?`<strong>${hourly?'小时平均总灰分':pending?'上轮总灰分':'预测总灰分'} ${this.number(shown?.total_ash?.value,2,'%')}</strong><span title="${this.escape(totalReason)}">${this.escape(totalReason.length>45?'输入待补充，点击建议密度查看原因':totalReason)}</span>`:`公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}`;
-        this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 970"><defs>${markers}</defs>${paths}</svg>${cards}<div class="decision-formula"><strong>${hourly?'逐次质量平衡 · 小时平均':'三组分质量平衡'}</strong>${hourly?'先按各次组分灰分和煤量计算总灰分，再对有效结果求平均':'总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量'}<br>${total}</div>`);
+        const ashHistory=this.view==='gpt'?'<button type="button" class="decision-ash-open" data-ash-history aria-haspopup="dialog">查看小时灰分 ↗</button>':'';
+        this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 970"><defs>${markers}</defs>${paths}</svg>${cards}<div class="decision-formula"><strong>${hourly?'逐次质量平衡 · 小时平均':'三组分质量平衡'}</strong>${hourly?'先按各次组分灰分和煤量计算总灰分，再对有效结果求平均':'总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量'}<br>${total}${ashHistory}</div>`);
     },
 
     telemetryState(item, failed = window.Operations?.telemetryFailed) {

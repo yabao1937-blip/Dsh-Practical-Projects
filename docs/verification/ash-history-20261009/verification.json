@@ -1,0 +1,60 @@
+{
+  "api": {
+    "policy": "decision-ash-hours-v1",
+    "timezone": "Asia/Shanghai",
+    "unit": "%",
+    "generated_at": "2026-10-09T08:38:22.663+00:00",
+    "latest_end": "2026-10-09T08:00:00.000+00:00",
+    "period": {
+      "start": "2026-10-09T06:00:00.000+00:00",
+      "end": "2026-10-09T08:00:00.000+00:00"
+    },
+    "items": [
+      {
+        "start": "2026-10-09T06:00:00.000+00:00",
+        "end": "2026-10-09T07:00:00.000+00:00",
+        "value": 8.90907426638184,
+        "sample_count": 129,
+        "expected_count": 720,
+        "coverage": 0.17916666666666667,
+        "status": "partial",
+        "reason": "129 条有效样本算术平均；先逐次计算，再对结果求平均",
+        "frozen": true
+      },
+      {
+        "start": "2026-10-09T07:00:00.000+00:00",
+        "end": "2026-10-09T08:00:00.000+00:00",
+        "value": 8.986755005134864,
+        "sample_count": 116,
+        "expected_count": 720,
+        "coverage": 0.16111111111111112,
+        "status": "partial",
+        "reason": "116 条有效样本算术平均；先逐次计算，再对结果求平均",
+        "frozen": true
+      }
+    ],
+    "summary": {
+      "value": 8.945853718199597,
+      "sample_count": 245,
+      "expected_count": 1440,
+      "coverage": 0.1701388888888889,
+      "valid_hours": 2,
+      "total_hours": 2,
+      "missing_hours": 0,
+      "partial_hours": 2
+    },
+    "method": "先逐次计算总灰分，再取小时有效结果均值；区间按各小时有效样本数加权汇总。缺失不按 0 计入。"
+  },
+  "weighted_mean_verified": true,
+  "backend_tests": "20 ash-history tests plus 33 existing hourly and DS tests passed",
+  "frontend_checks": [
+    "ash-history async/date/error checks",
+    "hourly UI regression",
+    "realtime regression"
+  ],
+  "browser_verified": [
+    "Instant GPT entry opens dialog",
+    "date/hour controls change range and clear old results",
+    "14:00-16:00 query displays two hourly records and 8.95% mean"
+  ]
+}

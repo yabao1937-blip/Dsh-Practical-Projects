@@ -1,5 +1,6 @@
 """Shared source configuration and read-only decision calculations; no device actions."""
 from typing import Literal
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -138,3 +139,14 @@ def hourly_decision(db: Session = Depends(get_db)):
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))
     return read_hour(db)
+
+
+@router.get('/total-ash-hours')
+def total_ash_hours(start: datetime | None = None, end: datetime | None = None, db: Session = Depends(get_db)):
+    from ..decision_hourly.ash_history import read_ash_hours
+    if db.bind.dialect.name == 'sqlite':
+        db.execute(text('BEGIN'))
+    try:
+        return read_ash_hours(db, start, end)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
