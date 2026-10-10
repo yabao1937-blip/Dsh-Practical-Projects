@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-10",
+  "scope": "决策总览默认 GPT，去掉链路切换和图例，新增同页手工信息补录入口",
+  "implementation": "浮动窗口移动并复用原业务指标补录面板，保持单一表单、SQLite API、草稿、幂等请求及保存后刷新链；关闭或离开总览后回到采集页原位置。",
+  "checks": {
+    "pytest": "tests/test_manual_measurements.py + tests/test_training.py: 45 passed",
+    "node": [
+      "verify_manual_measurement_points.js: passed",
+      "verify_decision_realtime.js: passed",
+      "verify_decision_hourly.js: passed",
+      "manual-measurements.js and verify_decision_overview_browser.js syntax: passed"
+    ],
+    "browser": [
+      "正式服务：默认 GPT，无链路切换与图例，新入口可打开窗口",
+      "关闭重开、Escape、切到采集页保持草稿，DOM 始终只有一个原补录表单",
+      "独立空测试库：提交重介精煤灰分 8.63，SQLite 新增一条记录，总览自动显示 8.63",
+      "累加模式也可提交粗精煤泥量 24.2，测试库共两条记录，历史小时没有被替换为新录入值",
+      "浅色和深色配色、键盘移动窗口、原采集入口恢复正常",
+      "正式与测试页面控制台无 error"
+    ],
+    "legacy_browser_script": "仅将旧链路切换验收更新为默认 GPT 和移除图例的断言；本轮未执行该完整历史脚本，页面验收使用 CUA。"
+  },
+  "production_data": "未提交测试补录到正式数据库；正式手工补录仍为原三条记录。",
+  "ds_golden_sha256": "aa09b7a4574ec19be5f840b68f3611394b0584f2ec435b0abd062416f8566bbd",
+  "deployment": "纯静态前端更新，正式服务无须重启；刷新页面即可加载。",
+  "screenshot": "overview-manual-entry.png"
+}

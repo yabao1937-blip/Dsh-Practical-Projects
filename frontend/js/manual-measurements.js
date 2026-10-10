@@ -2,7 +2,7 @@
 const ManualMeasurements = {
     ready: false, busy: false, definitions: [], definitionsPromise: null, offset: 0, pageSize: 20, total: 0, sequence: 0, pending: null,
     el(id) { return document.getElementById('measurement-' + id); },
-    active() { return document.getElementById('page-collect')?.classList.contains('active') && !document.hidden; },
+    active() { return !document.hidden && (document.getElementById('page-collect')?.classList.contains('active') || !!DecisionManualEntry.dialog?.open); },
     escape(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
     time(value) {
         const date = new Date(value);
@@ -98,6 +98,7 @@ const ManualMeasurements = {
         }
     },
     init() {
+        DecisionManualEntry.init();
         this.el('form').addEventListener('submit', event => this.submit(event));
         this.el('metric').addEventListener('change', () => this.updateUnit());
         this.el('refresh').addEventListener('click', () => this.refresh());
@@ -108,6 +109,85 @@ const ManualMeasurements = {
         new MutationObserver(() => {if(this.active()) this.refresh();}).observe(document.getElementById('page-collect'),{attributes:true,attributeFilter:['class']});
         document.addEventListener('visibilitychange', () => {if(this.active()) this.refresh();});
         if (this.active()) this.refresh();
+    },
+};
+
+// Move the original panel instead of cloning it: one form, one draft, one
+// idempotency key and the same SQLite save/refresh path from either page.
+const DecisionManualEntry = {
+    dialog: null, panel: null, anchor: null, position: null, drag: null,
+    init() {
+        document.getElementById('decision-manual-open')?.addEventListener('click', () => this.open());
+    },
+    ensure() {
+        if (this.dialog) return;
+        this.panel = document.getElementById('manual-measurements-panel');
+        this.anchor = document.createComment('manual measurements original location');
+        this.panel.before(this.anchor);
+        this.dialog = document.createElement('dialog');
+        this.dialog.id = 'decision-manual-dialog';
+        this.dialog.className = 'decision-manual-dialog';
+        this.dialog.setAttribute('aria-labelledby', 'decision-manual-title');
+        this.dialog.innerHTML = `<header class="manual-dialog-header" tabindex="0" aria-label="拖动标题栏或按方向键移动窗口"><div><h2 id="decision-manual-title">手工信息补录</h2><p>与数据采集页共用补录记录 · 时间按北京时间填写</p></div><button type="button" aria-label="关闭手工信息补录">×</button></header><div class="manual-dialog-body"></div>`;
+        document.body.append(this.dialog);
+        this.dialog.querySelector('header button').addEventListener('click', () => this.close());
+        this.dialog.addEventListener('keydown', event => {
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.close(); }
+        });
+        this.dialog.addEventListener('close', () => { if (!this.dialog.open) this.restore(); });
+        const header = this.dialog.querySelector('header');
+        header.addEventListener('pointerdown', event => {
+            if (event.button !== 0 || event.isPrimary === false || event.target.closest('button')) return;
+            const rect = this.dialog.getBoundingClientRect();
+            this.drag = {id:event.pointerId, x:event.clientX, y:event.clientY, left:rect.left, top:rect.top};
+            header.setPointerCapture(event.pointerId); event.preventDefault();
+        });
+        header.addEventListener('pointermove', event => {
+            if (this.drag?.id === event.pointerId) this.place(this.drag.left + event.clientX - this.drag.x, this.drag.top + event.clientY - this.drag.y);
+        });
+        this.stopDrag = () => {
+            const id = this.drag?.id; this.drag = null;
+            if (id !== undefined && header.hasPointerCapture(id)) header.releasePointerCapture(id);
+        };
+        for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) header.addEventListener(type, this.stopDrag);
+        header.addEventListener('keydown', event => {
+            const steps = {ArrowLeft:[-20,0], ArrowRight:[20,0], ArrowUp:[0,-20], ArrowDown:[0,20]};
+            if (event.target !== header || !steps[event.key]) return;
+            event.preventDefault(); const rect = this.dialog.getBoundingClientRect(), [x,y] = steps[event.key];
+            this.place(rect.left + x, rect.top + y);
+        });
+        window.addEventListener('resize', () => {
+            if (this.dialog.open) { const rect = this.dialog.getBoundingClientRect(); this.place(rect.left, rect.top); }
+        });
+        this.observer = new MutationObserver(() => {
+            if (!this.dialog.open) return;
+            if (!document.getElementById('page-decision').classList.contains('active')) this.close();
+            else this.syncTheme();
+        });
+        for (const id of ['page-decision', 'decision-workspace']) this.observer.observe(document.getElementById(id), {attributes:true, attributeFilter:['class']});
+    },
+    open() {
+        if (!document.getElementById('page-decision')?.classList.contains('active')) return;
+        this.ensure(); this.syncTheme();
+        if (this.dialog.open) { this.dialog.querySelector('header').focus(); return; }
+        this.dialog.querySelector('.manual-dialog-body').append(this.panel);
+        this.dialog.show();
+        const rect = this.dialog.getBoundingClientRect();
+        this.place(this.position?.left ?? window.innerWidth - rect.width - 24, this.position?.top ?? 80);
+        ManualMeasurements.refresh();
+        (ManualMeasurements.busy ? this.dialog.querySelector('header') : ManualMeasurements.el('value')).focus({preventScroll:true});
+    },
+    close() {
+        if (!this.dialog?.open) return;
+        this.dialog.close(); this.restore();
+        if (document.getElementById('page-decision').classList.contains('active')) document.getElementById('decision-manual-open')?.focus({preventScroll:true});
+    },
+    restore() { this.stopDrag(); this.anchor.after(this.panel); },
+    syncTheme() { this.dialog.classList.toggle('is-light', document.getElementById('decision-workspace').classList.contains('is-light')); },
+    place(left, top) {
+        const rect = this.dialog.getBoundingClientRect(), margin = 12;
+        this.position = {left:Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin)), top:Math.max(margin, Math.min(top, window.innerHeight - rect.height - margin))};
+        this.dialog.style.left = this.position.left + 'px'; this.dialog.style.top = this.position.top + 'px';
     },
 };
 document.addEventListener('DOMContentLoaded', () => ManualMeasurements.init());
