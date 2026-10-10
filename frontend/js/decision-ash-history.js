@@ -15,8 +15,7 @@ const DecisionAshHistory = {
             <div class="ash-dialog-body"><form id="ash-range-form"><fieldset id="ash-range-fields"><div class="ash-range-fields">
             <label>开始时间<span><input type="date" id="ash-start-date" aria-label="开始日期" required><select id="ash-start-hour" aria-label="开始小时">${this.hours()}</select></span></label>
             <label>结束时间<span><input type="date" id="ash-end-date" aria-label="结束日期" required><select id="ash-end-hour" aria-label="结束小时">${this.hours()}</select></span></label>
-            <button type="submit" class="ash-query">查询区间</button></div></fieldset>
-            <div class="ash-range-hint"><span>按整点选择，包含开始小时、不包含结束小时；最长 31 天。</span><button type="button" data-ash-latest>最近 24 小时</button></div></form>
+            <button type="submit" class="ash-query">查询区间</button></div></fieldset></form>
             <div id="ash-history-status" role="status" aria-live="polite"></div><div id="ash-history-result"></div></div>`;
         document.body.append(this.dialog);
         this.dialog.querySelector('[data-ash-close]').addEventListener('click',()=>this.dialog.close());
@@ -66,7 +65,6 @@ const DecisionAshHistory = {
         this.dialog.querySelector('#ash-range-form').addEventListener('submit',event=>{
             event.preventDefault(); this.load(this.selectedRange());
         });
-        this.dialog.querySelector('[data-ash-latest]').addEventListener('click',()=>this.load());
         this.dialog.querySelector('#ash-range-fields').addEventListener('change',()=>{
             // An old response must not be presented under newly edited dates.
             this.requestId++; this.controller?.abort(); this.result=null;
@@ -136,9 +134,8 @@ const DecisionAshHistory = {
             const state={complete:'完整',partial:'部分数据',missing:'无有效数据'}[item.status] || '无有效数据';
             return `<tr><td><strong>${time}–${end}</strong><span>${date}</span></td><td class="ash-table-value">${this.number(item.value)}</td><td title="${esc(item.reason)}"><span class="ash-state ${esc(item.status)}">${state}</span><small>${item.aggregation==='output-mass-v1'?this.number(item.mass_t,2)+' t · 产煤量加权':'旧样本均值'}</small><small>${item.sample_count}/${item.expected_count} · ${this.number(item.coverage*100,1)}%</small></td></tr>`;
         }).join('');
-        this.dialog.querySelector('#ash-history-result').innerHTML=`<section class="ash-summary" aria-label="区间平均灰分"><div><p>区间平均灰分</p><div class="ash-average">${this.number(s.value)}<span>%</span></div><p class="ash-summary-range">${esc(this.label(result.period.start))} — ${esc(this.label(result.period.end))}</p></div><dl><div><dt>有值小时</dt><dd>${s.valid_hours}<span> / ${s.total_hours} 小时</span></dd></div><div><dt>有效样本覆盖</dt><dd>${this.number(s.coverage*100,1)}<span>%</span></dd></div></dl></section>
-            <details class="ash-method"><summary>统计说明${s.partial_hours || s.missing_hours ? ' · 含不完整小时':''}</summary><p>${esc(result.method)}${s.partial_hours || s.missing_hours ? ` 本区间含 ${s.partial_hours} 个部分数据小时、${s.missing_hours} 个无数据小时，均值仅代表已有有效样本。`:''}</p></details>
-            ${s.aggregation==='mixed'?`<p class="ash-empty">产煤量加权：${this.number(s.groups.output_mass.value)} %（${this.number(s.mass_t)} t）<br>旧样本均值：${this.number(s.groups.legacy.value)} %<br>新旧口径分别展示，不合并。</p>`:s.value===null?'<p class="ash-empty">此区间暂无有效总灰分。可选择其他时间；历史未保存的预测不会补算。</p>':''}
+        const averageHint=s.aggregation==='mixed'?'区间含不同统计口径，无法合并平均值':s.value===null?'此区间暂无有效总灰分':result.method;
+        this.dialog.querySelector('#ash-history-result').innerHTML=`<section class="ash-summary" aria-label="区间平均灰分"><div><p>区间平均灰分</p><div class="ash-average" title="${esc(averageHint)}">${this.number(s.value)}<span>%</span></div><p class="ash-summary-range">${esc(this.label(result.period.start))} — ${esc(this.label(result.period.end))}</p></div><dl><div><dt>有值小时</dt><dd>${s.valid_hours}<span> / ${s.total_hours} 小时</span></dd></div><div><dt>有效样本覆盖</dt><dd>${this.number(s.coverage*100,1)}<span>%</span></dd></div></dl></section>
             <div class="ash-table-title"><h3>每小时平均灰分</h3><span>最新小时在前 · 单位 %</span></div>
             <div class="ash-table-scroll" tabindex="0" role="region" aria-label="每小时灰分记录"><table><thead><tr><th>统计时段</th><th>灰分 (%)</th><th>数据 / 覆盖</th></tr></thead><tbody>${rows}</tbody></table></div>
             <p class="ash-history-footnote">预测值 · 仅已结束小时 · 悬停数据状态查看说明</p>`;

@@ -2,6 +2,7 @@
 .decision-ash-open:hover { background:color-mix(in srgb,var(--dm-cyan) 12%,transparent); }
 .decision-ash-dialog { --ah-paper:#101934; --ah-card:#151f3f; --ah-text:#e4e9ff; --ah-muted:#a2acce; --ah-rule:#34416c; --ah-accent:#98a7ff; --ah-warn:#edbd84; color-scheme:dark; position:fixed; inset:auto; z-index:900; box-sizing:border-box; width:min(440px,calc(100vw - 24px)); height:min(880px,calc(100dvh - 88px)); max-height:calc(100dvh - 24px); margin:0; padding:0; overflow:hidden; border:1px solid var(--ah-rule); border-top:3px solid var(--ah-accent); border-radius:3px; background:var(--ah-paper); color:var(--ah-text); box-shadow:0 8px 28px #0003; font-family:inherit; font-size:13px; line-height:1.5; }
 .decision-ash-dialog[open] { display:flex; flex-direction:column; }
+#decision-ash-dialog { height:min(960px,calc(100dvh - 24px)); }
 .decision-ash-dialog.is-light { --ah-paper:#f5f4f0; --ah-card:#fffefb; --ah-text:#253154; --ah-muted:#68728c; --ah-rule:#cfd3df; --ah-accent:#293be3; --ah-warn:#8c5718; color-scheme:light; }
 .decision-ash-dialog button,.decision-ash-dialog input,.decision-ash-dialog select { font:inherit; }
 .decision-ash-dialog button { cursor:pointer; }
@@ -20,9 +21,7 @@
 .ash-range-fields input { flex:1; width:100%; }
 .ash-range-fields select { flex:0 0 86px; width:86px; }
 .ash-query { background:var(--ah-accent); color:var(--ah-paper); border:1px solid var(--ah-accent); padding:5px 12px; height:32px; }
-.ash-range-hint { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:7px 0 10px; color:var(--ah-muted); font-size:10px; }
-.ash-range-hint>span { max-width:245px; }
-.ash-range-hint button { color:var(--ah-accent); background:none; border:0; padding:3px 0; white-space:nowrap; font-size:10px; }
+#ash-range-form { flex:none; margin-bottom:10px; }
 #ash-history-status:not(:empty) { padding:14px; margin:10px 0; color:var(--ah-muted); border:1px solid var(--ah-rule); }
 #ash-history-status.is-error { color:var(--ah-warn); }
 #ash-history-result { display:flex; flex-direction:column; flex:1; min-height:0; }
@@ -35,17 +34,14 @@
 .ash-summary dt { font-size:10px; color:var(--ah-muted); }
 .ash-summary dd { margin:0; font-size:17px; color:var(--ah-text); font-variant-numeric:tabular-nums; }
 .ash-summary dd span { font-size:10px; color:var(--ah-muted); }
-.ash-method,.ash-history-footnote { flex:none; color:var(--ah-muted); font-size:10px; line-height:1.6; margin:8px 0; }
-.ash-method summary { cursor:pointer; }
-.ash-method p { margin:6px 0; }
-.ash-empty { padding:8px; margin:0 0 6px; border-left:2px solid var(--ah-accent); background:var(--ah-card); color:var(--ah-muted); font-size:11px; }
-.ash-table-title { display:flex; flex:none; align-items:center; justify-content:space-between; margin:2px 0 8px; gap:10px; }
+.ash-history-footnote { flex:none; color:var(--ah-muted); font-size:10px; line-height:1.6; margin:8px 0; }
+.ash-table-title { display:flex; flex:none; align-items:center; justify-content:space-between; margin:10px 0 8px; gap:10px; }
 .ash-table-title h3 { font-size:13px; font-weight:500; margin:0; color:var(--ah-text); }
 .ash-table-title>span { font-size:10px; color:var(--ah-muted); }
-.ash-table-scroll { flex:1 1 160px; min-height:120px; overflow:auto; border:1px solid var(--ah-rule); }
+.ash-table-scroll { flex:1 1 0; min-height:160px; overflow:auto; border:1px solid var(--ah-rule); }
 .ash-table-scroll table { width:100%; border-collapse:collapse; font-size:11px; background:var(--ah-card); }
 .ash-table-scroll th { position:sticky; top:0; z-index:1; background:var(--ah-paper); color:var(--ah-muted); font-weight:400; text-align:left; white-space:nowrap; }
-.ash-table-scroll :is(th,td) { padding:8px; border-bottom:1px solid var(--ah-rule); vertical-align:middle; }
+.ash-table-scroll :is(th,td) { padding:6px 8px; border-bottom:1px solid var(--ah-rule); vertical-align:middle; }
 .ash-table-scroll td { color:var(--ah-text); }
 .ash-table-scroll td>span:not(.ash-state),.ash-table-scroll small { display:block; color:var(--ah-muted); font-size:9px; line-height:1.5; }
 .ash-table-scroll td strong { font-weight:500; white-space:nowrap; }
