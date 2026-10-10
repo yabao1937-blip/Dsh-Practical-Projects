@@ -2,7 +2,7 @@
 from copy import deepcopy
 from datetime import timedelta
 
-from sqlalchemy import select, text, delete, exists
+from sqlalchemy import select, text
 
 from ..database import SessionLocal
 from ..hourly_brief.inputs import LOCAL, business_time
@@ -13,6 +13,9 @@ from ..telemetry.domain import iso_time, utc_now
 from .models import DecisionCycleContext, DecisionCycleSample, DecisionCycleHour
 from .statistics import CADENCE, digest, hour_advice
 from .history import historical_cells
+from .evidence import POLICY, PROVISIONAL, SEGMENT_POLICY, summarize
+from .tracking import density_channels, observe
+from .archive import archive_old_hour
 
 
 def window(now):
@@ -22,11 +25,12 @@ def window(now):
 
 def compact_cell(c):
     result = {k:deepcopy(c[k]) for k in ('value','status','reason','source','unit','observed_at','created_at',
-        'record_id','metric','input_path','item_id','source_id','point_key','raw_value','density_label') if k in c}
+        'record_id','metric','input_path','item_id','source_id','point_key','raw_value','density_label','entered_at',
+        'retained_sample') if k in c}
     sample = c.get('sample') or {}
     if sample:
-        result['batch_id'] = sample.get('batch_id')
-        result['definition_id'] = sample.get('definition_id')
+        for key in ('batch_id','definition_id','quality','status_code','issue','source_at','server_at','received_at','raw_value'):
+            result[key] = deepcopy(sample.get(key))
     if isinstance(c.get('components'),dict):
         result['components'] = {k:compact_cell(v) for k,v in c['components'].items()}
     return result
@@ -48,7 +52,8 @@ def context_definition(result, store):
             collect(part)
     for c in result['cells'].values():
         collect(c)
-    return dict(policy='decision-hourly-v1', sources=result['sources']['resolved_choices'],point_definitions=definitions,
+    return dict(policy='decision-hourly-v2', evidence_policy=POLICY, segmentation=SEGMENT_POLICY,
+        sources=result['sources']['resolved_choices'],point_definitions=definitions,
         target=result['target'], model=result['model'], model_definition=deepcopy(model) if method == 'expert9' else
         {k:deepcopy(model[k]) for k in ('intercept','coefs','feature_names','featureNames','inputPolicy','inputBounds','imputeMeans') if k in model},
         density_guide=store.get('densityGuide') or {})
@@ -76,9 +81,15 @@ def record(db, now, result=None, store=None):
     snapshot = {k:deepcopy(result[k]) for k in ('sources','density_label','model','target',
         'coarse_ash','heavy_amount','total_ash','suggested_density','guidance','warnings')}
     snapshot['cells'] = cells
+    snapshot['evidence_policy'] = POLICY
+    snapshot.update({k:deepcopy(result[k]) for k in ('features','expert_explanation') if k in result})
+    snapshot['inputs'] = {k:compact_cell(c) for k,c in result['inputs'].items()}
+    snapshot['density_channels'] = density_channels(db,now,compact_cell)
     snapshot['protection'] = {k:deepcopy(store.get(k)) for k in ('densityLastMoveAt','densityActionLatch')}
-    db.add(DecisionCycleSample(slot=slot,sampled_at=iso_time(now),context_key=key,
-        fingerprint=digest([key,identities]),snapshot=snapshot))
+    row = DecisionCycleSample(slot=slot,sampled_at=iso_time(now),context_key=key,
+        fingerprint=digest([key,identities]),snapshot=snapshot)
+    db.add(row)
+    observe(db,row)
     return True
 
 
@@ -89,11 +100,16 @@ def build_hour(db, start, end, now):
     context = db.get(DecisionCycleContext,rows[-1].context_key) if rows else None
     step = (context.definition.get('density_guide') or {}).get('maxStep',.03) if context else .03
     advice, coverage, guide = hour_advice(rows,start,end,basis,step)
+    evidence = summarize(rows,end)
+    cells['total_ash'] = evidence['total_ash']
+    guide.update(validation='awaiting_experiment', empirical_note=PROVISIONAL,
+                 feasible_interval=None, interval_width_limit=None)
+    advice['reason'] += '；'+PROVISIONAL
     cells['suggested_density'] = advice
-    for key in ('coarse_ash','total_ash'):
+    for key in ('coarse_ash',):
         if cells[key]['value'] is not None:
             cells[key]['reason'] += '；先逐次计算，再对结果求平均'
-    return dict(policy='decision-hourly-v1', generated_at=iso_time(now),
+    return dict(policy='decision-hourly-v2', evidence=evidence, generated_at=iso_time(now),
         period=dict(start=iso_time(start),end=iso_time(end),apply_start=iso_time(end),apply_end=iso_time(end+timedelta(hours=1)),
             label=f'{start.astimezone(LOCAL):%m-%d %H:%M}–{end.astimezone(LOCAL):%H:%M}',
             apply_label=f'{end.astimezone(LOCAL):%H:%M}–{(end+timedelta(hours=1)).astimezone(LOCAL):%H:%M}'),
@@ -101,9 +117,10 @@ def build_hour(db, start, end, now):
         model=rows[-1].snapshot['model'] if rows else {}, context_key=rows[-1].context_key if rows else None,
         coverage=coverage,guidance=guide,density_basis=basis,
         coarse_ash=cells['coarse_ash'],heavy_amount=cells['heavy_amount'],total_ash=cells['total_ash'],suggested_density=advice,
-        notes=['有效样本算术平均；停机零值、密度 1、缺失和沿用的采集值不重复计入。',
+        notes=['总灰分按 501+502 实际产煤量加权；每批最多计 5 秒，不跨缺口补齐产量。其他显示指标保留样本均值。',
                '手工数据按实际记录条数平均；没有新增时沿用该小时前最近值并显示采样时间。',
-               '旧采集历史只代表已保存的样本；功能启用前没有逐次预测和调密记录。'])
+               '工况分段保留真实系统组合、均值、波动、方向和持续时间，暂不推断下一工况。',
+               PROVISIONAL+'；等待响应实验，不限制未来估计区间宽度，单次执行仍限 ±0.03。'])
 
 
 def tick(now=None, sessions=SessionLocal):
@@ -117,13 +134,8 @@ def tick(now=None, sessions=SessionLocal):
         if not db.get(DecisionCycleHour,iso_time(start)):
             db.add(DecisionCycleHour(start=iso_time(start),end=iso_time(end),generated_at=iso_time(now),
                                     snapshot=build_hour(db,start,end,now)))
-        # Keep detailed observations for seven days; permanent frozen hour summaries remain.
-        old_slots = list(db.scalars(select(DecisionCycleSample.slot).where(
-            DecisionCycleSample.sampled_at < iso_time(start-timedelta(days=7)),
-            exists(select(DecisionCycleHour.start).where(DecisionCycleHour.start<=DecisionCycleSample.sampled_at,
-                                                       DecisionCycleHour.end>DecisionCycleSample.sampled_at))).limit(2000)))
-        if old_slots:
-            db.execute(delete(DecisionCycleSample).where(DecisionCycleSample.slot.in_(old_slots)))
+        # Retain full evidence in verified compressed storage before clearing hot rows.
+        archive_old_hour(db,iso_time(start-timedelta(days=7)))
         db.commit()
 
 
@@ -134,6 +146,8 @@ def read_hour(db, now=None, live=None):
     result = deepcopy(saved.snapshot) if saved else build_hour(db,start,end,now)
     result['frozen'] = bool(saved)
     result['checked_at'] = iso_time(now)
+    result['guidance'].update(validation='awaiting_experiment', empirical_note=PROVISIONAL,
+                             feasible_interval=None, interval_width_limit=None)
     # A frozen historical offset must not bypass a current stop, disconnect, new source or protection hold.
     if result['suggested_density']['value'] is not None:
         current = live if live is not None else shared_snapshot(db)

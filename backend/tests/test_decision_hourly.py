@@ -235,6 +235,8 @@ def test_full_hour_integrates_saved_outputs_with_last_meter_basis(sessions,seede
             for key,c in snap['cells'].items():
                 if c.get('status')=='good' and not isinstance(c.get('value'),dict):
                     c['observed_at']=stamp
+                    if c.get('sample'):
+                        c['sample'].update(batch_id=str(i),received_at=stamp)
             for c in snap['inputs'].values():
                 if c.get('status')=='good':
                     c['observed_at']=stamp
@@ -243,6 +245,7 @@ def test_full_hour_integrates_saved_outputs_with_last_meter_basis(sessions,seede
             snap['suggested_density']=dict(value=snap['cells']['density']['value']-.02,status='calculated',reason='test')
             snap['cells']['suggested_density']=snap['suggested_density']
             snap['cells']['total_ash']=dict(value=9 if i%2 else 10,status='calculated',unit='%')
+            snap['total_ash']=snap['cells']['total_ash']
             record(db,START+timedelta(seconds=5*i+1),snap,store)
         db.flush()
         result=build_hour(db,START,HOUR,HOUR)
@@ -251,7 +254,8 @@ def test_full_hour_integrates_saved_outputs_with_last_meter_basis(sessions,seede
         assert result['suggested_density']['value']==1.46
         assert result['guidance']['rhoCur']==1.48
         assert result['cells']['density']['value']<1.401
-        assert result['total_ash']['value']==9.5  # Mean frozen results, not a formula on input means.
+        # Equal flow weighted by observed duration; final sample covers only four seconds.
+        assert result['total_ash']['value']==pytest.approx((10*1800+9*1799)/3599)
 
 
 def test_boolean_state_and_real_zero_are_distinct_from_numeric_missing():

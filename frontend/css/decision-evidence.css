@@ -1,0 +1,27 @@
+.decision-evidence-dialog { width:min(580px,calc(100vw - 24px)); }
+.decision-evidence-dialog .ash-dialog-body { gap:10px; }
+.evidence-tabs,.evidence-controls,.evidence-pager { display:flex; gap:8px; align-items:center; }
+.evidence-tabs button { flex:1; }
+.evidence-tabs { position:sticky; top:-12px; z-index:2; background:var(--ah-paper); padding:8px 0; }
+.evidence-controls { position:sticky; top:34px; z-index:2; background:var(--ah-paper); padding-bottom:8px; }
+.evidence-controls select { flex:1; min-width:0; }
+.decision-evidence-dialog :is(input,select,textarea,button) { background:var(--ah-card); color:var(--ah-text); border:1px solid var(--ah-rule); border-radius:2px; padding:6px 8px; font:inherit; }
+.decision-evidence-dialog button[aria-pressed="true"],.decision-evidence-dialog button[type="submit"] { color:var(--ah-accent); border-color:var(--ah-accent); }
+.decision-evidence-dialog button:disabled { opacity:.5; cursor:default; }
+.decision-evidence-dialog table { border-collapse:collapse; width:100%; font-size:12px; }
+.decision-evidence-dialog :is(th,td) { padding:8px 6px; border-bottom:1px solid var(--ah-rule); text-align:left; vertical-align:top; }
+.decision-evidence-dialog th { color:var(--ah-muted); font-weight:400; }
+.decision-evidence-dialog small { display:block; font-size:10px; color:var(--ah-muted); overflow-wrap:anywhere; }
+.decision-evidence-dialog p { margin:8px 0; }
+.decision-evidence-dialog pre { max-height:300px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
+.decision-evidence-dialog summary { cursor:pointer; padding:10px 0; }
+.decision-evidence-dialog article,.evidence-segment { border:1px solid var(--ah-rule); background:var(--ah-card); padding:0 10px; margin-bottom:10px; }
+.evidence-segment summary span { display:block; color:var(--ah-muted); margin-top:3px; }
+.evidence-note { color:var(--ah-muted); font-size:11px; line-height:1.7; }
+#evidence-status:empty { display:none; }
+#evidence-status { color:var(--ah-warn); }
+.evidence-pager { justify-content:space-between; margin-top:12px; }
+.decision-evidence-dialog form { display:grid; gap:10px; margin:6px 0 14px; }
+.decision-evidence-dialog label { display:grid; grid-template-columns:160px minmax(0,1fr); align-items:center; gap:10px; color:var(--ah-muted); font-size:12px; }
+.decision-evidence-dialog textarea { min-height:60px; resize:vertical; }
+@media(max-width:480px) { .decision-evidence-dialog label { grid-template-columns:1fr; gap:4px; } }

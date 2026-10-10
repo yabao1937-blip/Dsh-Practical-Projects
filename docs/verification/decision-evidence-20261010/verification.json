@@ -1,0 +1,63 @@
+{
+  "verified_at": "2026-10-10T10:28:59",
+  "scope": "GPT operating evidence; DS training/prediction/page branch unchanged",
+  "policies": {
+    "hourly": "decision-hourly-v2",
+    "mass": "output-mass-v1",
+    "evidence": "gpt-operating-evidence-v1"
+  },
+  "behavior": {
+    "cadence_seconds": 5,
+    "ash_weight": "501+502 t/h * credited valid seconds /3600",
+    "cross_hour_old_batch": "excluded conservatively; boundary gaps not filled",
+    "legacy_hours": "immutable; mixed statistics displayed separately",
+    "advice": "existing expert offset average + end-hour valid density; explicitly unvalidated",
+    "feasible_interval": null,
+    "interval_width_cap": null,
+    "execution_cap": 0.03,
+    "physical_delay_assumption_seconds": 0,
+    "lab_report_time": "required separately; no retroactive training or current-value write"
+  },
+  "verification": {
+    "targeted_backend": "82 passed (evidence/hourly/ash history/shared sources/migrations)",
+    "DS_original_golden": "passed in targeted and full runs",
+    "full_suite_first_run": {
+      "passed": 495,
+      "failed": 4,
+      "migration_head_assertions_fixed_and_retested": 2,
+      "preexisting_failures_reproduced_on_HEAD": 2
+    },
+    "preexisting_failure_details": [
+      "instrument metadata test compares latest raw sample without existing display memory/batch metadata",
+      "operations UI test expects plain 0 cell despite existing g/cm3 suffix"
+    ],
+    "node_checks": [
+      "verify_decision_evidence.js passed",
+      "verify_decision_hourly.js passed",
+      "verify_ash_history.js passed"
+    ],
+    "browser": [
+      "overview entry",
+      "segments and factor details",
+      "sample history and raw evidence",
+      "empty tracking state",
+      "DS hides new entry and closes evidence window",
+      "hourly expert provisional note",
+      "console errors: none"
+    ],
+    "database": [
+      "7 existing frozen-hour snapshot hashes unchanged",
+      "DS coarse_models table hash unchanged",
+      "train_js.json hash unchanged"
+    ],
+    "deployment": [
+      "health 127.0.0.1:8000 200",
+      "health 10.255.249.9:8000 200",
+      "collector evidence accumulating",
+      "legacy production DB has no Alembic revision; initial upgrade attempt stopped on existing alerts table; startup create_all successfully created new independent tables",
+      "full Alembic chain verified on isolated new database"
+    ]
+  },
+  "cleanup": "Temporary archived HEAD comparison directory retained because automatic approval blocked its deletion; production DB and service unaffected",
+  "screenshot": "decision-evidence.png"
+}

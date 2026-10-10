@@ -59,7 +59,7 @@ const DecisionHourly = {
     context(page) {
         const r=this.presentation(),coverage=r?.coverage;
         document.getElementById('decision-mode-label').textContent='小时累加 · 人工执行';
-        document.getElementById('decision-mode-note').textContent='采用上一完整自然小时的有效样本算术平均。手工采样按记录条数平均，无新增则沿用并注明时间。总灰分先逐次计算再平均；建议取上一小时调密量平均，加到小时末有效实测密度上，最大 ±0.03。建议由人工执行。';
+        document.getElementById('decision-mode-note').textContent=(r?.policy==='decision-hourly-v2'?'总灰分按 501+502 实际产煤量加权；工况按系统组合、开停机和明显变化分段。':'该小时为旧口径样本均值。')+' 手工无新增沿用并注明时间。过渡期仍取平均建议偏移加到小时末密度上；专家经验建议 · 非实验验证的达标区间，单次执行限 ±0.03。';
         page.renderHTML('decision-context',r ? `<span>统计时段 <strong>${page.escape(r.period.label)}（北京时间）</strong></span><span>建议用于 <strong>${page.escape(r.period.apply_label)}</strong></span><span>密度来源 <strong>${page.escape(r.density_label)}</strong></span><span>有效建议覆盖 <strong>${(coverage.ratio*100).toFixed(1)}% · ${coverage.valid_count}/${coverage.expected_count}</strong></span><span class="decision-hour-status" role="status">${Number.isFinite(r.suggested_density.value)?`上调 ${coverage.up} · 下调 ${coverage.down} · 保持 ${coverage.stable}`:'数据不足或保护生效 · 暂缓调密'}</span>` : `<span role="status">${page.escape(this.error || '正在读取上一完整小时…')}</span>`);
     },
     inspector(page,node) {
@@ -73,7 +73,8 @@ const DecisionHourly = {
         }
         if(node.id==='density' && r) pairs.push(['小时末有效密度',page.number(r.guidance.rhoCur,3,'g/cm³')],
             ['基准采样时间',page.time(r.guidance.basis_at)],['平均建议偏移',page.number(r.guidance.mean_delta,5,'g/cm³')],
-            ['最大幅度',`±${page.number(r.guidance.maxStep,3)}`],['建议使用时段',r.period.apply_label],
+            ['单次执行步幅',`±${page.number(r.guidance.maxStep,3)}`],['验证状态','专家经验建议 · 非实验验证的达标区间'],
+            ['达标区间','等待响应实验；不把执行步幅当成区间宽度'],['建议使用时段',r.period.apply_label],
             ['有效覆盖',`${r.coverage.valid_count}/${r.coverage.expected_count}（至少 ${r.coverage.required_ratio*100}%）`],
             ['最长连续缺口',`${r.coverage.longest_gap_seconds} 秒（不超过 ${r.coverage.max_gap_seconds} 秒）`]);
         if(c?.components) for(const [label,part] of Object.entries(c.components)) pairs.push([

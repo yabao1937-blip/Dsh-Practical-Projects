@@ -8,6 +8,7 @@ from ..hourly_brief.inputs import LOCAL, numeric
 from ..telemetry.domain import iso_time, utc_now
 from .models import DecisionCycleHour
 from .statistics import EXPECTED
+from .evidence import MASS
 
 
 def read_ash_hours(db, start: datetime | None = None, end: datetime | None = None, now=None):
@@ -35,7 +36,8 @@ def read_ash_hours(db, start: datetime | None = None, end: datetime | None = Non
 
     saved = {r.start: r for r in db.scalars(select(DecisionCycleHour).where(
         DecisionCycleHour.start >= iso_time(start), DecisionCycleHour.start < iso_time(end)))}
-    items, weighted, counts = [], [], []
+    items, weighted, counts, masses, ashes = [], [], [], [], []
+    legacy_counts = []
     cursor = start
     while cursor < end:
         row = saved.get(iso_time(cursor))
@@ -43,9 +45,19 @@ def read_ash_hours(db, start: datetime | None = None, end: datetime | None = Non
         value, count = cell.get('value'), cell.get('sample_count')
         available = (numeric(value) and 0 <= value <= 100 and type(count) is int
                      and 0 < count <= EXPECTED and cell.get('status') == 'average')
+        is_mass = cell.get('aggregation') == MASS
+        mass, ash_mass = cell.get('mass_t'),cell.get('ash_mass_t')
+        seconds = cell.get('valid_seconds')
+        if is_mass:
+            available = available and numeric(mass) and mass > 0 and numeric(ash_mass) and 0 <= ash_mass <= mass and numeric(seconds) and 0 < seconds <= 3600
         if available:
-            weighted.append(value*count)
             counts.append(count)
+            if is_mass:
+                masses.append(mass)
+                ashes.append(ash_mass)
+            else:
+                weighted.append(value*count)
+                legacy_counts.append(count)
         items.append(dict(start=iso_time(cursor), end=iso_time(cursor+timedelta(hours=1)),
             value=value if available else None, sample_count=count if available else 0,
             expected_count=EXPECTED, coverage=count/EXPECTED if available else 0,
@@ -53,14 +65,29 @@ def read_ash_hours(db, start: datetime | None = None, end: datetime | None = Non
             reason=cell.get('reason') if available else
                 (cell.get('reason') or '该小时没有有效总灰分记录' if row else '该小时尚无已保存的统计记录'),
             frozen=row is not None))
+        items[-1].update(aggregation=MASS if is_mass else 'legacy-sample-mean',
+            mass_t=mass if available and is_mass else None,
+            valid_seconds=cell.get('valid_seconds') if is_mass else None)
+        if available and is_mass:
+            seconds = cell.get('valid_seconds',0)
+            items[-1].update(coverage=seconds/3600,
+                status='complete' if seconds >= 3595 else 'partial')
         cursor += timedelta(hours=1)
     sample_count = sum(counts)
+    mass_value = 100*fsum(ashes)/fsum(masses) if masses else None
+    legacy_value = fsum(weighted)/sum(legacy_counts) if legacy_counts else None
+    mixed = bool(masses and legacy_counts)
     return dict(policy='decision-ash-hours-v1', timezone='Asia/Shanghai', unit='%',
         generated_at=iso_time(now), latest_end=iso_time(latest_end),
         period=dict(start=iso_time(start), end=iso_time(end)), items=items,
-        summary=dict(value=fsum(weighted)/sample_count if sample_count else None,
+        summary=dict(value=None if mixed else mass_value if masses else legacy_value,
+            aggregation='mixed' if mixed else MASS if masses else 'legacy-sample-mean', mass_t=fsum(masses),
+            groups=dict(output_mass=dict(value=mass_value,mass_t=fsum(masses)),
+                        legacy=dict(value=legacy_value,sample_count=sum(legacy_counts))),
             sample_count=sample_count, expected_count=len(items)*EXPECTED,
-            coverage=sample_count/(len(items)*EXPECTED), valid_hours=len(counts),
+            coverage=fsum(item['coverage'] for item in items)/len(items), valid_hours=len(counts),
             total_hours=len(items), missing_hours=len(items)-len(counts),
             partial_hours=sum(item['status'] == 'partial' for item in items)),
-        method='先逐次计算总灰分，再取小时有效结果均值；区间按各小时有效样本数加权汇总。缺失不按 0 计入。')
+        method=('区间跨越新旧统计口径，分别展示均值，不合并成一个数。' if mixed else
+            '按实际产煤量加权：Σ(总灰分 × 501+502 流量 × 有效时长) / Σ实际产煤量；缺口不补齐。' if masses else
+            '旧口径：先逐次计算总灰分，再取小时有效结果均值；区间按各小时有效样本数加权汇总。缺失不按 0 计入。'))

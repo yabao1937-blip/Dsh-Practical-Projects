@@ -134,11 +134,11 @@ const DecisionAshHistory = {
         const rows=[...result.items].reverse().map(item=>{
             const [date,time]=this.localParts(item.start),end=this.localParts(item.end)[1];
             const state={complete:'完整',partial:'部分数据',missing:'无有效数据'}[item.status] || '无有效数据';
-            return `<tr><td><strong>${time}–${end}</strong><span>${date}</span></td><td class="ash-table-value">${this.number(item.value)}</td><td title="${esc(item.reason)}"><span class="ash-state ${esc(item.status)}">${state}</span><small>${item.sample_count}/${item.expected_count} · ${this.number(item.coverage*100,1)}%</small></td></tr>`;
+            return `<tr><td><strong>${time}–${end}</strong><span>${date}</span></td><td class="ash-table-value">${this.number(item.value)}</td><td title="${esc(item.reason)}"><span class="ash-state ${esc(item.status)}">${state}</span><small>${item.aggregation==='output-mass-v1'?this.number(item.mass_t,2)+' t · 产煤量加权':'旧样本均值'}</small><small>${item.sample_count}/${item.expected_count} · ${this.number(item.coverage*100,1)}%</small></td></tr>`;
         }).join('');
         this.dialog.querySelector('#ash-history-result').innerHTML=`<section class="ash-summary" aria-label="区间平均灰分"><div><p>区间平均灰分</p><div class="ash-average">${this.number(s.value)}<span>%</span></div><p class="ash-summary-range">${esc(this.label(result.period.start))} — ${esc(this.label(result.period.end))}</p></div><dl><div><dt>有值小时</dt><dd>${s.valid_hours}<span> / ${s.total_hours} 小时</span></dd></div><div><dt>有效样本覆盖</dt><dd>${this.number(s.coverage*100,1)}<span>%</span></dd></div></dl></section>
             <details class="ash-method"><summary>统计说明${s.partial_hours || s.missing_hours ? ' · 含不完整小时':''}</summary><p>${esc(result.method)}${s.partial_hours || s.missing_hours ? ` 本区间含 ${s.partial_hours} 个部分数据小时、${s.missing_hours} 个无数据小时，均值仅代表已有有效样本。`:''}</p></details>
-            ${s.value===null?'<p class="ash-empty">此区间暂无有效总灰分。可选择其他时间；历史未保存的预测不会补算。</p>':''}
+            ${s.aggregation==='mixed'?`<p class="ash-empty">产煤量加权：${this.number(s.groups.output_mass.value)} %（${this.number(s.mass_t)} t）<br>旧样本均值：${this.number(s.groups.legacy.value)} %<br>新旧口径分别展示，不合并。</p>`:s.value===null?'<p class="ash-empty">此区间暂无有效总灰分。可选择其他时间；历史未保存的预测不会补算。</p>':''}
             <div class="ash-table-title"><h3>每小时平均灰分</h3><span>最新小时在前 · 单位 %</span></div>
             <div class="ash-table-scroll" tabindex="0" role="region" aria-label="每小时灰分记录"><table><thead><tr><th>统计时段</th><th>灰分 (%)</th><th>数据 / 覆盖</th></tr></thead><tbody>${rows}</tbody></table></div>
             <p class="ash-history-footnote">预测值 · 仅已结束小时 · 悬停数据状态查看说明</p>`;

@@ -138,7 +138,20 @@ window.Api = {
         const response=await fetch(this.base+'/decision/hourly',{signal:AbortSignal.timeout(8000),cache:'no-store'});
         if(!response.ok) throw new Error('小时统计暂不可用，请重试');
         const result=await response.json();
-        if(result.policy!=='decision-hourly-v1' || !result.cells || !result.period || !result.coverage) throw new Error('小时统计响应异常');
+        if(!['decision-hourly-v1','decision-hourly-v2'].includes(result.policy) || !result.cells || !result.period || !result.coverage) throw new Error('小时统计响应异常');
+        return result;
+    },
+
+    async decisionEvidence(path,body) {
+        const token=this.writeToken(),headers=body?{'Content-Type':'application/json'}:{};
+        if(body && token) headers['X-DMCS-Token']=token;
+        const response=await fetch(this.base+'/decision/evidence'+path,{method:body?'POST':'GET',headers,
+            ...(body?{body:JSON.stringify(body)}:{}),cache:'no-store',signal:AbortSignal.timeout(15000)});
+        const result=await response.json().catch(()=>null);
+        if(!response.ok) throw new Error([401,403].includes(response.status)?'无写入权限，请重新打开服务页面':
+            typeof result?.detail==='string'?result.detail:Array.isArray(result?.detail)?result.detail.map(d=>d.msg).join('；'):'记录读取或保存失败，请重试');
+        if(!result || typeof result!=='object')throw new Error('记录返回异常，请重试');
+        if(body && (!Array.isArray(result.entries)||!result.entries.some(e=>e.client_id===body.client_id)))throw new Error('尚未确认本次记录保存成功，请重试核对');
         return result;
     },
 
