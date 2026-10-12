@@ -258,11 +258,14 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .decision-hourly-summary .decision-node-value { font-size:30px; line-height:1.1; }
 .decision-hourly-summary .decision-node-source { display:grid; gap:4px; }
 /* Enlarge instant readings without changing card geometry or status text. */
-.is-instant-layout .decision-node:not(.decision-root,.decision-hourly-summary,.is-state-group,[data-decision-node="system-switches"],[data-decision-node="desliming"],[data-decision-node="float-press"]) > .decision-node-value { font-size:23px; }
-.is-instant-layout .decision-root > .decision-node-value { font-size:42px; }
-.is-instant-layout .decision-hourly-summary > .decision-node-value { font-size:34px; }
+.is-instant-layout .decision-node:not(.decision-root,.decision-hourly-summary,.is-state-group,[data-decision-node="system-switches"],[data-decision-node="desliming"],[data-decision-node="float-press"]) > .decision-node-value { font-size:27px; }
+.is-instant-layout .decision-root > .decision-node-value { font-size:46px; }
+.is-instant-layout .decision-hourly-summary > .decision-node-value { font-size:38px; }
 /* Use the existing card height to balance the title and reading vertically. */
 .is-instant-layout .decision-node:not(.decision-root,.decision-hourly-summary) { justify-content:space-between; }
+/* Center switch readings between the heading and the card's bottom edge. */
+.is-instant-layout .decision-node:is(.is-state-group,[data-decision-node="system-switches"],[data-decision-node="desliming"],[data-decision-node="float-press"]) { display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto 1fr; row-gap:0; padding-bottom:0; }
+.is-instant-layout .decision-node:is(.is-state-group,[data-decision-node="system-switches"],[data-decision-node="desliming"],[data-decision-node="float-press"]) > .decision-node-value { align-self:center; }
 .decision-hourly-link { opacity:.9; stroke-width:2.6; }
 /* Toolbar actions stay fixed while the graph scales below them. */
 .decision-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-right:auto; }
