@@ -270,6 +270,27 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .decision-node.decision-density-instant { height:207px; }
 .decision-density-instant .decision-node-source > span:first-child { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
 .decision-hourly-link { opacity:.9; stroke-width:2.6; }
+/* Instant view: one action row, with total ash over the hourly density card. */
+.decision-actions { display:flex; align-items:center; gap:12px; margin-right:auto; }
+.decision-actions .decision-manual-open { margin:0; white-space:nowrap; }
+.decision-actions.is-on-canvas { position:absolute; left:0; top:0; padding:48px 0 0 25px; transform-origin:top left; gap:14px; }
+.decision-workspace .decision-actions.is-on-canvas button { font-size:18px; padding:12px 16px; background:var(--dm-card); }
+.decision-actions [hidden] { display:none; }
+.decision-total-ash { position:absolute; left:650px; top:20px; width:285px; height:110px; display:flex; flex-direction:column; justify-content:center; gap:3px; padding:12px 18px; border:1px solid var(--dm-border); border-top:3px solid var(--dm-cyan); background:var(--dm-card); color:var(--dm-text); border-radius:3px; }
+.decision-total-label { font-size:18px; font-weight:600; }
+.decision-total-ash strong { font:600 36px/1.1 Bahnschrift, 'DIN Alternate', 'Microsoft YaHei', sans-serif; font-variant-numeric:tabular-nums; color:var(--dm-cyan); }
+.decision-total-ash small { font-size:20px; font-weight:400; }
+.decision-total-status { color:var(--dm-muted); font-size:12px; line-height:1.4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.is-instant-layout .decision-node:not(.decision-root,.decision-hourly-summary) { padding:16px 18px; justify-content:space-between; gap:10px; }
+.is-instant-layout .decision-node:not(.decision-root,.decision-hourly-summary) .decision-node-heading { font-size:20px; line-height:1.3; align-items:flex-start; }
+.is-instant-layout .decision-badge { flex-shrink:0; font-size:12px; line-height:1.4; }
+.is-instant-layout .decision-node:not(.decision-root,.decision-hourly-summary) .decision-node-value { font-size:32px; line-height:1.2; }
+.is-instant-layout .decision-node.is-state-group .decision-node-value { font-size:19px; line-height:1.3; }
+.is-instant-layout .decision-state-grid { gap:6px 12px; }
+.is-instant-layout .decision-component-amount { font-size:16px; margin-top:10px; }
+.is-instant-layout .decision-node[data-decision-node="float-unmodeled"] .decision-node-heading { font-size:18px; }
+.is-instant-layout .decision-node[data-decision-node="density-current"] .decision-node-value { font-size:28px; }
+.is-instant-layout .decision-node.decision-density-instant { height:222px; }
 .decision-workspace { --dm-gap:#ff9999; --dm-gap-bg:#382130; --dm-warning:#f5cc78; --dm-warning-bg:#352d21; }
 .decision-workspace.is-light { --dm-gap:#b42332; --dm-gap-bg:#fff0f0; --dm-warning:#855900; --dm-warning-bg:#fff8df; }
 .decision-workspace .is-hourly-gap { --dm-quality:var(--dm-gap); --dm-quality-bg:var(--dm-gap-bg); }

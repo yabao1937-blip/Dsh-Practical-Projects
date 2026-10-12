@@ -96,7 +96,11 @@
                             <button type="button" data-decision-aggregation="instant" class="is-active" aria-pressed="true">即时</button>
                             <button type="button" data-decision-aggregation="hourly" aria-pressed="false">累加</button>
                         </div>
-                        <button type="button" class="decision-manual-open" id="decision-manual-open" aria-haspopup="dialog" aria-controls="decision-manual-dialog">手工信息补录</button>
+                        <div class="decision-actions" id="decision-actions" role="group" aria-label="决策操作">
+                            <button type="button" class="decision-manual-open" id="decision-manual-open" aria-haspopup="dialog" aria-controls="decision-manual-dialog">手工信息补录</button>
+                            <button type="button" class="decision-manual-open" data-instant-action data-ash-history aria-haspopup="dialog" hidden>查看小时灰分</button>
+                            <button type="button" class="decision-manual-open" data-instant-action data-evidence-open aria-haspopup="dialog" hidden>工况分段 / 调密跟踪</button>
+                        </div>
                         <div class="decision-zoom" role="group" aria-label="画布缩放">
                             <button type="button" id="decision-zoom-out" aria-label="缩小">−</button>
                             <button type="button" id="decision-fit">适应画布</button>

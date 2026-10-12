@@ -48,7 +48,7 @@ const DecisionAshHistory = {
         this.dialog.addEventListener('close',()=>{
             stopDrag();
             this.requestId++; this.controller?.abort(); this.controller=null;
-            if(this.page?.active()) document.querySelector('[data-ash-history]')?.focus({preventScroll:true});
+            if(this.page?.active()) document.querySelector('[data-ash-history]:not([hidden])')?.focus({preventScroll:true});
         });
         window.addEventListener('resize',()=>{
             if(this.dialog.open) {const r=this.dialog.getBoundingClientRect();this.place(r.left,r.top);}

@@ -20,6 +20,8 @@ const DecisionOverviewPage = {
     active() { return !!document.getElementById('page-decision')?.classList.contains('active'); },
     liveMode() { return typeof DecisionRealtime !== 'undefined' && DecisionRealtime.active(this); },
     hourMode() { return this.view==='gpt' && this.aggregationMode==='hourly' && typeof DecisionHourly!=='undefined'; },
+    instantLayout() { return this.view==='gpt' && !this.hourMode(); },
+    graphHeight() { return this.instantLayout() ? 1120 : 970; },
     renderHTML(id, html) {
         const host=document.getElementById(id);
         // Keep the legacy production view unchanged. GPT refreshes patch existing
@@ -549,13 +551,29 @@ const DecisionOverviewPage = {
     fit() {
         const viewport = document.getElementById('decision-canvas-scroll');
         const scale = this.zoom ?? Math.min(1, Math.max(.65, viewport.clientWidth / 1540));
-        const geometryKey=`${scale}|${viewport.clientWidth}|${innerHeight}`;
+        const instant=this.instantLayout(), height=this.graphHeight();
+        const geometryKey=`${scale}|${viewport.clientWidth}|${innerHeight}|${height}`;
         if(this.liveMode() && this.fitKey===geometryKey) { this.queueInspectorPosition(); return; }
         this.fitKey=geometryKey;
         this.actualZoom = scale;
-        document.getElementById('decision-board').style.transform = `scale(${scale})`;
+        const board=document.getElementById('decision-board');
+        board.style.transform = `scale(${scale})`;
+        board.style.height = `${height}px`;
+        board.classList.toggle('is-instant-layout',instant);
         const space = document.getElementById('decision-canvas-space');
-        space.style.width = `${1540 * scale}px`; space.style.height = `${970 * scale}px`;
+        space.style.width = `${1540 * scale}px`; space.style.height = `${height * scale}px`;
+        // Keep the original manual button and its listener while sharing graph
+        // coordinates with total ash and the hourly recommendation above it.
+        const actions=document.getElementById('decision-actions');
+        const toolbar=document.querySelector('.decision-toolbar');
+        const actionHost=instant?space:toolbar;
+        if(actions.parentElement!==actionHost) {
+            if(instant) space.insertBefore(actions,board);
+            else toolbar.insertBefore(actions,toolbar.querySelector('.decision-zoom'));
+        }
+        actions.classList.toggle('is-on-canvas',instant);
+        actions.style.transform=instant?`scale(${scale})`:'';
+        actions.querySelectorAll('[data-instant-action]').forEach(button=>{button.hidden=!instant;});
         this.background?.resize();
         document.getElementById('decision-fit').textContent = `适应画布 · ${Math.round(scale * 100)}%`;
         this.queueInspectorPosition(true);
@@ -645,7 +663,7 @@ const DecisionOverviewPage = {
             return `${short} ${field.raw == null ? '—' : field.raw ? '开' : '关'}`;
         }).join(' · ');
         const densityLayout = this.view === 'gpt' && !this.hourMode() ? {x:650,w:285} : {x:670,w:245};
-        return [
+        const nodes = [
             n('density','建议密度',s.showAdvice ? this.number(s.guide.rhoNew,3) : '—',s.showAdvice ? (s.ashOk ? '达标保持' : s.guide.direction === 'down' ? '本步建议 · 下调' : '本步建议 · 上调') : s.guide.hold ? '等待新化验 / 新数据' : '暂无有效建议',
                 s.guide.reason,{...densityLayout,y:343,h:207,type:'root',unit:'g/cm³',sampleAt:s.reader.ashMeasurementInfo(s.guide.scheme).sampleAt}),
             n('heavy','重介精煤',ash(s.ashes.heavy),`煤量 ${rate(s.amounts.heavy)}`,'汇总左侧重介精煤灰分和重介精煤量，随左侧数据同步更新。',
@@ -679,6 +697,21 @@ const DecisionOverviewPage = {
             n('coarse-slime','原煤煤泥含量','待补充','工艺因素 · 尚未进入模型','目前的粗精模型使用 10 个输入因素；原煤煤泥含量尚无独立输入字段，也未进入模型。后续需要人工采样或可验证的测量来源。',
                 {...family('coarse',1260,715),parent:'coarse',reference:true}),
         ];
+        if(this.instantLayout()) {
+            const layout={
+                density:{x:650,y:380,w:285,h:222},
+                heavy:{x:360,y:225,w:240,h:164}, float:{x:360,y:710,w:240,h:170},
+                coarse:{x:965,y:398,w:240,h:188}, 'density-current':{x:360,y:435,w:240,h:118},
+            };
+            ['heavy-ash','heavy-amount','float-ash','float-amount','float-press','float-unmodeled'].forEach((id,i)=>{
+                layout[id]={x:25,y:[125,270,560,688,816,944][i],w:280,h:118};
+            });
+            ['raw-ash','coal-rate','system-switches','desliming','tail-level','coarse-amount','coarse-slime'].forEach((id,i)=>{
+                layout[id]={x:1235,y:125+128*i,w:280,h:118};
+            });
+            for(const node of nodes) Object.assign(node,layout[node.id]);
+        }
+        return nodes;
     },
 
     renderContext() {
@@ -803,7 +836,10 @@ const DecisionOverviewPage = {
         const totalReason=this.liveMode() ? pending?'更新中 · 上轮结果仅供对照':shown?.total_ash?.reason || (hourly?DecisionHourly.error:DecisionRealtime.error) || '正在计算' : '';
         const total=this.liveMode()?`<strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'产煤量加权总灰分':'小时平均总灰分'):pending?'上轮总灰分':'预测总灰分'} ${this.number(shown?.total_ash?.value,2,'%')}</strong><span title="${this.escape(totalReason)}">${this.escape(totalReason.length>45?(hourly && Number.isFinite(shown?.total_ash?.value)?'按已保存口径统计 · 详见小时灰分': '输入待补充，点击建议密度查看原因'):totalReason)}</span>`:`公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}`;
         const ashHistory=this.view==='gpt'?'<button type="button" class="decision-ash-open" data-ash-history aria-haspopup="dialog">查看小时灰分 ↗</button><button type="button" class="decision-ash-open" data-evidence-open>工况分段 / 调密跟踪 ↗</button>':'';
-        this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 970"><defs>${markers}</defs>${paths}${hourLink}</svg>${cards}${hourSummary}<div class="decision-formula${hourly?DecisionHourly.gapClass(hourlyGaps.get('total-ash')):''}" title="${this.escape(hourlyGaps.get('total-ash')?.reason || '')}"><strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'逐次质量平衡 · 产煤量加权':'逐次质量平衡 · 小时平均'):'三组分质量平衡'}</strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'Σ（逐次总灰分 × 实际产煤量）/ Σ 实际产煤量':'先按各次组分灰分和煤量计算总灰分，再对有效结果求平均'):'总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量'}<br>${total}${ashHistory}</div>`);
+        const totalPanel=this.instantLayout()
+            ? `<section class="decision-total-ash" data-decision-key="total-ash" aria-label="预测总灰分" title="${this.escape('三组分质量平衡：Σ（组分灰分 × 组分煤量）/ Σ 组分煤量；'+totalReason)}"><span class="decision-total-label">${pending?'上轮总灰分':'预测总灰分'}</span><strong>${this.number(this.liveMode()?shown?.total_ash?.value:s.formula,2)}<small> %</small></strong>${totalReason?`<span class="decision-total-status">${this.escape(totalReason)}</span>`:''}</section>`
+            : `<div class="decision-formula${hourly?DecisionHourly.gapClass(hourlyGaps.get('total-ash')):''}" title="${this.escape(hourlyGaps.get('total-ash')?.reason || '')}"><strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'逐次质量平衡 · 产煤量加权':'逐次质量平衡 · 小时平均'):'三组分质量平衡'}</strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'Σ（逐次总灰分 × 实际产煤量）/ Σ 实际产煤量':'先按各次组分灰分和煤量计算总灰分，再对有效结果求平均'):'总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量'}<br>${total}${ashHistory}</div>`;
+        this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 ${this.graphHeight()}" style="height:${this.graphHeight()}px"><defs>${markers}</defs>${paths}${hourLink}</svg>${cards}${hourSummary}${totalPanel}`);
     },
 
     telemetryState(item, failed = window.Operations?.telemetryFailed) {
