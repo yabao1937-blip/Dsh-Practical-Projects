@@ -26,7 +26,7 @@ def window(now):
 def compact_cell(c):
     result = {k:deepcopy(c[k]) for k in ('value','status','reason','source','unit','observed_at','created_at',
         'record_id','metric','input_path','item_id','source_id','point_key','raw_value','density_label','entered_at',
-        'retained_sample') if k in c}
+        'retained_sample','alignment') if k in c}
     sample = c.get('sample') or {}
     if sample:
         for key in ('batch_id','definition_id','quality','status_code','issue','source_at','server_at','received_at','raw_value'):
@@ -56,7 +56,7 @@ def context_definition(result, store):
         sources=result['sources']['resolved_choices'],point_definitions=definitions,
         target=result['target'], model=result['model'], model_definition=deepcopy(model) if method == 'expert9' else
         {k:deepcopy(model[k]) for k in ('intercept','coefs','feature_names','featureNames','inputPolicy','inputBounds','imputeMeans') if k in model},
-        density_guide=store.get('densityGuide') or {})
+        density_guide=store.get('densityGuide') or {}, input_timing=deepcopy(result.get('input_timing')))
 
 
 def record(db, now, result=None, store=None):
@@ -81,6 +81,9 @@ def record(db, now, result=None, store=None):
     snapshot = {k:deepcopy(result[k]) for k in ('sources','density_label','model','target',
         'coarse_ash','heavy_amount','total_ash','suggested_density','guidance','warnings')}
     snapshot['cells'] = cells
+    snapshot['input_timing'] = deepcopy(result.get('input_timing'))
+    if result.get('level_observation'):
+        snapshot['level_observation'] = compact_cell(result['level_observation'])
     snapshot['evidence_policy'] = POLICY
     snapshot.update({k:deepcopy(result[k]) for k in ('features','expert_explanation') if k in result})
     snapshot['inputs'] = {k:compact_cell(c) for k,c in result['inputs'].items()}

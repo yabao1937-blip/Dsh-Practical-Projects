@@ -14,6 +14,7 @@ from ..telemetry.retained import density_history
 from .manual_measurements import METRICS
 from .decision_live import calculate, gpt_group
 from .state import load_store, AUTO_STATE_KEYS, SETTING_TO_STORE
+from ..gpt_coarse.timing import aligned_level, POLICY as TIMING_POLICY
 
 NODE_CELLS = {'raw-ash':'raw_ash', 'coal-rate':'coal_amount', 'tail-level':'level',
     'system-switches':'systems', 'desliming':'desliming', 'heavy-ash':'heavy_ash',
@@ -150,6 +151,8 @@ def shared_snapshot(db, when=None):
     inputs = Inputs(db, when, live=live)
     config = config_view(db, when, inputs)
     cells = collect_shared(inputs, config)
+    level_observation = deepcopy(cells['level'])
+    cells['level'] = aligned_level(inputs, level_observation)
     captured = {k:deepcopy(cells[k]) for k in ('raw_ash','coal_amount','level','heavy_ash','float_ash',
         'float_amount','coarse_amount','density','belt501','belt502')}
     for group, mapping in [('systems', {'401':'sys401','402':'sys402','A':'sysA','B':'sysB'}),
@@ -190,5 +193,6 @@ def shared_snapshot(db, when=None):
     for key in ('coarse_ash','heavy_amount','total_ash','suggested_density'):
         cells[key] = dict(result[key], observed_at=iso_time(when), source='决策总览共享 GPT 计算',
                           unit='g/cm³' if key == 'suggested_density' else 't/h' if key == 'heavy_amount' else '%')
-    result.update(cells=cells, sources=config, density_label=config['density_label'])
+    result.update(cells=cells, sources=config, density_label=config['density_label'],
+                  level_observation=level_observation, input_timing=deepcopy(TIMING_POLICY))
     return result

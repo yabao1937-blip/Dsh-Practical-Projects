@@ -35,6 +35,7 @@ def seeded(sessions, monkeypatch):
     repo = TelemetryRepository(sessions)
     repo.acquire(cfg, 'owner')
     values = [40, 600, 50, 1.42, 1.48, 260, 240, True, True, True, False, True, False]
+    send(repo, cfg, HOUR-timedelta(seconds=92), values)
     send(repo, cfg, HOUR-timedelta(seconds=2), values)
     before = (HOUR-timedelta(minutes=1)).astimezone(LOCAL).replace(tzinfo=None)
     with sessions.begin() as db:

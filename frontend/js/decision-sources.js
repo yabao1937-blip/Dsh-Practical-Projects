@@ -61,11 +61,13 @@ const DecisionSources = {
         const value=group ? Object.entries(c.value).map(([name,on])=>`${name} ${on===true?'开':on===false?'关':'未知'}`).join(' · ') :
             typeof c.value==='boolean' ? c.value?'运行':'停止' : page.number(c.value,node.id==='density-current'?3:2,c.unit);
         const parts=group ? Object.entries(c.value).map(([label,value])=>({label,value,available:typeof value==='boolean',received_at:c.components?.[label]?.observed_at})) : null;
-        const badge=c.raw_value===0 && ['raw-ash','coal-rate'].includes(node.id) ? '设备停机' :
+        const aligned=node.id==='tail-level' && c.alignment?.version==='gpt-level-lag-v1';
+        const badge=aligned && c.status==='good' ? '提前90秒' : c.raw_value===0 && ['raw-ash','coal-rate'].includes(node.id) ? '设备停机' :
             {manual:'补录',historical:'历史',default:'默认',calculated:'计算',held:'沿用',missing:'不可用'}[c.status] || '采集';
         return {bound:true,shared:true,badge,item,available:c.status!=='missing' && c.status!=='held' && c.value!=null,
             held:c.status==='held',stopped:c.raw_value===0 && ['raw-ash','coal-rate'].includes(node.id),manual:c.status==='manual',
             value,numericValue:Number.isFinite(c.value)?c.value:null,unit:c.unit || '',components:parts,
-            source:[c.source,c.reason].filter(Boolean).join(' · '),title:c.reason || c.source,sampleAt:c.observed_at,enteredAt:c.created_at};
+            source:aligned && c.status==='good' ? `采集于 ${page.time(c.observed_at)}` : [c.source,c.reason].filter(Boolean).join(' · '),
+            title:c.reason || c.source,sampleAt:c.observed_at,enteredAt:c.created_at,alignment:c.alignment};
     },
 };

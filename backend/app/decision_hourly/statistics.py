@@ -35,7 +35,8 @@ def event_key(c):
 def mean_cell(key, candidates, fallback, start, end):
     events = {}
     for c in candidates:
-        stamp = business_time(c.get('observed_at')) if c.get('observed_at') else None
+        stamp_value = c.get('_period_at') or c.get('observed_at')
+        stamp = business_time(stamp_value) if stamp_value else None
         if stamp and start <= stamp < end:
             events[c.get('_event') or event_key(c)] = c
     accepted = [c for c in events.values() if valid(c, key)]
@@ -45,8 +46,8 @@ def mean_cell(key, candidates, fallback, start, end):
                   excluded_count=len(events)-len(accepted), carried=False)
     if accepted:
         result.update(value=fsum(float(c['value']) for c in accepted)/len(accepted), status='average',
-            observed_at=max(c['observed_at'] for c in accepted),
-            first_at=min(c['observed_at'] for c in accepted), reason=f'{len(accepted)} 条有效样本算术平均')
+            observed_at=max((c['observed_at'] for c in accepted if c.get('observed_at')),default=None),
+            first_at=min((c['observed_at'] for c in accepted if c.get('observed_at')),default=None), reason=f'{len(accepted)} 条有效样本算术平均')
     elif key not in COMPUTED and fallback.get('status') in ('manual', 'historical', 'default') and valid(fallback, key):
         stamp = business_time(fallback.get('observed_at')) if fallback.get('observed_at') else None
         # Explicit carry/default, never silently count it as a new hourly measurement.

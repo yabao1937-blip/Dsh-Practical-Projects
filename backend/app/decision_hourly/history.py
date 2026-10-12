@@ -13,6 +13,7 @@ from ..telemetry.domain import iso_time
 from ..telemetry.models import TelemetryReading
 from ..telemetry.retained import raw_sample, usable_at_receipt
 from .statistics import COMPUTED, digest, event_key, mean_cell, valid
+from ..gpt_coarse.timing import level_mean
 
 
 def historical_cells(db, start, end, rows):
@@ -155,6 +156,8 @@ def historical_cells(db, start, end, rows):
                 result[key].update(value=None,status='missing',reason='小时内采集点定义变化，暂不混合不同口径的均值')
     for key in COMPUTED:
         result[key] = mean_cell(key,series[key],dict(unit='t/h' if key=='heavy_amount' else '%',source='逐次决策存档'),start,end)
+    if any(r.snapshot.get('input_timing') for r in rows):
+        result['level'] = level_mean(rows,start,end,mean_cell)
     densities = [c for c in series['density'] if valid(c,'density') and c.get('observed_at') and
                  start <= business_time(c['observed_at']) < end]
     basis = max(densities,key=lambda c:c['observed_at'],default={})

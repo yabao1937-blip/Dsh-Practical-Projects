@@ -9,6 +9,7 @@ from .density import calc_total_ash, compute_density_guidance, DENSITY_GUIDE
 from .guidance import density_guard_state
 from .modeling import MLR_FEATURES, predict_coarse_ash
 from ..gpt_coarse.predict import FEATURES as EXPERT_FEATURES, valid as valid_expert, explain as explain_expert
+from ..gpt_coarse.timing import POLICY as TIMING_POLICY, LEVEL_LAG_SECONDS, LEVEL_TOLERANCE_SECONDS
 
 LABELS = dict(raw_ash='原煤灰分', coal_amount='入洗原煤量', level='精磁尾液位',
     sysA='A系统', sysB='B系统', sys401='401系统', sys402='402系统',
@@ -53,7 +54,11 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
                 age = (now-received).total_seconds()
             except (TypeError,ValueError):
                 return f'{LABELS[key]}采集时间缺失或无效'
-            if age > 30 or age < -5:
+            if key == 'level' and shared_sources:
+                alignment = c.get('alignment') or {}
+                if alignment.get('version') != TIMING_POLICY['version'] or not LEVEL_LAG_SECONDS <= age <= LEVEL_LAG_SECONDS+LEVEL_TOLERANCE_SECONDS:
+                    return '精磁尾液位未按提前 90 秒对齐，或对应采样已过期'
+            elif age > 30 or age < -5:
                 return f'{LABELS[key]}采集数据已过期或时钟异常，等待新采集'
         expected = 'g/cm³' if key == 'density' else '%' if key in ('raw_ash','level','heavy_ash','float_ash') else 't/h' if key in ('coal_amount','float_amount','coarse_amount','belt501','belt502') else ''
         if c.get('unit', '') != expected:

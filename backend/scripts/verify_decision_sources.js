@@ -33,6 +33,15 @@ async function verify(){
     assert.equal(elements['decision-source-point'].disabled,true);
     live.result={cells:{float_ash:{value:9,status:'historical',source:'历史浮精记录',unit:'%'}}};
     assert.equal(sources.display(page,{id:'float-ash'}).badge,'历史');
+    live.result={cells:{level:{value:75,status:'good',source:'KEPServer · 提前 90 秒',unit:'%',
+        observed_at:'2026-10-12T01:29:30Z',reason:'采用预测时刻前 90 秒的液位',
+        alignment:{version:'gpt-level-lag-v1',target_at:'2026-10-12T01:29:30Z',prediction_at:'2026-10-12T01:31:00Z'}}}};
+    const delayed=sources.display(page,{id:'tail-level'});
+    assert.equal(delayed.numericValue,75);assert.equal(delayed.badge,'提前90秒');
+    assert.equal(delayed.sampleAt,'2026-10-12T01:29:30Z');assert.equal(delayed.available,true);
+    live.result.cells.level={...live.result.cells.level,value:null,status:'missing',reason:'提前 90 秒液位缺失'};
+    assert.equal(sources.display(page,{id:'tail-level'}).available,false);
+    assert.equal(sources.display(page,{id:'tail-level'}).value,'—');
     ctx.Api.decisionSources=api;live.update=update;
     const pending=[];
     ctx.Api.getDecisionCurrent=()=>new Promise(resolve=>pending.push(resolve));

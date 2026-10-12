@@ -815,6 +815,9 @@ const DecisionOverviewPage = {
             ['卡片状态',display.stopped ? '设备停机' : display.held ? '采集异常 · 沿用历史值' : display.available ? '实时采集' : '不可用'],
             ['卡片采集来源',display.item?.item_id || display.item?.name || '已选点位未返回'],['显示数值原接收时间',this.time(display.sampleAt)],['单位',display.components ? '运行状态 · 无单位' : App.telemetryDisplayUnit(display.item) || '未配置']);
         if (display.held && !display.manual) pairs.splice(4, 0, ['沿用数值原源时间', this.time(display.valueSourceAt)]);
+        if (display.alignment) pairs.push(['液位对齐规则','采用预测时刻前 90 秒的采集值；最多向前寻找 30 秒'],
+            ['预测时刻',this.time(display.alignment.prediction_at)],['液位目标时刻',this.time(display.alignment.target_at)],
+            ['实际采用采集时间',this.time(display.sampleAt)]);
         if (node.id === 'density-current' && display.item?.effective_density) {
             const effective = display.item.effective_density;
             pairs.splice(2, 0, ['密度采用规则', effective.reason || '有效非 1 读数']);

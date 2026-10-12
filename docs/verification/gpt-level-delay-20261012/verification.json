@@ -1,0 +1,72 @@
+{
+  "generated_at": "2026-10-12T08:39:39.811+08:00",
+  "policy": {
+    "version": "gpt-level-lag-v1",
+    "level_lag_seconds": 90,
+    "max_lookback_seconds": 30,
+    "clock": "received_at",
+    "selection": "latest-at-or-before-target",
+    "training_rows": "already-aligned"
+  },
+  "level": {
+    "value": 53.26968002319336,
+    "source": "KEPServer · 提前 90 秒",
+    "observed_at": "2026-10-12T08:38:08.703+08:00",
+    "status": "good",
+    "reason": "采用预测时刻前 90 秒的液位",
+    "source_id": "kepserver-main",
+    "point_key": "tag_543c440c9a90e0e2daae",
+    "item_id": "TIA_3_5.TIA_3_5.JMCWC/LEVEL_B",
+    "unit": "%",
+    "alignment": {
+      "version": "gpt-level-lag-v1",
+      "level_lag_seconds": 90,
+      "max_lookback_seconds": 30,
+      "clock": "received_at",
+      "selection": "latest-at-or-before-target",
+      "training_rows": "already-aligned",
+      "prediction_at": "2026-10-12T08:39:39.811+08:00",
+      "target_at": "2026-10-12T08:38:09.811+08:00",
+      "offset_seconds": 1.108562
+    },
+    "sample": {
+      "value": 53.26968002319336,
+      "raw_value": 53.26968002319336,
+      "definition_id": "be2932eee1ca1353a8356a81c39d88c4adce800860d8afd3860f47e01acb3cbe",
+      "quality": "good",
+      "issue": null,
+      "status_code": 0,
+      "source_at": "2026-10-12T08:37:15.001+08:00",
+      "server_at": "2026-10-12T08:37:15.001+08:00",
+      "received_at": "2026-10-12T08:38:08.703+08:00",
+      "batch_id": "9d65da3eda0d47dbb4aa13650e89f7c7"
+    }
+  },
+  "model_level": 53.26968002319336,
+  "current_level": 57.98611068725586,
+  "current_level_at": "2026-10-12T08:39:35.931+08:00",
+  "model": {
+    "engine": "gpt",
+    "method": "expert9",
+    "trained_at": "2026-10-09T15:49:02+08:00",
+    "id": "9e41f54accc37ac8",
+    "revision": 1,
+    "artifact_id": "db46f9ca3829bdb0dbe33645f2bf5158227709bb3a342407797437684a03d67c",
+    "activated_at": "2026-10-09T15:49:23.529+08:00",
+    "label": "专家基准九因子 · 待现场验证"
+  },
+  "coarse_ash": {
+    "value": 14.28619523682625,
+    "status": "held",
+    "reason": "采用沿用输入，仅供观察"
+  },
+  "backend_tests_passed": 141,
+  "node_checks": [
+    "decision_sources",
+    "decision_realtime",
+    "decision_hourly",
+    "decision_evidence",
+    "gpt_expert9"
+  ],
+  "browser_console_errors": 0
+}
