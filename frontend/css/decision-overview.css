@@ -257,18 +257,6 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .decision-hourly-summary .decision-node-heading { font-size:15px; }
 .decision-hourly-summary .decision-node-value { font-size:30px; line-height:1.1; }
 .decision-hourly-summary .decision-node-source { display:grid; gap:4px; }
-/* Give the recommendation its own full-height left column. */
-.decision-node:is(.decision-density-instant,.decision-hourly-summary) { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); padding:16px 18px; gap:14px; align-items:stretch; }
-.decision-density-main { display:flex; flex-direction:column; justify-content:space-between; min-width:0; }
-.decision-node:is(.decision-density-instant,.decision-hourly-summary) .decision-node-heading { display:block; font-size:24px; line-height:1.3; }
-.decision-density-period { display:block; font-size:15px; font-weight:400; margin-bottom:5px; }
-.decision-node:is(.decision-density-instant,.decision-hourly-summary) .decision-node-value { font-size:52px; line-height:1; white-space:nowrap; }
-.decision-density-main .decision-root-unit { display:block; margin:9px 0 0; font-size:12px; line-height:1.4; }
-.decision-density-meta { display:flex; flex-direction:column; align-items:flex-end; gap:8px; min-width:0; }
-.decision-node:is(.decision-density-instant,.decision-hourly-summary) .decision-node-source { display:grid; gap:4px; margin-top:auto; text-align:right; line-height:1.4; overflow-wrap:anywhere; }
-.decision-density-target { white-space:nowrap; }
-.decision-node.decision-density-instant { height:207px; }
-.decision-density-instant .decision-node-source > span:first-child { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
 .decision-hourly-link { opacity:.9; stroke-width:2.6; }
 /* Toolbar actions stay fixed while the graph scales below them. */
 .decision-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-right:auto; }
@@ -282,25 +270,6 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .decision-total-label { font-size:18px; font-weight:600; }
 .decision-total-ash strong { font:600 30px/1.2 Bahnschrift, 'DIN Alternate', 'Microsoft YaHei', sans-serif; font-variant-numeric:tabular-nums; color:var(--dm-cyan); }
 .decision-total-ash small { font-size:18px; font-weight:400; }
-.is-instant-layout .decision-node[data-decision-node] { height:var(--dm-node-height); }
-.is-instant-layout .decision-node:not(.decision-root,.decision-hourly-summary) { padding:12px 14px; justify-content:space-between; gap:6px; }
-.is-instant-layout .decision-node:not(.decision-root,.decision-hourly-summary) .decision-node-heading { font-size:16px; line-height:1.25; align-items:flex-start; }
-.is-instant-layout .decision-badge { flex-shrink:0; font-size:10px; line-height:1.4; }
-.is-instant-layout .decision-node:not(.decision-root,.decision-hourly-summary) .decision-node-value { font-size:26px; line-height:1.15; }
-.is-instant-layout .decision-node.is-state-group .decision-node-value { font-size:15px; line-height:1.25; }
-.is-instant-layout .decision-state-grid { gap:3px 10px; }
-.is-instant-layout .decision-node[data-decision-node="float-unmodeled"] .decision-node-heading { font-size:14px; }
-.is-instant-layout .decision-node[data-decision-node="density-current"] .decision-node-value { font-size:25px; }
-.is-instant-layout .decision-node.decision-component { padding:20px; gap:12px; }
-.is-instant-layout .decision-node.decision-component .decision-node-heading { font-size:22px; }
-.is-instant-layout .decision-node.decision-component .decision-node-value { font-size:38px; }
-.is-instant-layout .decision-component .decision-badge { font-size:11px; }
-.is-instant-layout .decision-component-amount { font-size:16px; margin-top:8px; }
-.is-instant-layout .decision-node:is(.decision-density-instant,.decision-hourly-summary) { padding:22px; gap:18px; }
-.is-instant-layout .decision-node:is(.decision-density-instant,.decision-hourly-summary) .decision-node-heading { font-size:28px; }
-.is-instant-layout .decision-node:is(.decision-density-instant,.decision-hourly-summary) .decision-node-value { font-size:64px; }
-.is-instant-layout .decision-density-period { font-size:16px; }
-.is-instant-layout .decision-density-meta .decision-node-source { font-size:13px; }
 .decision-workspace { --dm-gap:#ff9999; --dm-gap-bg:#382130; --dm-warning:#f5cc78; --dm-warning-bg:#352d21; }
 .decision-workspace.is-light { --dm-gap:#b42332; --dm-gap-bg:#fff0f0; --dm-warning:#855900; --dm-warning-bg:#fff8df; }
 .decision-workspace .is-hourly-gap { --dm-quality:var(--dm-gap); --dm-quality-bg:var(--dm-gap-bg); }

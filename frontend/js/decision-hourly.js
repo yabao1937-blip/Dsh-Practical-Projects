@@ -130,7 +130,7 @@ const DecisionHourly = {
         const updatedTime=Number.isFinite(updatedAt.getTime())?updatedAt.toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}):'—';
         const statusClass=this.gapClass(gap) || (r && !available?' is-hourly-warning':'');
           const height=root.summaryHeight??201, spacing=root.summaryGap??24;
-          return `<section class="decision-node decision-hourly-summary${statusClass}" data-decision-key="hourly-summary" aria-label="本小时建议密度" aria-busy="${this.pending()}" style="left:${root.x}px;top:${root.y-height-spacing}px;width:${root.w}px;height:${height}px"><span class="decision-density-main"><span class="decision-node-heading"><span class="decision-density-period">本小时</span>建议密度</span><span class="decision-node-value">${page.number(value,3)}<span class="decision-root-unit">g/cm³</span></span></span><span class="decision-density-meta"><span class="decision-node-source">更新于 ${page.escape(updatedTime)}</span></span></section>`;
+          return `<section class="decision-node decision-hourly-summary${statusClass}" data-decision-key="hourly-summary" aria-label="本小时建议密度" aria-busy="${this.pending()}" style="left:${root.x}px;top:${root.y-height-spacing}px;width:${root.w}px;height:${height}px"><span class="decision-node-heading">本小时建议密度</span><span class="decision-node-value">${page.number(value,3)} <span class="decision-root-unit">g/cm³</span></span><span class="decision-node-source">更新于 ${page.escape(updatedTime)}</span></section>`;
     },
     async update(page,force=false) {
         if(!this.enabled(page) || this.inFlight || (typeof DecisionSources!=='undefined' && DecisionSources.saving) ||

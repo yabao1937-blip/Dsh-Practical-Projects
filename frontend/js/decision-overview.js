@@ -21,8 +21,8 @@ const DecisionOverviewPage = {
     liveMode() { return typeof DecisionRealtime !== 'undefined' && DecisionRealtime.active(this); },
     hourMode() { return this.view==='gpt' && this.aggregationMode==='hourly' && typeof DecisionHourly!=='undefined'; },
     instantLayout() { return this.view==='gpt' && !this.hourMode(); },
-    graphWidth() { return this.instantLayout() ? 1720 : 1540; },
-    graphHeight() { return this.instantLayout() ? 880 : 970; },
+    graphWidth() { return 1540; },
+    graphHeight() { return 970; },
     renderHTML(id, html) {
         const host=document.getElementById(id);
         // Keep the legacy production view unchanged. GPT refreshes patch existing
@@ -576,7 +576,7 @@ const DecisionOverviewPage = {
         const width=this.graphWidth();
         const scale = this.zoom ?? Math.min(1, Math.max(.65, viewport.clientWidth / width));
         const instant=this.instantLayout(), height=this.graphHeight();
-        const geometryKey=`${scale}|${viewport.clientWidth}|${innerHeight}|${width}|${height}`;
+        const geometryKey=`${scale}|${viewport.clientWidth}|${innerHeight}|${width}|${height}|${instant}`;
         if(this.liveMode() && this.fitKey===geometryKey) { this.alignToolbarTotal(); this.queueInspectorPosition(); return; }
         this.fitKey=geometryKey;
         this.actualZoom = scale;
@@ -677,7 +677,7 @@ const DecisionOverviewPage = {
             const short = field.key.replace('sys','').replace('desliming','');
             return `${short} ${field.raw == null ? '—' : field.raw ? '开' : '关'}`;
         }).join(' · ');
-        const densityLayout = this.view === 'gpt' && !this.hourMode() ? {x:650,w:285} : {x:670,w:245};
+        const densityLayout = {x:670,w:245};
         const nodes = [
             n('density','建议密度',s.showAdvice ? this.number(s.guide.rhoNew,3) : '—',s.showAdvice ? (s.ashOk ? '达标保持' : s.guide.direction === 'down' ? '本步建议 · 下调' : '本步建议 · 上调') : s.guide.hold ? '等待新化验 / 新数据' : '暂无有效建议',
                 s.guide.reason,{...densityLayout,y:343,h:207,type:'root',unit:'g/cm³',sampleAt:s.reader.ashMeasurementInfo(s.guide.scheme).sampleAt}),
@@ -712,23 +712,6 @@ const DecisionOverviewPage = {
             n('coarse-slime','原煤煤泥含量','待补充','工艺因素 · 尚未进入模型','目前的粗精模型使用 10 个输入因素；原煤煤泥含量尚无独立输入字段，也未进入模型。后续需要人工采样或可验证的测量来源。',
                 {...family('coarse',1260,715),parent:'coarse',reference:true}),
         ];
-        if(this.instantLayout()) {
-            // Small inputs feed medium summaries and large recommendations.
-            // Summaries stay centered on their inputs; the middle row is shared
-            // by current density, guidance and coarse ash.
-            const layout={
-                density:{x:688,y:316,w:344,h:248,summaryHeight:248,summaryGap:28},
-                heavy:{x:328,y:169,w:280,h:176}, float:{x:328,y:535,w:280,h:176},
-                coarse:{x:1112,y:344,w:280,h:192}, 'density-current':{x:352,y:390,w:232,h:100},
-            };
-            ['heavy-ash','heavy-amount','float-ash','float-amount','float-press','float-unmodeled'].forEach((id,i)=>{
-                layout[id]={x:24,y:146+122*i,w:232,h:100};
-            });
-            ['raw-ash','coal-rate','system-switches','desliming','tail-level','coarse-amount','coarse-slime'].forEach((id,i)=>{
-                layout[id]={x:1464,y:24+122*i,w:232,h:100};
-            });
-            for(const node of nodes) Object.assign(node,layout[node.id]);
-        }
         return nodes;
     },
 
@@ -763,7 +746,7 @@ const DecisionOverviewPage = {
             let y2, lane = (x1+x2)/2;
             if (parent.id === 'density') {
                 // Keep three left entrances separate; coarse enters from the right.
-                y2 = node.id === 'heavy' ? parent.y+(this.instantLayout()?45:42) : node.id === 'float' ? parent.y+(this.instantLayout()?parent.h-45:162) : parent.y+parent.h/2;
+                y2 = node.id === 'heavy' ? parent.y+42 : node.id === 'float' ? parent.y+162 : parent.y+parent.h/2;
             } else {
                 const siblings = this.nodes.filter(n => n.parent === parent.id).sort((a,b) => a.y-b.y);
                 const targets = siblings.map((n,i) => ({id:n.id,sourceY:n.y+n.h/2,targetY:parent.y+parent.h*(i+1)/(siblings.length+1)}));
@@ -771,10 +754,10 @@ const DecisionOverviewPage = {
                 y2 = target.targetY;
                 // Nested lanes preserve source/port ordering and avoid crossing fan-in lines.
                 const upper = y1 <= y2;
-                const peers = targets.filter(n => (n.sourceY <= n.targetY) === upper && (!this.instantLayout() || Math.abs(n.sourceY-n.targetY)>=.5));
+                const peers = targets.filter(n => (n.sourceY <= n.targetY) === upper);
                 const rank = peers.findIndex(n => n.id === node.id);
                 const gap = Math.abs(x2-x1), inset = Math.min(18,gap/3);
-                const step = peers.length > 1 ? Math.min(this.instantLayout()?24:18,(gap-2*inset)/(peers.length-1)) : 0;
+                const step = peers.length > 1 ? Math.min(18,(gap-2*inset)/(peers.length-1)) : 0;
                 const distance = inset+(upper ? rank : peers.length-1-rank)*step;
                 lane = x2-Math.sign(x2-x1)*distance;
             }
@@ -845,7 +828,7 @@ const DecisionOverviewPage = {
             const componentAmount=compact && node.type==='component' ? node.id==='coarse'?displays.get('coarse-amount')?.value:display.summaryParts?.[1]?.display.value:null;
             const amountHtml=componentAmount?`<span class="decision-component-amount">煤量 ${this.escape(componentAmount)}</span>`:'';
             const content = root && hourSummary
-                ? `<span class="decision-density-main"><span class="decision-node-heading"><span class="decision-density-period">即时</span>建议密度</span><span class="decision-node-value">${groupHtml}${unit}</span></span><span class="decision-density-meta"><span class="decision-node-source"><span>目标灰分</span><span class="decision-density-target">${targetAshRange}</span></span></span>`
+                ? `<span class="decision-node-heading">即时建议密度</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>目标灰分 ${targetAshRange}</span></span>`
                 : compact ? `<span class="decision-node-heading">${this.escape(hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}${amountHtml}</span>`
                 : `<span class="decision-node-heading">${this.escape(hourly && root?'本小时建议密度':hourSummary && root?'即时建议密度':hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(gap ? gap.message : root && !this.liveMode() ? node.source : display.source)}</span>${sub}${preview}${compare}</span>`;
             return `<button type="button" class="decision-node${hourly?DecisionHourly.gapClass(gap):''}${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${display.pending ? ' is-updating' : ''}${(display.bound || display.aggregate || display.calculated) && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}${root && hourSummary?' decision-density-instant':''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" aria-busy="${!!display.pending}"${display.bound || display.aggregate || display.calculated ? ` title="${this.escape(gap?.reason || display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-node-height:${node.h}px;--dm-pulse-delay:${phase}s">${content}</button>`;
