@@ -6,8 +6,8 @@ const context={Date,Number,Math,Object,Array,String,performance:{now:()=>clock},
 vm.createContext(context);
 vm.runInContext(fs.readFileSync('frontend/js/decision-hourly.js','utf8')+';this.hourly=DecisionHourly;',context);
 const h=context.hourly;
-const page={hourMode:()=>true,active:()=>true,renderGraph(){},renderContext(){},renderInspector(){},
-    summaryChildren:new Map(),number:(v,d=2,u='')=>Number.isFinite(v)?v.toFixed(d)+(u?' '+u:''):'—',time:v=>v};
+const page={view:'gpt',hourMode:()=>true,active:()=>true,renderGraph(){},renderContext(){},renderInspector(){},
+    summaryChildren:new Map(),number:(v,d=2,u='')=>Number.isFinite(v)?v.toFixed(d)+(u?' '+u:''):'—',time:v=>v,escape:v=>String(v??'')};
 const response=()=>({period:{start:'2026-10-09T02:00:00Z',end:'2026-10-09T03:00:00Z',apply_end:'2026-10-09T04:00:00Z',apply_label:'11:00–12:00'},
     checked_at:'2026-10-09T03:24:00Z',cells:{raw_ash:{value:40,status:'average',unit:'%',sample_count:3},
         systems:{components:{'401':{value:.5},'402':{value:0}}}},coverage:{}});
@@ -113,5 +113,51 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
     assert(h.presentation());
     pending=h.update(page,true); reject(new Error('小时请求失败')); await pending;
     assert.equal(h.presentation(),null); assert.equal(h.error,'小时请求失败');
-    console.log('Hourly UI: gap attribution, carry/zero/reference isolation, end basis, segment quality, server clock, rollover and request races passed.');
+    // Enter instant mode directly: one shared hourly request, no mode switch required.
+    page.hourMode=()=>false;
+    const root={x:670,y:343,w:245};
+    let renders=0; page.renderGraph=()=>renders++;
+    const source={resolved_choices:{density:'A304'}};
+    const advised=()=>{
+        const result={...completeHour(),sources:source,density_label:'A304',
+            suggested_density:{value:1.472,status:'calculated',reason:'按上一小时工况建议整体下调'},guidance:{direction:'down'}};
+        result.cells.suggested_density=result.suggested_density;
+        return result;
+    };
+    pending=h.update(page,true); const shared=h.inFlight;
+    await h.update(page,true); assert.equal(h.inFlight,shared,'Instant/hour views share one request');
+    const htmlPending=h.summary(page,root);
+    assert(!htmlPending.includes('1.472') && htmlPending.includes('读取中'));
+    resolve(advised()); await pending;
+    assert.equal(renders,1,'Hourly completion redraws the instant page');
+    let summary=h.summary(page,root);
+    assert(summary.includes('本小时建议密度') && summary.includes('1.472') && summary.includes('11:00–12:00'));
+    assert(summary.includes('top:118px') && !summary.includes('data-decision-node='),'Summary sits above the root without adding a calculation node');
+    assert.equal(h.display(page,{id:'density'}).value,'1.472','Summary and cumulative view use the same value');
+    page.hourMode=()=>true; assert.equal(h.summary(page,root),'','No duplicate summary in cumulative mode');
+    await h.update(page); assert.equal(h.inFlight,null,'Switching modes respects the shared refresh throttle');
+    page.hourMode=()=>false;
+    context.DecisionSources.config={resolved_choices:{density:'A303'}};
+    assert.equal(h.presentation(),null,'Another client changing the density source hides stale finite advice');
+    assert(!h.summary(page,root).includes('1.472'));
+    h.result.suggested_density={value:null,reason:'当前来源变化，等待完整小时'};
+    assert(h.summary(page,root).includes('当前来源变化'),'Server reasons for a withheld hour remain visible');
+    page.hourMode=()=>true;
+    pending=h.update(page,true); resolve(advised()); await pending;
+    assert(h.presentation(),'Fresh server-validated advice overrides a stale local config in cumulative mode');
+    page.hourMode=()=>false;
+    context.DecisionSources.config=null;
+    pending=h.update(page,true); reject(new Error('小时统计离线')); await pending;
+    assert(h.summary(page,root).includes('小时统计离线') && !h.summary(page,root).includes('1.472'));
+    context.DecisionSources.saving=true;
+    await h.update(page,true); assert.equal(h.inFlight,null,'Do not query hourly advice while source selection is being saved');
+    context.DecisionSources.saving=false;
+    // A response generated before the boundary but delivered after it must expire.
+    clock=0; pending=h.update(page,true); clock=8000;
+    resolve({...advised(),checked_at:'2026-10-09T03:59:56Z'}); await pending;
+    assert.equal(h.presentation(),null,'Slow replies cannot prolong the previous hour');
+    assert(!h.summary(page,root).includes('1.472'));
+    page.view='production'; await h.update(page,true);
+    assert.equal(h.inFlight,null); assert.equal(h.summary(page,root),'','DS does not request or display the hourly summary');
+    console.log('Hourly UI: gap severity, instant summary, shared requests, source changes, failures and rollover passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -252,6 +252,11 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .decision-float-analysis .decision-analysis-data summary { color: var(--ds-ink); }
 .decision-view-switch button:disabled { opacity:.4; cursor:default; }
 .decision-hour-status { color:var(--dm-blue); }
+.decision-hourly-summary { height:201px; border-top:3px solid var(--dm-cyan); justify-content:center; gap:10px; }
+.decision-hourly-summary .decision-node-heading { font-size:15px; }
+.decision-hourly-summary .decision-node-value { font-size:30px; line-height:1.1; }
+.decision-hourly-summary .decision-node-source { display:grid; gap:4px; }
+.decision-hourly-summary .decision-hourly-summary-note { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
 .decision-workspace { --dm-gap:#ff9999; --dm-gap-bg:#382130; --dm-warning:#f5cc78; --dm-warning-bg:#352d21; }
 .decision-workspace.is-light { --dm-gap:#b42332; --dm-gap-bg:#fff0f0; --dm-warning:#855900; --dm-warning-bg:#fff8df; }
 .decision-workspace .is-hourly-gap { --dm-quality:var(--dm-gap); --dm-quality-bg:var(--dm-gap-bg); }

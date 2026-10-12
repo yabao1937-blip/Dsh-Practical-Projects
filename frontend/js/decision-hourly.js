@@ -1,6 +1,6 @@
 /* Previous completed natural hour. Read-only server summaries; never changes App.store. */
 const DecisionHourly = {
-    result:null, inFlight:null, lastAttempt:0, error:'', receivedAt:0, resultEpoch:0,
+    result:null, inFlight:null, lastAttempt:0, error:'', clockBaseAt:0, resultEpoch:0, sourceKeyAtRequest:'',
     keys:{'raw-ash':'raw_ash','coal-rate':'coal_amount','tail-level':'level','system-switches':'systems',
         desliming:'desliming','heavy-ash':'heavy_ash','heavy-amount':'heavy_amount','float-ash':'float_ash',
         'float-amount':'float_amount','float-press':'float_press','float-unmodeled':'reagent',
@@ -8,9 +8,21 @@ const DecisionHourly = {
         coarse:'coarse_ash',density:'suggested_density'},
     epoch() { return typeof DecisionSources==='undefined'?0:DecisionSources.epoch; },
     clock() { return typeof performance==='undefined'?Date.now():performance.now(); },
+    enabled(page) { return page.view==='gpt'; },
+    sourceKey() {
+        const choices=typeof DecisionSources==='undefined'?{}:DecisionSources.config?.resolved_choices || {};
+        return JSON.stringify(Object.keys(choices).sort().map(key=>[key,choices[key]]));
+    },
     presentation() {
         const r=this.result;
-        const serverNow=r ? Date.parse(r.checked_at)+(this.clock()-this.receivedAt) : NaN;
+        const serverNow=r ? Date.parse(r.checked_at)+(this.clock()-this.clockBaseAt) : NaN;
+        // Another workstation may change the selected sources without changing
+        // this browser's epoch. Wait for a new server check before showing advice.
+        const current=typeof DecisionSources==='undefined'?null:DecisionSources.config?.resolved_choices;
+        const previous=r?.sources?.resolved_choices;
+        // A stale local configuration must not overrule a newer server check.
+        if(Number.isFinite(r?.suggested_density?.value) && this.sourceKey()!==this.sourceKeyAtRequest && current && previous &&
+            [...new Set([...Object.keys(current),...Object.keys(previous)])].some(key=>current[key]!==previous[key])) return null;
         return r && this.resultEpoch===this.epoch() && serverNow<Date.parse(r.period.apply_end) ? r : null;
     },
     pending() { return !this.presentation() && !!this.inFlight; },
@@ -108,22 +120,37 @@ const DecisionHourly = {
         return gaps;
     },
     gapClass(gap) { return gap ? gap.severity==='error'?' is-hourly-gap':' is-hourly-warning' : ''; },
+    summary(page,root) {
+        if(!this.enabled(page) || page.hourMode() || !root) return '';
+        const r=this.presentation(), value=r?.suggested_density?.value, available=Number.isFinite(value);
+        const gap=r?this.dataGaps(r).get('density'):null;
+        const label=available?'小时建议':r?'暂缓':this.error?'读取失败':'读取中';
+        const reason=r?.suggested_density?.reason || this.error || '正在读取上一小时工况建议';
+        const direction={up:'整体上调',down:'整体下调',stable:'保持'}[r?.guidance?.direction] || '小时建议';
+        const note=available?direction:gap?.message || reason;
+        const statusClass=this.gapClass(gap) || (r && !available?' is-hourly-warning':'');
+        return `<section class="decision-node decision-hourly-summary${statusClass}" data-decision-key="hourly-summary" aria-label="本小时建议密度" aria-busy="${this.pending()}" style="left:${root.x}px;top:${root.y-225}px;width:${root.w}px"><span class="decision-node-heading">本小时建议密度<span class="decision-badge">${label}</span></span><span class="decision-node-value">${page.number(value,3)} <span class="decision-root-unit">g/cm³</span></span><span class="decision-node-source"><span>${page.escape(r?`用于 ${r.period.apply_label} · ${r.density_label || ''}`:'等待适用时段')}</span><span>${page.escape(r?`依据 ${r.period.label} 工况`:'上一完整小时统计')}</span><span class="decision-hourly-summary-note" title="${page.escape(reason)}">${page.escape(note)}</span></span></section>`;
+    },
     async update(page,force=false) {
-        if(!page.hourMode() || this.inFlight || (!force && Date.now()-this.lastAttempt<4500)) return;
-        const epoch=this.epoch();
+        if(!this.enabled(page) || this.inFlight || (typeof DecisionSources!=='undefined' && DecisionSources.saving) ||
+            (!force && Date.now()-this.lastAttempt<4500)) return;
+        const epoch=this.epoch(), requestedAt=this.clock(), sourceKey=this.sourceKey();
         this.lastAttempt=Date.now(); this.error='';
         const work=(async()=>{
             try {
                 const result=await Api.getDecisionHourly();
                 if(epoch!==this.epoch()) return;
-                this.result=result; this.receivedAt=this.clock(); this.resultEpoch=epoch;
+                // Include request time conservatively, so a slow response cannot
+                // extend an old recommendation beyond its applicable hour.
+                this.result=result; this.clockBaseAt=requestedAt; this.resultEpoch=epoch; this.sourceKeyAtRequest=sourceKey;
             } catch(error) { if(epoch===this.epoch()) {this.result=null; this.error=error.message || '小时统计读取失败';} }
         })();
         this.inFlight=work;
         await work;
         this.inFlight=null;
-        if(page.active() && page.hourMode()) {
-            page.renderGraph(); page.renderContext(); page.renderInspector();
+        if(page.active() && this.enabled(page)) {
+            page.renderGraph();
+            if(page.hourMode()) { page.renderContext(); page.renderInspector(); }
             if(epoch!==this.epoch()) this.update(page,true);
         }
     },
