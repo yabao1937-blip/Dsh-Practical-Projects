@@ -16,7 +16,12 @@ const DecisionHourly = {
     pending() { return !this.presentation() && !!this.inFlight; },
     dataGaps(result=this.presentation()) {
         const gaps=new Map(), advice=result?.suggested_density;
-        if(!advice || Number.isFinite(advice.value)) return gaps;
+        if(!advice) return gaps;
+        const blocked=!Number.isFinite(advice.value), coverage=result.coverage || {};
+        const coverageLow=Number.isFinite(coverage.ratio) && coverage.ratio<coverage.required_ratio;
+        const gapLong=Number.isFinite(coverage.longest_gap_seconds) && coverage.longest_gap_seconds>coverage.max_gap_seconds;
+        const adviceGap=blocked && (coverageLow || gapLong);
+        const put=(id,severity,label,message,reason=message)=>gaps.set(id,{severity,label,message,reason});
         // Only inputs used by the recommendation chain. Reference-only cards do
         // not become blockers, and one carried manual reading is still valid.
         const fields={'raw-ash':'raw_ash','coal-rate':'coal_amount','tail-level':'level',
@@ -25,23 +30,30 @@ const DecisionHourly = {
             coarse:'coarse_ash','total-ash':'total_ash'};
         for(const [id,key] of Object.entries(fields)) {
             const cell=result.cells?.[key];
-            if(!Number.isFinite(cell?.value) || ['missing','held','invalid'].includes(cell.status))
-                gaps.set(id,cell?.reason || '该小时缺少有效数据');
+            if(!Number.isFinite(cell?.value) || ['missing','held','invalid'].includes(cell.status)) {
+                // Missing computed history does not prove an input failure. A
+                // weighted total can also lack flow pairing despite valid advice.
+                const error=adviceGap && !['coarse_ash','heavy_amount','total_ash'].includes(key);
+                put(id,error?'error':'warning',error?'数据不足':'统计缺数',cell?.reason || '该小时缺少有效数据');
+            }
         }
         const groups={'system-switches':['systems',['401','402','A','B']],desliming:['desliming',['473','474']]};
         for(const [id,[key,labels]] of Object.entries(groups)) {
             const missing=labels.filter(label=>!Number.isFinite(result.cells?.[key]?.components?.[label]?.value));
-            if(missing.length) gaps.set(id,`${missing.join('、')} 状态缺少有效数据`);
+            if(missing.length) put(id,adviceGap?'error':'warning',adviceGap?'数据不足':'统计缺数',`${missing.join('、')} 状态缺少有效数据`);
         }
         const basis=result.density_basis || {value:result.guidance?.rhoCur,observed_at:result.guidance?.basis_at};
         const age=(Date.parse(result.period?.end)-Date.parse(basis.observed_at))/1000;
-        if(!Number.isFinite(basis.value) || basis.value<=0 || Math.abs(basis.value-1)<=1e-9 ||
-            ['missing','held','invalid'].includes(basis.status) || !(age>0 && age<=30))
-            gaps.set('density-current','小时末 30 秒内没有有效实测密度；小时均值仅供查看');
+        const basisMissing=!Number.isFinite(basis.value) || basis.value<=0 || Math.abs(basis.value-1)<=1e-9 ||
+            ['missing','held','invalid'].includes(basis.status) || !(age>0 && age<=30);
+        if(blocked && basisMissing)
+            put('density-current','error','基准缺失','小时末 30 秒内没有有效实测密度；小时均值仅供查看');
         // A valid hourly mean can conceal a period of missing/held readings.
         // Use recorded segment quality, never infer sensor gaps from sample counts.
         const valid=new Set(['good','manual','historical','default','predicted','calculated','average','carried']);
-        const missingSeconds=new Map();
+        const missing=new Map(), cadence=coverage.cadence_seconds, expected=coverage.expected_count;
+        const firstSlot=Date.parse(result.period?.start)/1000/cadence;
+        const slotEvidence=Number.isInteger(firstSlot) && Number.isInteger(expected) && expected>0 && cadence>0;
         for(const segment of result.evidence?.segments || []) {
             const affected=new Set();
             for(const [id,key] of Object.entries(fields)) {
@@ -52,20 +64,50 @@ const DecisionHourly = {
                 const switches=segment.state?.switches?.[key];
                 if(switches && labels.some(label=>typeof switches[label]!=='boolean')) affected.add(id);
             }
-            for(const id of affected) missingSeconds.set(id,(missingSeconds.get(id)||0)+Math.max(0,segment.duration_seconds||0));
+            for(const id of affected) {
+                const entry=missing.get(id) || {seconds:0,slots:new Set()};
+                entry.seconds+=Math.max(0,segment.duration_seconds||0);
+                // Only recorded invalid slots can be attributed to this input.
+                // Do not bridge unrecorded periods or use wall time as slot coverage.
+                if(slotEvidence && Number.isInteger(segment.first_slot) && Number.isInteger(segment.last_slot))
+                    for(let slot=Math.max(firstSlot,segment.first_slot);slot<=Math.min(firstSlot+expected-1,segment.last_slot);slot++) entry.slots.add(slot);
+                missing.set(id,entry);
+            }
         }
-        for(const [id,seconds] of missingSeconds) if(!gaps.has(id))
-            gaps.set(id,seconds>0?`小时内约 ${Math.round(seconds)} 秒无有效数据；显示其余有效均值`:'小时内存在无效数据；显示其余有效均值');
+        for(const [id,{seconds,slots}] of missing) {
+            let longest=0,run=0,previous=-Infinity;
+            for(const slot of [...slots].sort((a,b)=>a-b)) {
+                run=slot===previous+1?run+1:1; longest=Math.max(longest,run); previous=slot;
+            }
+            const tooLong=longest*cadence>coverage.max_gap_seconds;
+            const tooFew=slotEvidence && 1-slots.size/expected<coverage.required_ratio;
+            const error=adviceGap && (tooLong || tooFew);
+            const existing=gaps.get(id);
+            if(existing && (existing.severity==='error' || !error)) continue;
+            const message=error ? tooLong?`该项连续无效 ${longest*cadence} 秒，超过 ${coverage.max_gap_seconds} 秒门槛`:
+                `该项无效时隙占比 ${(slots.size/expected*100).toFixed(1)}%，有效覆盖不足 ${coverage.required_ratio*100}%` :
+                seconds>0?`小时内累计约 ${Math.round(seconds)} 秒无效；显示其余有效均值`:'小时内存在无效数据；显示其余有效均值';
+            put(id,error?'error':'warning',error?'数据不足':seconds>0 && seconds<=60?'短时缺失':'部分缺失',message,
+                message+(error?'；该项缺失已超过小时建议的数据门槛':'；局部缺失提示，不代表该项导致建议暂缓'));
+        }
         for(const [id,children] of [['heavy',['heavy-ash','heavy-amount']],['float',['float-ash','float-amount']]]) {
-            const reasons=children.filter(key=>gaps.has(key)).map(key=>gaps.get(key));
-            if(reasons.length) gaps.set(id,[...new Set(reasons)].join('；'));
+            const entries=children.map(key=>gaps.get(key)).filter(Boolean);
+            if(entries.length) {
+                const error=entries.some(g=>g.severity==='error');
+                put(id,error?'error':'warning',error?'数据不足':'部分缺失',
+                    [...new Set(entries.map(g=>g.message))].join('；'),[...new Set(entries.map(g=>g.reason))].join('；'));
+            }
         }
-        const coverage=result.coverage || {};
-        const adviceGap=Number.isFinite(coverage.ratio) && coverage.ratio<coverage.required_ratio ||
-            Number.isFinite(coverage.longest_gap_seconds) && coverage.longest_gap_seconds>coverage.max_gap_seconds;
-        if(gaps.size || adviceGap) gaps.set('density',advice.reason || '有效建议记录不足，暂不调密');
+        if(adviceGap || blocked && basisMissing) {
+            const messages=[];
+            if(coverageLow) messages.push(`有效建议 ${(coverage.ratio*100).toFixed(1)}%（需 ≥${coverage.required_ratio*100}%）`);
+            if(gapLong) messages.push(`连续无有效建议 ${coverage.longest_gap_seconds} 秒（限 ${coverage.max_gap_seconds} 秒）`);
+            if(basisMissing) messages.push('小时末密度基准缺失');
+            put('density','error','建议不足',messages.join('；'),advice.reason || messages.join('；'));
+        }
         return gaps;
     },
+    gapClass(gap) { return gap ? gap.severity==='error'?' is-hourly-gap':' is-hourly-warning' : ''; },
     async update(page,force=false) {
         if(!page.hourMode() || this.inFlight || (!force && Date.now()-this.lastAttempt<4500)) return;
         const epoch=this.epoch();
@@ -118,7 +160,7 @@ const DecisionHourly = {
         const r=this.presentation(),d=this.display(page,node),c=r?.cells?.[this.keys[node.id]],pairs=[
             ['统计时段',r?.period.label || '等待读取'],['显示值',d.value],['统计口径',d.reason || '左侧两项小时统计汇总']];
         const gap=this.dataGaps(r).get(node.id);
-        if(gap) pairs.unshift(['数据缺口',gap]);
+        if(gap) pairs.unshift([gap.label,gap.reason]);
         if(c) {
             if(c.sample_count!==undefined) pairs.push(['有效样本',String(c.sample_count)],['排除样本',String(c.excluded_count)]);
             if(c.source) pairs.push(['来源',c.source]);

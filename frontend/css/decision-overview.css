@@ -252,10 +252,11 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .decision-float-analysis .decision-analysis-data summary { color: var(--ds-ink); }
 .decision-view-switch button:disabled { opacity:.4; cursor:default; }
 .decision-hour-status { color:var(--dm-blue); }
-.decision-workspace { --dm-gap:#ff9999; --dm-gap-bg:#382130; }
-.decision-workspace.is-light { --dm-gap:#b42332; --dm-gap-bg:#fff0f0; }
-.decision-workspace .decision-node.is-hourly-gap,
-.decision-workspace .decision-formula.is-hourly-gap { --dm-node-accent:var(--dm-gap); border-color:var(--dm-gap); background:var(--dm-gap-bg); color:var(--dm-gap); }
-.decision-workspace .decision-node.is-hourly-gap:is(:hover,.is-selected) { outline-color:var(--dm-gap); border-color:var(--dm-gap); background:var(--dm-gap-bg); box-shadow:3px 3px 0 color-mix(in srgb,var(--dm-gap) 20%,transparent); }
-.decision-workspace .is-hourly-gap :is(.decision-node-heading,.decision-node-value,.decision-node-source,.decision-root-unit,strong) { color:var(--dm-gap); }
-.decision-workspace .is-hourly-gap .decision-badge { color:var(--dm-gap); border-color:var(--dm-gap); }
+.decision-workspace { --dm-gap:#ff9999; --dm-gap-bg:#382130; --dm-warning:#f5cc78; --dm-warning-bg:#352d21; }
+.decision-workspace.is-light { --dm-gap:#b42332; --dm-gap-bg:#fff0f0; --dm-warning:#855900; --dm-warning-bg:#fff8df; }
+.decision-workspace .is-hourly-gap { --dm-quality:var(--dm-gap); --dm-quality-bg:var(--dm-gap-bg); }
+.decision-workspace .is-hourly-warning { --dm-quality:var(--dm-warning); --dm-quality-bg:var(--dm-warning-bg); }
+.decision-workspace :is(.decision-node,.decision-formula):is(.is-hourly-gap,.is-hourly-warning) { --dm-node-accent:var(--dm-quality); border-color:var(--dm-quality); background:var(--dm-quality-bg); color:var(--dm-quality); }
+.decision-workspace .decision-node:is(.is-hourly-gap,.is-hourly-warning):is(:hover,.is-selected) { outline-color:var(--dm-quality); border-color:var(--dm-quality); background:var(--dm-quality-bg); box-shadow:3px 3px 0 color-mix(in srgb,var(--dm-quality) 20%,transparent); }
+.decision-workspace :is(.is-hourly-gap,.is-hourly-warning) :is(.decision-node-heading,.decision-node-value,.decision-node-source,.decision-root-unit,strong) { color:var(--dm-quality); }
+.decision-workspace :is(.is-hourly-gap,.is-hourly-warning) .decision-badge { color:var(--dm-quality); border-color:var(--dm-quality); }
