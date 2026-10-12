@@ -22,7 +22,7 @@ const DecisionOverviewPage = {
     hourMode() { return this.view==='gpt' && this.aggregationMode==='hourly' && typeof DecisionHourly!=='undefined'; },
     instantLayout() { return this.view==='gpt' && !this.hourMode(); },
     graphWidth() { return this.instantLayout() ? 1720 : 1540; },
-    graphHeight() { return this.instantLayout() ? 1088 : 970; },
+    graphHeight() { return this.instantLayout() ? 880 : 970; },
     renderHTML(id, html) {
         const host=document.getElementById(id);
         // Keep the legacy production view unchanged. GPT refreshes patch existing
@@ -713,19 +713,19 @@ const DecisionOverviewPage = {
                 {...family('coarse',1260,715),parent:'coarse',reference:true}),
         ];
         if(this.instantLayout()) {
-            // Equal-height input rows and generous routing gutters. The heavy
-            // and flotation summaries sit at the midpoint of their own inputs;
-            // current density, guidance and coarse ash share the center row.
+            // Small inputs feed medium summaries and large recommendations.
+            // Summaries stay centered on their inputs; the middle row is shared
+            // by current density, guidance and coarse ash.
             const layout={
-                density:{x:718,y:433,w:285,h:222},
-                heavy:{x:388,y:234,w:240,h:164}, float:{x:388,y:687,w:240,h:170},
-                coarse:{x:1092,y:433,w:240,h:222}, 'density-current':{x:388,y:480,w:240,h:128},
+                density:{x:688,y:316,w:344,h:248,summaryHeight:248,summaryGap:28},
+                heavy:{x:328,y:169,w:280,h:176}, float:{x:328,y:535,w:280,h:176},
+                coarse:{x:1112,y:344,w:280,h:192}, 'density-current':{x:352,y:390,w:232,h:100},
             };
             ['heavy-ash','heavy-amount','float-ash','float-amount','float-press','float-unmodeled'].forEach((id,i)=>{
-                layout[id]={x:24,y:176+152*i,w:280,h:128};
+                layout[id]={x:24,y:146+122*i,w:232,h:100};
             });
             ['raw-ash','coal-rate','system-switches','desliming','tail-level','coarse-amount','coarse-slime'].forEach((id,i)=>{
-                layout[id]={x:1416,y:24+152*i,w:280,h:128};
+                layout[id]={x:1464,y:24+122*i,w:232,h:100};
             });
             for(const node of nodes) Object.assign(node,layout[node.id]);
         }
@@ -828,7 +828,7 @@ const DecisionOverviewPage = {
             const trace = flows || this.liveMode() ? `<path data-decision-key="flow-${node.id}" class="decision-flow${highlight ? ' is-highlight' : ''}${flows?'':' is-inactive'}" d="${path}" pathLength="100" style="--dm-flow-color:${colors[node.family]};animation-delay:${phase}s"/>` : '';
             return `<path class="decision-edge${displayReference ? ' is-reference' : ''}${highlight ? ' is-highlight' : ''}" data-decision-from="${node.id}" data-decision-to="${parent.id}" d="${path}" stroke="${colors[node.family]}" marker-end="url(#decision-arrow-${node.family})"/>${trace}`;
         }).join('');
-        const hourLink=hourSummary?`<path class="decision-edge decision-hourly-link" data-decision-key="hourly-link" data-decision-from="density" data-decision-to="hourly-summary" d="M ${densityRoot.x+densityRoot.w/2} ${densityRoot.y} V ${densityRoot.y-24+2}" stroke="${colors.hourly}" marker-end="url(#decision-arrow-hourly)"/>`:'';
+        const hourLink=hourSummary?`<path class="decision-edge decision-hourly-link" data-decision-key="hourly-link" data-decision-from="density" data-decision-to="hourly-summary" d="M ${densityRoot.x+densityRoot.w/2} ${densityRoot.y} V ${densityRoot.y-(densityRoot.summaryGap??24)+2}" stroke="${colors.hourly}" marker-end="url(#decision-arrow-hourly)"/>`:'';
         const markers = Object.entries(colors).map(([key,color]) => `<marker id="decision-arrow-${key}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8" fill="${color}"/></marker>`).join('');
         const cards = this.nodes.map((node,index) => {
             const active = node.id === this.selected;
