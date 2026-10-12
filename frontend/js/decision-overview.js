@@ -404,6 +404,11 @@ const DecisionOverviewPage = {
             if (node) { this.select(node.dataset.decisionNode); return; }
             if (!event.target.closest('.decision-formula,button,a,input,select,textarea,label,[contenteditable="true"]')) this.closeInspector(false);
         });
+        let totalAlignFrame=null;
+        document.getElementById('decision-canvas-scroll').addEventListener('scroll',()=>{
+            if(totalAlignFrame) return;
+            totalAlignFrame=requestAnimationFrame(()=>{totalAlignFrame=null;this.alignToolbarTotal();});
+        },{passive:true});
         document.getElementById('decision-inspector').addEventListener('change', event => {
             if (event.target.id === 'decision-source-point' && !this.sourceLocked(this.selected)) {
                 if(this.sharedSources()) { DecisionSources.change(this,this.selected,event.target.value); return; }
@@ -550,12 +555,27 @@ const DecisionOverviewPage = {
         inspector.style.setProperty('--di-width',`${width}px`);
         inspector.style.setProperty('--di-height',`${innerHeight-margin-top}px`);
     },
+    alignToolbarTotal() {
+        const total=document.getElementById('decision-toolbar-total'), toolbar=total?.parentElement;
+        if(!toolbar) return;
+        toolbar.classList.remove('has-total-row');
+        if(total.hidden) return;
+        const density=document.querySelector('#decision-board [data-decision-node="density"]');
+        if(!density) return;
+        const bar=toolbar.getBoundingClientRect(), card=density.getBoundingClientRect();
+        const half=total.offsetWidth/2, center=card.left+card.width/2-bar.left;
+        total.style.left=`${Math.max(half+12,Math.min(bar.width-half-12,center))}px`;
+        const ash=total.getBoundingClientRect();
+        const actions=document.getElementById('decision-actions').getBoundingClientRect();
+        const zoom=toolbar.querySelector('.decision-zoom').getBoundingClientRect();
+        toolbar.classList.toggle('has-total-row',ash.left<actions.right+16 || ash.right>zoom.left-16);
+    },
     fit() {
         const viewport = document.getElementById('decision-canvas-scroll');
         const scale = this.zoom ?? Math.min(1, Math.max(.65, viewport.clientWidth / 1540));
         const instant=this.instantLayout(), height=this.graphHeight();
         const geometryKey=`${scale}|${viewport.clientWidth}|${innerHeight}|${height}`;
-        if(this.liveMode() && this.fitKey===geometryKey) { this.queueInspectorPosition(); return; }
+        if(this.liveMode() && this.fitKey===geometryKey) { this.alignToolbarTotal(); this.queueInspectorPosition(); return; }
         this.fitKey=geometryKey;
         this.actualZoom = scale;
         const board=document.getElementById('decision-board');
@@ -565,6 +585,7 @@ const DecisionOverviewPage = {
         const space = document.getElementById('decision-canvas-space');
         space.style.width = `${1540 * scale}px`; space.style.height = `${height * scale}px`;
         document.querySelectorAll('[data-instant-action]').forEach(button=>{button.hidden=!instant;});
+        this.alignToolbarTotal();
         this.background?.resize();
         document.getElementById('decision-fit').textContent = `适应画布 · ${Math.round(scale * 100)}%`;
         this.queueInspectorPosition(true);
@@ -827,8 +848,10 @@ const DecisionOverviewPage = {
         const totalReason=this.liveMode() ? pending?'更新中 · 上轮结果仅供对照':shown?.total_ash?.reason || (hourly?DecisionHourly.error:DecisionRealtime.error) || '正在计算' : '';
         const total=this.liveMode()?`<strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'产煤量加权总灰分':'小时平均总灰分'):pending?'上轮总灰分':'预测总灰分'} ${this.number(shown?.total_ash?.value,2,'%')}</strong><span title="${this.escape(totalReason)}">${this.escape(totalReason.length>45?(hourly && Number.isFinite(shown?.total_ash?.value)?'按已保存口径统计 · 详见小时灰分': '输入待补充，点击建议密度查看原因'):totalReason)}</span>`:`公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}`;
         const ashHistory=this.view==='gpt'?'<button type="button" class="decision-ash-open" data-ash-history aria-haspopup="dialog">查看小时灰分 ↗</button><button type="button" class="decision-ash-open" data-evidence-open>工况分段 / 调密跟踪 ↗</button>':'';
+        this.renderHTML('decision-toolbar-total',this.instantLayout()?`<span class="decision-total-label">预测总灰分</span><strong>${this.number(this.liveMode()?shown?.total_ash?.value:s.formula,2)}<small> %</small></strong>`:'');
+        document.getElementById('decision-toolbar-total').hidden=!this.instantLayout();
         const totalPanel=this.instantLayout()
-            ? `<section class="decision-total-ash" data-decision-key="total-ash" aria-label="预测总灰分" title="${this.escape('三组分质量平衡：Σ（组分灰分 × 组分煤量）/ Σ 组分煤量；'+totalReason)}"><span class="decision-total-label">${pending?'上轮总灰分':'预测总灰分'}</span><strong>${this.number(this.liveMode()?shown?.total_ash?.value:s.formula,2)}<small> %</small></strong>${totalReason?`<span class="decision-total-status">${this.escape(totalReason)}</span>`:''}</section>`
+            ? ''
             : `<div class="decision-formula${hourly?DecisionHourly.gapClass(hourlyGaps.get('total-ash')):''}" title="${this.escape(hourlyGaps.get('total-ash')?.reason || '')}"><strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'逐次质量平衡 · 产煤量加权':'逐次质量平衡 · 小时平均'):'三组分质量平衡'}</strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'Σ（逐次总灰分 × 实际产煤量）/ Σ 实际产煤量':'先按各次组分灰分和煤量计算总灰分，再对有效结果求平均'):'总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量'}<br>${total}${ashHistory}</div>`;
         this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 1540 ${this.graphHeight()}" style="height:${this.graphHeight()}px"><defs>${markers}</defs>${paths}${hourLink}</svg>${cards}${hourSummary}${totalPanel}`);
     },
