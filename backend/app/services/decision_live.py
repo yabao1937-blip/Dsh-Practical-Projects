@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from .density import calc_total_ash, compute_density_guidance, DENSITY_GUIDE
 from .guidance import density_guard_state
 from .modeling import MLR_FEATURES, predict_coarse_ash
-from ..gpt_coarse.predict import FEATURES as EXPERT_FEATURES, valid as valid_expert, explain as explain_expert
+from ..gpt_coarse.runtime import ENGINES, features as expert_features, valid as valid_expert, explain as explain_expert
 from ..gpt_coarse.timing import POLICY as TIMING_POLICY, LEVEL_LAG_SECONDS, LEVEL_TOLERANCE_SECONDS
 
 LABELS = dict(raw_ash='原煤灰分', coal_amount='入洗原煤量', level='精磁尾液位',
@@ -24,7 +24,7 @@ def numeric(value):
 
 def gpt_group(store):
     expert = store.get('gptExpertModel')
-    if isinstance(expert, dict) and expert.get('production') == 'expert9':
+    if isinstance(expert, dict) and expert.get('production') in ENGINES:
         return expert
     def is_gpt(group):
         if not isinstance(group, dict):
@@ -78,8 +78,9 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
     group = gpt_group(store)
     method = (group or {}).get('production')
     model = (group or {}).get(method) or {}
-    expert = method == 'expert9'
-    features_used = EXPERT_FEATURES if expert else MLR_FEATURES
+    expert = method in ENGINES
+    features_used = expert_features(method) if expert else MLR_FEATURES
+    expert_name = '八因子' if method == 'expert8' else '九因子'
     names = model.get('feature_names', model.get('featureNames', MLR_FEATURES))
     valid_model = (method in ('mlr','pls') and numeric(model.get('intercept')) and names == MLR_FEATURES
                    and len(model.get('coefs') or []) == len(MLR_FEATURES) and all(numeric(v) for v in model['coefs']))
@@ -88,7 +89,7 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
         valid_model = valid_model and len(bounds) == len(MLR_FEATURES) and all(
             b is None or (isinstance(b,list) and len(b)==2 and all(numeric(v) for v in b) and b[0]<=b[1]) for b in bounds)
     if expert:
-        valid_model = valid_expert(model)
+        valid_model = valid_expert(model, method)
     model_id = hashlib.sha256(json.dumps(model, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16] if valid_model else None
     result = dict(policy='decision-live-v1', generated_at=stamp, inputs=cells,
         model=dict(engine='gpt', method=method, trained_at=(group or {}).get('trainedAt'), id=model_id),
@@ -97,7 +98,7 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
         target=dict(min=target_min,max=target_max))
     if expert:
         result['model'].update(revision=group.get('revision'), artifact_id=group.get('artifact_id'),
-                               activated_at=group.get('activated_at'), label='专家基准九因子 · 待现场验证')
+                               activated_at=group.get('activated_at'), label=f'专家基准{expert_name} · 待现场验证')
     expert_detail = None
     feature_errors = [error for k in features_used if (error := problem(k))]
     if feature_errors:
@@ -110,7 +111,7 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
             raw = features[k]
             used = min(bounds[j][1],max(bounds[j][0],raw)) if model.get('inputPolicy') == 'clip-training-range' and bounds[j] else raw
             result['features'].append(dict(key=k, raw=raw, used=used, clipped=used!=raw))
-        expert_detail = explain_expert(features, model) if expert else None
+        expert_detail = explain_expert(features, model, method) if expert else None
         prediction = expert_detail['value'] if expert_detail else None if expert else predict_coarse_ash(features, model)
         if expert_detail:
             result['features'] = expert_detail['features']
@@ -121,7 +122,7 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
         if numeric(prediction) and 0 <= prediction <= 100:
             held = any(cells[k]['status'] in ('held','stopped') for k in features_used)
             result['coarse_ash'] = output(prediction, 'held' if held else 'predicted', '采用沿用输入，仅供观察' if held else
-                                         'GPT专家基准九因子预测；待现场验证' if expert else 'GPT 保存模型实时预测')
+                                         f'GPT专家基准{expert_name}预测；待现场验证' if expert else 'GPT 保存模型实时预测')
         else:
             result['coarse_ash'] = output(reason='模型预测超出有效灰分范围')
     amount_keys = ('belt501','belt502','float_amount','coarse_amount')
@@ -169,7 +170,8 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
         advice_errors.append(result['total_ash']['reason'])
     if error := problem('density'):
         advice_errors.append(error)
-    held = [LABELS[k] for k,c in cells.items() if k in LABELS and c.get('status') in ('held','stopped')]
+    held = [LABELS[k] for k,c in cells.items() if k in LABELS and c.get('status') in ('held','stopped')
+            and not (method == 'expert8' and k == 'raw_ash')]
     if held:
         advice_errors.append('输入沿用或设备停机，暂缓调密：'+'、'.join(held))
     if not problem('is_stoppage') and cells['is_stoppage']['value'] == 1:
@@ -182,7 +184,7 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
     guard_store = deepcopy(store)
     times = []
     for key,c in cells.items():
-        if key == 'density':
+        if key == 'density' or (method == 'expert8' and key == 'raw_ash'):
             continue  # A density refresh alone is not new ash-driving data.
         try:
             observed = datetime.fromisoformat(c.get('observed_at') or '')

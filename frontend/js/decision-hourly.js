@@ -22,7 +22,8 @@ const DecisionHourly = {
         const previous=r?.sources?.resolved_choices;
         // A stale local configuration must not overrule a newer server check.
         if(Number.isFinite(r?.suggested_density?.value) && this.sourceKey()!==this.sourceKeyAtRequest && current && previous &&
-            [...new Set([...Object.keys(current),...Object.keys(previous)])].some(key=>current[key]!==previous[key])) return null;
+            [...new Set([...Object.keys(current),...Object.keys(previous)])].some(key=>
+                !(r.model?.method==='expert8' && key==='raw-ash') && current[key]!==previous[key])) return null;
         return r && this.resultEpoch===this.epoch() && serverNow<Date.parse(r.period.apply_end) ? r : null;
     },
     pending() { return !this.presentation() && !!this.inFlight; },
@@ -40,12 +41,13 @@ const DecisionHourly = {
             'heavy-ash':'heavy_ash','heavy-amount':'heavy_amount','float-ash':'float_ash',
             'float-amount':'float_amount','coarse-amount':'coarse_amount','density-current':'density',
             coarse:'coarse_ash','total-ash':'total_ash'};
+        const referenceOnly=id=>result.model?.method==='expert8' && id==='raw-ash';
         for(const [id,key] of Object.entries(fields)) {
             const cell=result.cells?.[key];
             if(!Number.isFinite(cell?.value) || ['missing','held','invalid'].includes(cell.status)) {
                 // Missing computed history does not prove an input failure. A
                 // weighted total can also lack flow pairing despite valid advice.
-                const error=adviceGap && !['coarse_ash','heavy_amount','total_ash'].includes(key);
+                const error=adviceGap && !referenceOnly(id) && !['coarse_ash','heavy_amount','total_ash'].includes(key);
                 put(id,error?'error':'warning',error?'数据不足':'统计缺数',cell?.reason || '该小时缺少有效数据');
             }
         }
@@ -93,7 +95,7 @@ const DecisionHourly = {
             }
             const tooLong=longest*cadence>coverage.max_gap_seconds;
             const tooFew=slotEvidence && 1-slots.size/expected<coverage.required_ratio;
-            const error=adviceGap && (tooLong || tooFew);
+            const error=adviceGap && !referenceOnly(id) && (tooLong || tooFew);
             const existing=gaps.get(id);
             if(existing && (existing.severity==='error' || !error)) continue;
             const message=error ? tooLong?`该项连续无效 ${longest*cadence} 秒，超过 ${coverage.max_gap_seconds} 秒门槛`:

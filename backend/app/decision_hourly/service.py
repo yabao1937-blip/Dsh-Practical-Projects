@@ -56,11 +56,15 @@ def context_definition(result, store):
         parts = c.get('components') or []
         for part in parts.values() if isinstance(parts,dict) else parts:
             collect(part)
-    for c in result['cells'].values():
-        collect(c)
+    for key,c in result['cells'].items():
+        if method != 'expert8' or key != 'raw_ash':
+            collect(c)
+    sources = deepcopy(result['sources']['resolved_choices'])
+    if method == 'expert8':
+        sources.pop('raw-ash', None)  # Display-only source changes cannot invalidate advice.
     return dict(policy='decision-hourly-v2', evidence_policy=POLICY, segmentation=SEGMENT_POLICY,
-        sources=result['sources']['resolved_choices'],point_definitions=definitions,
-        target=result['target'], model=result['model'], model_definition=deepcopy(model) if method == 'expert9' else
+        sources=sources,point_definitions=definitions,
+        target=result['target'], model=result['model'], model_definition=deepcopy(model) if method in ('expert9','expert8') else
         {k:deepcopy(model[k]) for k in ('intercept','coefs','feature_names','featureNames','inputPolicy','inputBounds','imputeMeans') if k in model},
         density_guide=store.get('densityGuide') or {}, input_timing=deepcopy(result.get('input_timing')))
 
@@ -83,7 +87,7 @@ def record(db, now, result=None, store=None):
         db.flush()
     cells = {k:compact_cell(c) for k,c in result['cells'].items()}
     identities = {k:{f:c.get(f) for f in ('value','status','observed_at','entered_at','source_id','item_id','batch_id')}
-                  for k,c in result['inputs'].items()}
+                  for k,c in result['inputs'].items() if result['model'].get('method') != 'expert8' or k != 'raw_ash'}
     snapshot = {k:deepcopy(result[k]) for k in ('sources','density_label','model','target',
         'coarse_ash','heavy_amount','total_ash','suggested_density','guidance','warnings')}
     snapshot['cells'] = cells

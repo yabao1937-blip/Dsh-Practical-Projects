@@ -128,9 +128,10 @@ const DecisionCoarseCharts = {
         document.getElementById('decision-coarse-factor-caption').textContent=daily?'日级分析模型的标准化系数，仅用于历史分析。':'采样保存模型的标准化系数，保留原生产模型。';
         const note=document.getElementById(this.rootId).querySelector('.decision-analysis-note');
         if(note && !note.dataset.legacyText) note.dataset.legacyText=note.textContent;
-        if(note) note.textContent=s.expert?'按采样：使用当前保存的专家九因子模型，对原表正常生产记录逐条回算；按日：先逐条预测，再将同日实测与预测分别求均值，不重新训练日级模型。日均误差可能因正负误差抵消而减小，不代表单次预测更准确。历史回算不是新的独立验证，化验报告时间尚未记录。上方决策链使用当前采集数据；液位25–75%以外显示边界估算并暂缓调密。':note.dataset.legacyText;
+        const expertName=s.model?.feature_names?.length===8?'八因子':'九因子';
+        if(note) note.textContent=s.expert?`按采样：使用当前保存的专家${expertName}模型，对原表正常生产记录逐条回算；按日：先逐条预测，再将同日实测与预测分别求均值，不重新训练日级模型。日均误差可能因正负误差抵消而减小，不代表单次预测更准确。历史回算不是新的独立验证，化验报告时间尚未记录。上方决策链使用当前采集数据；液位25–75%以外显示边界估算并暂缓调密。`:note.dataset.legacyText;
         if(s.expert) {
-            meta.textContent=`GPT · 专家基准九因子 · ${s.count} 条历史记录 → ${s.rows.length} 个${mode} · 历史回算，非独立验收；按日为逐样本预测后求均值`;
+            meta.textContent=`GPT · 专家基准${expertName} · ${s.count} 条历史记录 → ${s.rows.length} 个${mode} · 历史回算，非独立验收；按日为逐样本预测后求均值`;
             document.getElementById('decision-coarse-factor-caption').textContent='参考工况单因素影响：连续量增加1个历史标准差（受范围限制），开关停止→运行；液位为专家设定，A系统样本不足取0。';
             document.getElementById(this.rootId).querySelectorAll('[data-decision-series="predicted"]').forEach(el=>el.textContent=daily?'GPT 回算日均值':'GPT 逐样本回算');
         }

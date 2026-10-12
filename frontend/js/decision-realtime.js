@@ -68,7 +68,8 @@ const DecisionRealtime = {
             if(this.result) { this.previousResult=this.result; this.previewUntil=Date.now()+5000; }
             this.result=null;
         }
-        const safePreview=Object.values(body.cells).every(c=>Number.isFinite(c.value) && !['missing','held','stopped'].includes(c.status) &&
+        const eight=(this.result || this.previousResult)?.model?.method==='expert8';
+        const safePreview=Object.entries(body.cells).filter(([key])=>!eight || key!=='raw_ash').every(([,c])=>Number.isFinite(c.value) && !['missing','held','stopped'].includes(c.status) &&
             (c.status!=='good' || (Date.now()-Date.parse(c.observed_at)>=-5000 && Date.now()-Date.parse(c.observed_at)<=30000))) &&
             body.cells.is_stoppage.value===0 && body.cells.density.value>0 && body.cells.density.value!==1;
         if(!safePreview) this.previousResult=null;
@@ -125,7 +126,7 @@ const DecisionRealtime = {
         const output=result?.[key], value=output?.value;
         const reason=pending ? result ? '正在更新；显示上一轮结果，仅供对照，本轮完成后自动替换' : '正在按当前输入计算' : output?.reason || this.error || '正在按当前输入计算';
         const available=!pending && Number.isFinite(value) && output.status!=='held';
-        const inputKeys=node.id==='coarse' ? result?.model?.method==='expert9'?result.features.map(f=>f.key):App.MLR_FEATURES : ['density','heavy_ash','float_ash','float_amount','coarse_amount'];
+        const inputKeys=node.id==='coarse' ? ['expert9','expert8'].includes(result?.model?.method)?result.features.map(f=>f.key):App.MLR_FEATURES : ['density','heavy_ash','float_ash','float_amount','coarse_amount'];
         const inputs=inputKeys.map(key=>{
             const c=result?.inputs?.[key] || {};
             const feature=result?.features?.find(f=>f.key===key);
@@ -141,7 +142,7 @@ const DecisionRealtime = {
         return {live:true,calculated:true,pending,bound:false,numericValue:Number.isFinite(value)?value:null,available,held:output?.status==='held',inputs,
             value:page.number(value,node.id==='coarse'?2:3,node.id==='coarse'?'%':''),
             badge:pending?'更新中':available ? node.id==='coarse'?'预测':'建议' : Number.isFinite(value)?'沿用输入':/暂缓|已按|刚调整/.test(reason)?'暂缓':'待计算',
-            source:pending ? result ? '上轮结果 · 等待本轮计算' : '等待本轮计算' : node.id==='coarse' ? `煤量 ${amount.value} · GPT${output?.status==='held'?'沿用输入预测':result?.model?.method==='expert9'?'专家基准预测':'实时预测'}` :
+            source:pending ? result ? '上轮结果 · 等待本轮计算' : '等待本轮计算' : node.id==='coarse' ? `煤量 ${amount.value} · GPT${output?.status==='held'?'沿用输入预测':['expert9','expert8'].includes(result?.model?.method)?'专家基准预测':'实时预测'}` :
                 Number.isFinite(value) ? guide?.direction==='down'?'本步建议 · 下调':guide?.direction==='up'?'本步建议 · 上调':'密度保持' : '等待有效输入',
             formula:node.id==='coarse'?`GPT / ${result?.model?.method?.toUpperCase() || '保存模型'} · ${result?.model?.id || '等待模型'}`:`总灰分 ${page.number(result?.target?.min ?? 8.5,1)}–${page.number(result?.target?.max ?? 9.0,1)}% 范围内保持，范围外向最近边界调整`,
             reason,title:reason,sampleAt:result?.generated_at};

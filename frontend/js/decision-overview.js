@@ -636,7 +636,8 @@ const DecisionOverviewPage = {
                 const name = s.reader.FEATURE_LABELS[field.key];
                 return `${name}：记录 ${this.number(field.raw)}；模型采用 ${this.number(field.used)}${!s.model ? '（查看模型尚未训练）' : field.missing && Number.isFinite(field.used) ? '（缺失，按训练均值补齐）' : field.clipped ? '（超训练范围，已限幅）' : ''}`;
             }).join('；');
-            return n(id,title,value,recordSource(s.coarse),this.liveMode() ? '当前卡片采用的数值参与 GPT 实时预测；各项来源和数据时间见下方。' : `所查看的${this.view === 'gpt' ? ' GPT' : '当前生产'}模型输入。${details}。采集点位尚未绑定业务字段。`,
+            const rawReference=id==='raw-ash' && this.view==='gpt' && typeof GptExpert9!=='undefined' && GptExpert9.group?.production==='expert8';
+            return n(id,title,value,recordSource(s.coarse),rawReference ? '原煤灰分保留采集与展示，不参与当前八因子预测，也不作为建议密度的必要条件。' : this.liveMode() ? '当前卡片采用的数值参与 GPT 实时预测；各项来源和数据时间见下方。' : `所查看的${this.view === 'gpt' ? ' GPT' : '当前生产'}模型输入。${details}。采集点位尚未绑定业务字段。`,
                 {...family('coarse',1260,y),parent:'coarse',numericValue:fields.length===1?fields[0].raw:null,sampleAt:s.coarse?.timestamp,reference:s.previewOnly || !s.model || coarseManual,fields,unit:keys.length === 1 ? (keys[0] === 'coal_amount' ? 't/h' : '%') : '状态'});
         };
         const flags = fields => fields.map(field => {

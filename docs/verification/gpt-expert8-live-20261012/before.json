@@ -1,0 +1,79 @@
+{
+  "files": {
+    "backend/data/train_js.json": "aa09b7a4574ec19be5f840b68f3611394b0584f2ec435b0abd062416f8566bbd",
+    "backend/models/coarse_slime_ash_model.json": "ada805bb538075ff371c149814aa1bef85bcc2a9cdf871994ba045d095afc3e0",
+    "backend/models/gpt_expert9/20261009.json": "2024678f0abad558f7095b306cc6928f76b445f5bd4fb09150c5a3ff9a64dc03",
+    "backend/models/gpt_expert8/20261012/model.json": "c720efc10952802f42e3ec4261ab3b13966aefd89b34f7a21f7906c13f4362a0",
+    "frontend/js/app.js": "e743d8a9921c60ecd22e4acf172d7b6d187685d86c6230f997b4206ae3f60630",
+    "frontend/js/coarse.js": "583646b0883fa280b8f9329346877bc11abb8a833d3725de8c38cfe76d479c72",
+    "backend/app/services/training.py": "25ae63af01f760f4a196d87467ea7d56d203d4853034c0c87c2787a09d0331de",
+    "backend/app/services/training_sklearn.py": "9058ec4c1a7de7f9ae1aedb722187ff5a896ad73b167c7a7084fa25f0c2aacc2",
+    "backend/app/services/modeling.py": "11b05d83db4b7e736682894f6dfb34260dddd015041b04b206c9d6898ac7351d",
+    "backend/app/services/coarse_training.py": "830425609d042bd032af5ac97bd5ed6eccaf659ff3d745fb975880524fbde45f",
+    "backend/app/services/coarse_forward.py": "bb61080640db340240463ba9aeb398473d6bd09e52d70ee0ce7320d56b0ad325",
+    "backend/app/services/coarse_direction.py": "8cd67215990e327d025baeae9c1fbb9ff6974fea744bbd804ad788cc58466cb8",
+    "backend/app/services/density.py": "43155b1f342ff1fc60b4ff39b42b85fffcd883626b5d485b7d60681180575fff",
+    "backend/app/services/guidance.py": "5d63610cfcb6f2c06faa0779e73206a312a13c7401dc3fc6a19e5278de74c8a3"
+  },
+  "tables": {
+    "coarse_models": {
+      "rows": 2,
+      "sha256": "0e80a18be3bda63019c2085853dc4d9e056b327df67cd981dd70752844c9cbf9"
+    },
+    "regression_models": {
+      "rows": 0,
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "coarse_model_history": {
+      "rows": 23,
+      "sha256": "95f0a5a13cec9b3050a85ca96151188eb3649a94d3a08f4e9218ce65a1481a2b"
+    },
+    "gpt_coarse_model_revisions": {
+      "rows": 1,
+      "sha256": "1d1a932a173cb9e2c1e3466e501e4e8d5f19d5c942cacc76af29eac344d96340"
+    },
+    "decision_cycle_hours": {
+      "rows": 16,
+      "sha256": "9d542ca545a0dd732107a868ec5873526a2bb84675043e65f48cb932e6e9cb06"
+    },
+    "hourly_brief_rows": {
+      "rows": 98,
+      "sha256": "f1aa0c7c746da66e66266eaf9d473d713d8998e68dd4eb2cb10a5f45337f98cc"
+    }
+  },
+  "live": {
+    "generated_at": "2026-10-12T03:31:38.539+00:00",
+    "model": {
+      "engine": "gpt",
+      "method": "expert9",
+      "trained_at": "2026-10-09T07:49:02+00:00",
+      "id": "9e41f54accc37ac8",
+      "revision": 1,
+      "artifact_id": "db46f9ca3829bdb0dbe33645f2bf5158227709bb3a342407797437684a03d67c",
+      "activated_at": "2026-10-09T07:49:23.529+00:00",
+      "label": "专家基准九因子 · 待现场验证"
+    },
+    "coarse_ash": {
+      "value": 14.53581930561835,
+      "status": "held",
+      "reason": "采用沿用输入，仅供观察"
+    },
+    "total_ash": {
+      "value": 8.374684458406936,
+      "status": "held",
+      "reason": "含沿用输入，仅供观察"
+    },
+    "suggested_density": {
+      "value": null,
+      "status": "missing",
+      "reason": "输入沿用或设备停机，暂缓调密：原煤灰分"
+    }
+  },
+  "raw_ash": {
+    "value": 40.55921173095703,
+    "raw_value": 0,
+    "status": "held",
+    "observed_at": "2026-10-12T01:04:58.145+00:00",
+    "reason": "设备停机 · 沿用上次非零读数"
+  }
+}

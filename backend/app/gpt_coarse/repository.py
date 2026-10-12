@@ -7,7 +7,7 @@ import json
 from sqlalchemy import select
 
 from .models import GptCoarseRevision
-from .predict import valid
+from .runtime import method
 
 
 def stamp(when=None):
@@ -26,7 +26,10 @@ def active(db, when=None, include_analysis=False):
     if not row:
         return None
     artifact = row.artifact
-    result = dict(engine='gpt', production='expert9', expert9=deepcopy(artifact['model']),
+    selected = method(artifact['model'])
+    if selected is None:
+        return None
+    result = dict(engine='gpt', production=selected, **{selected:deepcopy(artifact['model'])},
                   trainedAt=artifact['trained_at'], activated_at=row.activated_at, revision=row.id,
                   artifact_id=row.artifact_id, n=artifact['model']['n'], range='expert-workbook')
     if include_analysis:
@@ -36,8 +39,9 @@ def active(db, when=None, include_analysis=False):
 
 
 def activate(db, artifact, when=None):
-    if not valid(artifact.get('model')):
-        raise ValueError('无效的GPT专家九因子模型')
+    selected = method(artifact.get('model'))
+    if selected is None or (selected == 'expert8' and artifact.get('status') != 'production_ready'):
+        raise ValueError('无效的GPT专家九因子模型，或八因子候选尚未明确提升为生产版本')
     key = identity(artifact)
     existing = db.scalar(select(GptCoarseRevision).where(GptCoarseRevision.artifact_id == key))
     if existing:
