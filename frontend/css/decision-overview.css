@@ -257,11 +257,17 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .decision-hourly-summary .decision-node-value { font-size:30px; line-height:1.1; }
 .decision-hourly-summary .decision-node-source { display:grid; gap:4px; }
 .decision-hourly-summary .decision-hourly-summary-note { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
-/* Instant recommendations read from a large left value to a quiet bottom-right note. */
-.decision-node:is(.decision-density-instant,.decision-hourly-summary) { padding:16px 18px; gap:6px; justify-content:flex-start; }
-.decision-node:is(.decision-density-instant,.decision-hourly-summary) .decision-node-heading { font-size:22px; line-height:1.25; }
-.decision-node:is(.decision-density-instant,.decision-hourly-summary) .decision-node-value { font-size:44px; line-height:1.1; }
-.decision-node:is(.decision-density-instant,.decision-hourly-summary) .decision-node-source { display:grid; gap:2px; margin-top:auto; text-align:right; line-height:1.4; overflow-wrap:anywhere; }
+/* Give the recommendation its own full-height left column. */
+.decision-node:is(.decision-density-instant,.decision-hourly-summary) { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,1fr); padding:16px 18px; gap:14px; align-items:stretch; }
+.decision-density-main { display:flex; flex-direction:column; justify-content:space-between; min-width:0; }
+.decision-node:is(.decision-density-instant,.decision-hourly-summary) .decision-node-heading { display:block; font-size:24px; line-height:1.3; }
+.decision-density-period { display:block; font-size:15px; font-weight:400; margin-bottom:5px; }
+.decision-node:is(.decision-density-instant,.decision-hourly-summary) .decision-node-value { font-size:52px; line-height:1; white-space:nowrap; }
+.decision-density-main .decision-root-unit { display:block; margin:9px 0 0; font-size:12px; line-height:1.4; }
+.decision-density-meta { display:flex; flex-direction:column; align-items:flex-end; gap:8px; min-width:0; }
+.decision-node:is(.decision-density-instant,.decision-hourly-summary) .decision-node-source { display:grid; gap:4px; margin-top:auto; text-align:right; line-height:1.4; overflow-wrap:anywhere; }
+.decision-density-target { white-space:nowrap; }
+.decision-hourly-summary .decision-density-meta .decision-hourly-summary-note { -webkit-line-clamp:3; }
 .decision-node.decision-density-instant { height:207px; }
 .decision-density-instant .decision-node-source > span:first-child { white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
 .decision-hourly-link { opacity:.9; stroke-width:2.6; }
