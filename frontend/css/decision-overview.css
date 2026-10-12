@@ -266,6 +266,16 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 /* Center switch readings between the heading and the card's bottom edge. */
 .is-instant-layout .decision-node:is(.is-state-group,[data-decision-node="system-switches"],[data-decision-node="desliming"],[data-decision-node="float-press"]) { display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto 1fr; row-gap:0; padding-bottom:0; }
 .is-instant-layout .decision-node:is(.is-state-group,[data-decision-node="system-switches"],[data-decision-node="desliming"],[data-decision-node="float-press"]) > .decision-node-value { align-self:center; }
+.decision-heartbeat { position:absolute; right:0; top:50%; transform:translateY(-50%); width:64px; height:26px; overflow:visible; pointer-events:none; color:var(--dm-node-accent); }
+.decision-heartbeat path { fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; }
+.decision-heartbeat-line { opacity:.45; }
+.decision-heartbeat-scan { stroke-dasharray:18 82; animation:decision-heartbeat-scan 2.4s linear infinite; }
+.decision-heartbeat:not([data-heartbeat-state="running"]) .decision-heartbeat-scan { display:none; }
+.decision-heartbeat[data-heartbeat-state="unavailable"] { color:var(--dm-muted); }
+.decision-heartbeat[data-heartbeat-state="unavailable"] .decision-heartbeat-line { stroke-dasharray:3 4; }
+@keyframes decision-heartbeat-scan { from { stroke-dashoffset:100; } to { stroke-dashoffset:0; } }
+.decision-workspace.is-motion-paused .decision-heartbeat-scan, #page-decision:not(.active) .decision-heartbeat-scan { animation-play-state:paused; visibility:hidden; }
+@media (prefers-reduced-motion:reduce), print { .decision-heartbeat-scan { display:none; animation:none; } }
 .decision-hourly-link { opacity:.9; stroke-width:2.6; }
 /* Toolbar actions stay fixed while the graph scales below them. */
 .decision-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-right:auto; }

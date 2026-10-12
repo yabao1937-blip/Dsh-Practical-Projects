@@ -783,6 +783,53 @@ const DecisionOverviewPage = {
         return ['raw-ash','coal-rate','tail-level','density-current','system-switches','desliming','float-press'].includes(node.id)?'采集':'补录';
     },
 
+    heartbeatState(node,display) {
+        if(!this.instantLayout() || !this.liveMode() || node.type || node.id==='heavy-amount' || !display.bound) return null;
+        const shared=this.sharedSources();
+        const key=typeof DecisionSources!=='undefined'?DecisionSources.nodes[node.id]:null;
+        const cell=shared?DecisionRealtime.result?.cells?.[key]:null;
+        const item=display.item, choice=this.pointChoices[node.id] || '';
+        if(display.manual || display.aggregate || item?.kind==='manual_measurement' || item?.kind==='numeric_average' ||
+            cell?.source_id==='manual-measurements' || choice.startsWith('["manual-measurements",') ||
+            ['manual','historical','default','calculated'].includes(cell?.status) || cell?.point_key==='a303_a304_density_average') return null;
+        if(!item && !choice && !cell?.source_id && !cell?.point_key) return null;
+        // A stopped meter may still display a retained nonzero number. Its heartbeat must be flat.
+        if(display.stopped || cell?.status==='stopped') return {status:'stopped',amplitude:0};
+        const valid=display.available && !display.held && !display.pending && !window.Operations?.telemetryFailed &&
+            item?.available!==false && (!shared || cell?.status==='good');
+        if(!valid) return {status:'unavailable',amplitude:0};
+        const parts=display.components;
+        let ratio;
+        if(parts?.length) {
+            if(!parts.every(p=>p.available && typeof p.value==='boolean')) return {status:'unavailable',amplitude:0};
+            ratio=parts.filter(p=>p.value).length/parts.length;
+            if(!ratio) return {status:'stopped',amplitude:0};
+        } else {
+            const raw=shared?cell?.value:item?.sample?.value;
+            if(typeof raw==='boolean') {
+                if(!raw) return {status:'stopped',amplitude:0};
+                ratio=1;
+            } else {
+                const value=display.numericValue;
+                if(!Number.isFinite(value)) return {status:'unavailable',amplitude:0};
+                if(value===0) return {status:'zero',amplitude:0};
+                const unit=display.unit || node.unit || '';
+                const scale=node.id==='density-current' || /g\/cm/.test(unit)?2:/t\/h/.test(unit)?1000:100;
+                ratio=Math.min(1,Math.abs(value)/scale);
+            }
+        }
+        // A value-driven status illustration, not fabricated sample history.
+        return {status:'running',amplitude:Number((4+6*ratio).toFixed(2))};
+    },
+    heartbeatMarkup(node,display) {
+        const state=this.heartbeatState(node,display);
+        if(!state) return '';
+        const a=state.amplitude, y=f=>Number((14+a*f).toFixed(2));
+        const path=a?`M 0 14 H 16 L 22 ${y(-.2)} L 26 14 L 30 ${y(.35)} L 35 ${y(-1)} L 41 ${y(.6)} L 47 ${y(-.2)} L 52 14 H 72`:'M 0 14 H 72';
+        const label={running:'采集心跳 · 波幅按当前读数归一化示意',stopped:'设备停机',unavailable:'采集不可用或沿用值 · 心跳暂停',zero:'当前采集值为零'}[state.status];
+        return `<svg class="decision-heartbeat" data-decision-key="heartbeat-${node.id}" data-heartbeat-state="${state.status}" viewBox="0 0 72 28" aria-hidden="true" focusable="false"><title>${label}</title><path class="decision-heartbeat-line" d="${path}"/><path class="decision-heartbeat-scan" d="${path}" pathLength="100"/></svg>`;
+    },
+
     renderGraph() {
         const s = this.snapshot, selected = this.nodes.find(n => n.id === this.selected);
         const targetAsh = (typeof CollectPage !== 'undefined' ? CollectPage.instruments.find(i => i.id === 'total_ash') : null);
@@ -831,7 +878,7 @@ const DecisionOverviewPage = {
                 ? `<span class="decision-node-heading">即时建议密度</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>目标灰分 ${targetAshRange}</span></span>`
                 : compact ? `<span class="decision-node-heading">${this.escape(hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}${amountHtml}</span>`
                 : `<span class="decision-node-heading">${this.escape(hourly && root?'本小时建议密度':hourSummary && root?'即时建议密度':hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(gap ? gap.message : root && !this.liveMode() ? node.source : display.source)}</span>${sub}${preview}${compare}</span>`;
-            return `<button type="button" class="decision-node${hourly?DecisionHourly.gapClass(gap):''}${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${display.pending ? ' is-updating' : ''}${(display.bound || display.aggregate || display.calculated) && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}${root && hourSummary?' decision-density-instant':''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" aria-busy="${!!display.pending}"${display.bound || display.aggregate || display.calculated ? ` title="${this.escape(gap?.reason || display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-node-height:${node.h}px;--dm-pulse-delay:${phase}s">${content}</button>`;
+            return `<button type="button" class="decision-node${hourly?DecisionHourly.gapClass(gap):''}${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${display.pending ? ' is-updating' : ''}${(display.bound || display.aggregate || display.calculated) && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}${root && hourSummary?' decision-density-instant':''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" aria-busy="${!!display.pending}"${display.bound || display.aggregate || display.calculated ? ` title="${this.escape(gap?.reason || display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-node-height:${node.h}px;--dm-pulse-delay:${phase}s">${content}${this.heartbeatMarkup(node,display)}</button>`;
         }).join('');
         const shown=hourly?hourResult:this.liveMode()?DecisionRealtime.presentation():null,pending=hourly?DecisionHourly.pending():this.liveMode() && DecisionRealtime.pending();
         const totalReason=this.liveMode() ? pending?'更新中 · 上轮结果仅供对照':shown?.total_ash?.reason || (hourly?DecisionHourly.error:DecisionRealtime.error) || '正在计算' : '';
