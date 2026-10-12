@@ -4,6 +4,7 @@ import json
 import zlib
 from sqlalchemy import select, delete
 from .models import DecisionCycleSample, DecisionCycleHour, DecisionEvidenceArchive
+from .references import resolve_snapshots
 
 
 def archive_old_hour(db, cutoff):
@@ -36,7 +37,8 @@ def archive_old_hour(db, cutoff):
 def read_sample(db, slot):
     row = db.get(DecisionCycleSample,slot)
     if row:
-        return dict(slot=row.slot,sampled_at=row.sampled_at,context_key=row.context_key,snapshot=row.snapshot)
+        return dict(slot=row.slot,sampled_at=row.sampled_at,context_key=row.context_key,
+                    snapshot=resolve_snapshots(db,[row.snapshot])[0])
     from datetime import datetime, timezone
     from ..telemetry.domain import iso_time
     hour = iso_time(datetime.fromtimestamp(slot*5,timezone.utc).replace(minute=0,second=0,microsecond=0))
@@ -46,7 +48,10 @@ def read_sample(db, slot):
     raw = zlib.decompress(saved.payload)
     if hashlib.sha256(raw).hexdigest() != saved.checksum:
         raise ValueError('逐次证据归档校验失败')
-    return next((r for r in json.loads(raw) if r['slot']==slot),None)
+    found = next((r for r in json.loads(raw) if r['slot']==slot),None)
+    if found:
+        found['snapshot'] = resolve_snapshots(db,[found['snapshot']])[0]
+    return found
 
 
 def archived_rows(db, start):
@@ -56,4 +61,6 @@ def archived_rows(db, start):
     raw=zlib.decompress(saved.payload)
     if hashlib.sha256(raw).hexdigest()!=saved.checksum:
         raise ValueError('逐次证据归档校验失败')
-    return json.loads(raw)
+    rows = json.loads(raw)
+    snapshots = resolve_snapshots(db,[r['snapshot'] for r in rows])
+    return [dict(r,snapshot=s) for r,s in zip(rows,snapshots)]

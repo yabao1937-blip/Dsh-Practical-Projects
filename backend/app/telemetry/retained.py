@@ -69,7 +69,7 @@ def point_memory(db, point):
     return result
 
 
-def density_history(db, point, cutoff=None):
+def density_history(db, point, cutoff=None, authoritative=False):
     """Latest same-channel non-1 sample, including non-throttled durable memories."""
     def accepted(sample):
         return (usable_at_receipt(sample, point.config) and valid_density(sample.get("value"))
@@ -78,6 +78,8 @@ def density_history(db, point, cutoff=None):
     memory = (point.latest or {}).get(MEMORY) or {}
     candidates = [s for s in (raw_sample(point.latest), (memory.get("density_before_hour") or {}).get("sample"), memory.get("last_density"),
                   memory.get("last_valid"), memory.get("last_nonzero")) if accepted(s)]
+    if authoritative:
+        candidates = []
     query = select(TelemetryReading).where(
         TelemetryReading.source_id == point.source_id, TelemetryReading.point_key == point.key,
         TelemetryReading.sample["definition_id"].as_string() == definition_id(point.config),

@@ -18,7 +18,7 @@ from ..gpt_coarse.timing import level_mean
 
 def historical_cells(db, start, end, rows):
     from datetime import timedelta
-    inputs = Inputs(db, end-timedelta(microseconds=1))
+    inputs = Inputs(db, end-timedelta(microseconds=1), authoritative=True)
     sources = config_view(db, inputs.hour, inputs)
     fallback = collect_shared(inputs, sources)
     # Use the frozen end-of-hour configuration if it exists (including old point labels).
@@ -37,13 +37,6 @@ def historical_cells(db, start, end, rows):
     for r in db.scalars(select(TelemetryReading).where(
             TelemetryReading.received_at >= iso_time(start), TelemetryReading.received_at < iso_time(end))):
         by_point[(r.source_id, r.point_key)][r.received_at] = {**raw_sample(r.sample), 'batch_id':r.batch_id}
-    # A last raw sample can be newer than the throttled history row.
-    for group in inputs.points.values():
-        for p in group:
-            s = raw_sample(p.latest)
-            if s and iso_time(start) <= s['received_at'] < iso_time(end):
-                by_point[(p.source_id, p.key)][s['received_at']] = s
-
     def point_series(p):
         if p is None:
             return []

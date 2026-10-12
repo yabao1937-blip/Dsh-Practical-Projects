@@ -35,9 +35,10 @@ def business_time(value):
 
 
 class Inputs:
-    def __init__(self, db, hour, live=False):
+    def __init__(self, db, hour, live=False, authoritative=False):
         self.db, self.hour = db, hour
         self.live = live
+        self.authoritative = authoritative
         self.cutoff = iso_time(hour)
         self.points = {}
         for p in db.scalars(select(TelemetryPoint).where(TelemetryPoint.enabled.is_(True))):
@@ -66,7 +67,7 @@ class Inputs:
             return False
 
     def latest(self, point):
-        candidates = [raw_sample(point.latest)] if self.before(point.latest) else []
+        candidates = [raw_sample(point.latest)] if not self.authoritative and self.before(point.latest) else []
         row = self.db.scalar(select(TelemetryReading).where(
             TelemetryReading.source_id == point.source_id, TelemetryReading.point_key == point.key,
             TelemetryReading.received_at <= self.cutoff,
@@ -89,7 +90,7 @@ class Inputs:
 
     def nonzero(self, point):
         cached = ((point.latest or {}).get(MEMORY) or {}).get("last_nonzero")
-        candidates = [cached] if self.before(cached) and usable_at_receipt(cached, point.config) else []
+        candidates = [cached] if not self.authoritative and self.before(cached) and usable_at_receipt(cached, point.config) else []
         query = select(TelemetryReading).where(
             TelemetryReading.source_id == point.source_id, TelemetryReading.point_key == point.key,
             TelemetryReading.received_at <= self.cutoff,
@@ -129,7 +130,7 @@ class Inputs:
             items.append(dict(source_id=p.source_id, key=p.key, item_id=p.config["item_id"],
                 unit=p.config.get("unit", ""), definition_id=definition_id(p.config), sample=sample, as_of=self.cutoff,
                 available=self.usable(p, sample), status="good",
-                last_density_sample=density_history(self.db, p, self.cutoff)))
+                last_density_sample=density_history(self.db, p, self.cutoff, authoritative=self.authoritative)))
         effective = effective_average(items)
         return cell(effective["value"], "KEPServer · A303/A304 平均", effective["received_at"],
                     effective["status"], effective["reason"], sample=effective,

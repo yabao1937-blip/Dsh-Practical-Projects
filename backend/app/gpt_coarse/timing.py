@@ -19,11 +19,9 @@ POLICY = dict(version='gpt-level-lag-v1', level_lag_seconds=LEVEL_LAG_SECONDS,
 def aligned_level(inputs, current):
     """Latest raw event at/before t-90, within 30s; never skip a bad latest event.
 
-    The sparse telemetry archive is augmented by the existing 5s decision archive.
-    That archive keeps the unshifted observation separately, so delay never compounds.
-    All reads remain within the prediction's knowledge boundary.
+    The five-second telemetry history is the sole authority. Decision outputs and
+    mutable latest caches must never become substitute observations.
     """
-    from ..decision_hourly.models import DecisionCycleSample
     from ..telemetry.models import TelemetryPoint, TelemetryReading
 
     target = inputs.hour-timedelta(seconds=LEVEL_LAG_SECONDS)
@@ -48,7 +46,6 @@ def aligned_level(inputs, current):
         except (KeyError, TypeError, ValueError):
             pass
 
-    add(raw_sample(point.latest))
     rows = inputs.db.scalars(select(TelemetryReading).where(
         TelemetryReading.source_id == source, TelemetryReading.point_key == key,
         TelemetryReading.received_at >= iso_time(lower), TelemetryReading.received_at <= iso_time(target)
@@ -56,20 +53,6 @@ def aligned_level(inputs, current):
     for row in rows:
         add(dict(raw_sample(row.sample) or {}, batch_id=row.batch_id))
 
-    # Project only the needed JSON fragments, not the full decision/evidence payload.
-    rows = inputs.db.execute(select(DecisionCycleSample.snapshot['level_observation'],
-        DecisionCycleSample.snapshot['cells']['level'], DecisionCycleSample.snapshot['input_timing']).where(
-        DecisionCycleSample.sampled_at >= iso_time(lower),
-        DecisionCycleSample.sampled_at <= inputs.cutoff))
-    for observation, old_level, timing in rows:
-        # Pre-delay archives stored the raw level directly. New archives never reuse
-        # their shifted model input as a raw observation, even if the field is absent.
-        c = observation if isinstance(observation,dict) else old_level if not timing else None
-        if not c or c.get('alignment') or c.get('source_id') != source or c.get('point_key') != key:
-            continue
-        sample = c.get('sample') or {k:c.get(k) for k in
-            ('value','raw_value','definition_id','quality','issue','status_code','source_at','server_at','received_at','batch_id')}
-        add(sample)
     sample = max(candidates, key=lambda s:parse_time(s['received_at']), default=None)
     if sample is None:
         return cell(reason='提前 90 秒液位缺失：目标时刻之前 30 秒内无采集记录', **meta)

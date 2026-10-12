@@ -94,7 +94,10 @@ class TelemetryRepository:
                     TelemetryReading.source_id == cfg.source_id, TelemetryReading.point_key == sample["key"],
                     TelemetryReading.batch_id == batch["batch_id"]))
                 changed_quality = not point.latest or (point.latest.get("quality"), point.latest.get("issue")) != (sample["quality"], sample.get("issue"))
-                due = not point.last_history_at or (parse_time(received) - parse_time(point.last_history_at)).total_seconds() >= cfg.history_interval_seconds
+                # At full resolution persist every distinct batch, even if timer jitter
+                # makes two consecutive receipts slightly less than five seconds apart.
+                due = (cfg.history_interval_seconds <= cfg.poll_seconds or not point.last_history_at
+                       or (parse_time(received) - parse_time(point.last_history_at)).total_seconds() >= cfg.history_interval_seconds)
                 if existing is None and (due or changed_quality):
                     db.add(TelemetryReading(source_id=cfg.source_id, point_key=sample["key"],
                         batch_id=batch["batch_id"], received_at=received, sample=sample))
@@ -104,7 +107,7 @@ class TelemetryRepository:
                 matches = sample.get("definition_id") == definition_id(point.config)
                 if matches and (not point.latest or received >= point.latest["received_at"]):
                     # Preserve the nearest pre-hour reading before a 5-second latest
-                    # update replaces it. The regular history interval is 60 seconds.
+                    # update replaces it (also supports legacy throttled configurations).
                     previous = raw_sample(point.latest)
                     if (previous and previous.get("batch_id")
                             and parse_time(previous["received_at"]).replace(minute=0, second=0, microsecond=0)
@@ -123,10 +126,15 @@ class TelemetryRepository:
             db.commit()
 
     def prune(self, cfg):
+        from ..decision_hourly.models import DecisionTelemetryPin
         cutoff = iso_time(utc_now() - timedelta(days=cfg.retention_days))
         with self.sessions() as db:
+            self._lock(db)
             ids = select(TelemetryReading.id).where(TelemetryReading.source_id == cfg.source_id,
-                TelemetryReading.received_at < cutoff).order_by(TelemetryReading.received_at).limit(5000)
+                TelemetryReading.received_at < cutoff,
+                ~select(DecisionTelemetryPin.reading_id).where(
+                    DecisionTelemetryPin.reading_id == TelemetryReading.id).exists()
+            ).order_by(TelemetryReading.received_at).limit(5000)
             db.execute(delete(TelemetryReading).where(TelemetryReading.id.in_(ids)))
             db.commit()
 

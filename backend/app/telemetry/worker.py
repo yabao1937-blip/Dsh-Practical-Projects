@@ -60,6 +60,7 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
                 async with reader_factory(cfg) as reader:
                     first_read = True
                     while not stop.is_set():
+                        cycle_started = time.monotonic()
                         samples = await reader.read()
                         if len(samples) != len(cfg.points):
                             raise ValueError("incomplete read batch")
@@ -77,7 +78,9 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
                         if once:
                             return 0
                         try:
-                            await asyncio.wait_for(stop.wait(), cfg.poll_seconds)
+                            # Read/persist time belongs to this cycle, not to an extra
+                            # delay after it. Slow cycles never fabricate catch-up data.
+                            await asyncio.wait_for(stop.wait(), max(.001, cfg.poll_seconds-(time.monotonic()-cycle_started)))
                         except asyncio.TimeoutError:
                             pass
             except Exception as exc:

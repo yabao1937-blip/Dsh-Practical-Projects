@@ -32,12 +32,14 @@ def main():
     try:
         from app.database import Base, engine
         from app.telemetry import models  # noqa: F401
+        from app.decision_hourly.models import DecisionTelemetryPin
         from app.telemetry.repository import TelemetryRepository
         from app.telemetry.spool import DurableSpool
         from app.telemetry.worker import run_collector
         from app.telemetry.views import ensure_sqlite_views
         for name in ("telemetry_sources", "telemetry_points", "telemetry_readings"):
             Base.metadata.tables[name].create(engine, checkfirst=True)
+        DecisionTelemetryPin.__table__.create(engine, checkfirst=True)
         ensure_sqlite_views(engine)
         spool_root = Path(os.environ.get("DMCS_TELEMETRY_SPOOL") or Path(__file__).parent / "data/telemetry-spool")
         return asyncio.run(run_collector(cfg, TelemetryRepository(), DurableSpool(spool_root, cfg.source_id), once=args.once))

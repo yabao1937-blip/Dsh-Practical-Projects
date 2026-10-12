@@ -9,7 +9,7 @@ from .evidence import state
 
 
 def density_channels(db, now, compact):
-    inputs = Inputs(db, now, live=True)
+    inputs = Inputs(db, now, live=True, authoritative=True)
     result = {}
     for channel in ('A303','A304'):
         result[channel] = {key:compact(inputs.telemetry(f'TIA_4_1.TIA_4_1.{channel}/{item}',unit='g/cm³'))
@@ -91,6 +91,7 @@ def assess_window(db,action,start,end):
     from types import SimpleNamespace
     from .archive import archived_rows
     from .models import DecisionCycleSample
+    from .references import hydrate_rows
     from .evidence import SEGMENT_POLICY, statistics, weights
     first=min(start,business_time(action.evidence['before']['sampled_at']))
     last=max(end,business_time(action.evidence['after']['sampled_at']))
@@ -99,7 +100,7 @@ def assess_window(db,action,start,end):
     rows=list(db.scalars(select(DecisionCycleSample).where(DecisionCycleSample.sampled_at>=iso_time(first),
         DecisionCycleSample.sampled_at<=iso_time(last)).order_by(DecisionCycleSample.slot)))
     cursor=first.replace(minute=0,second=0,microsecond=0)
-    by_slot={r.slot:r for r in rows}
+    by_slot={r.slot:r for r in hydrate_rows(db,rows)}
     while cursor<=last:
         for r in archived_rows(db,iso_time(cursor)):
             if iso_time(first)<=r['sampled_at']<=iso_time(last):

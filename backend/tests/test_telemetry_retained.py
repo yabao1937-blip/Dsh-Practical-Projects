@@ -46,6 +46,7 @@ def view(repo, cfg, now):
 
 def test_nonzero_memory_keeps_exact_last_poll_not_throttled_history(repo):
     cfg, start = config(), utc_now() - timedelta(seconds=10)
+    cfg.history_interval_seconds = 60  # Explicit legacy throttled deployment.
     repo.acquire(cfg, "owner")
     send(repo, cfg, [42], start)
     newest = send(repo, cfg, [43], start + timedelta(seconds=1))

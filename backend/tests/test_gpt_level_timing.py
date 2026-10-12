@@ -24,7 +24,8 @@ from test_decision_sources import seeded
 def levels(sessions, cfg, events):
     """Keep the latest t-2s reading, replace only the liquid-level raw history."""
     with sessions.begin() as db:
-        db.execute(delete(TelemetryReading).where(TelemetryReading.point_key=='point2'))
+        db.execute(delete(TelemetryReading).where(TelemetryReading.point_key=='point2',
+            TelemetryReading.received_at < iso_time(HOUR-timedelta(seconds=2))))
         for seconds, value, code in events:
             when=HOUR-timedelta(seconds=seconds)
             sample=normalize(cfg.points[2],value,code,when,when,when)
@@ -64,7 +65,8 @@ def test_bad_latest_is_not_replaced_with_older_good(sessions,seeded):
 def test_old_point_definition_and_manual_default_cannot_supply_level(sessions,seeded):
     levels(sessions,seeded[0],[(90,75,0)])
     with sessions.begin() as db:
-        row=db.scalar(select(TelemetryReading).where(TelemetryReading.point_key=='point2'))
+        row=db.scalar(select(TelemetryReading).where(TelemetryReading.point_key=='point2',
+            TelemetryReading.received_at <= iso_time(HOUR-timedelta(seconds=90))))
         row.sample={**row.sample,'definition_id':'old-definition'}
     with sessions() as db:
         assert shared_snapshot(db)['cells']['level']['value'] is None
@@ -75,72 +77,23 @@ def test_old_point_definition_and_manual_default_cannot_supply_level(sessions,se
         assert shared_snapshot(db)['cells']['level']['value'] is None  # No implicit 55% fallback.
 
 
-def test_archive_saves_raw_level_even_when_prediction_missing_and_never_double_delays(sessions,seeded,monkeypatch):
-    cfg=seeded[0]
-    levels(sessions,cfg,[])
-    # The collector only persists raw history every minute. Its latest point is
-    # available to the 5s decision worker even when the prediction is warming up.
-    early=HOUR-timedelta(seconds=92)
-    with sessions.begin() as db:
-        point=db.get(TelemetryPoint,(cfg.source_id,'point2'))
-        point.latest=normalize(cfg.points[2],75,0,early,early,early)
-    with sessions.begin() as db:
-        snap=shared_snapshot(db,early)
-        assert snap['coarse_ash']['value'] is None
-        assert snap['level_observation']['value']==75
-        record(db,early,snap)
-    latest=HOUR-timedelta(seconds=2)
-    with sessions.begin() as db:
-        point=db.get(TelemetryPoint,(cfg.source_id,'point2'))
-        point.latest=normalize(cfg.points[2],25,0,latest,latest,latest)
-    with sessions.begin() as db:
-        snap=shared_snapshot(db)
-        assert snap['cells']['level']['value']==75
-        assert snap['level_observation']['value']==25
-        assert snap['coarse_ash']['value']==pytest.approx(9.7)
-        record(db,HOUR,snap)
-    later=HOUR+timedelta(seconds=90)
-    with sessions() as db:
-        delayed=shared_snapshot(db,later)
-        assert delayed['cells']['level']['value']==25
-        assert delayed['cells']['level']['observed_at']==iso_time(latest)
-        saved=db.get(DecisionCycleSample,int(HOUR.timestamp())//5).snapshot
-        assert saved['cells']['level']['alignment']['level_lag_seconds']==90
-        assert saved['level_observation']['value']==25
-        assert saved['input_timing']==POLICY
-
-
-def test_archive_cannot_cross_source_or_reuse_shifted_cell(sessions,seeded):
-    cfg=seeded[0]
-    with sessions.begin() as db:
-        snap=shared_snapshot(db)
-        snap['generated_at']=iso_time(HOUR-timedelta(seconds=91))
-        snap['level_observation']['source_id']='another-source'
-        # An already shifted input is not a raw observation candidate.
-        snap['cells']['level']['value']=99
-        record(db,HOUR,snap)
-    levels(sessions,cfg,[])
-    with sessions() as db:
-        assert shared_snapshot(db)['cells']['level']['value'] is None
-
-
-def test_legacy_raw_archive_is_usable_without_rewriting_it(sessions,seeded):
+def test_decision_and_latest_cache_cannot_replace_missing_raw_history(sessions,seeded):
     cfg=seeded[0]
     at=HOUR-timedelta(seconds=91)
     with sessions.begin() as db:
         snap=shared_snapshot(db)
-        snap['generated_at']=iso_time(at)
-        raw=snap['level_observation']
-        raw.update(value=65,observed_at=iso_time(at))
-        raw['sample']=normalize(cfg.points[2],65,0,at,at,at)
-        snap['cells']['level']=raw
-        snap.pop('input_timing')
-        snap.pop('level_observation')
-        record(db,at,snap)
+        record(db,HOUR,snap)
+        # Simulate a legacy inline decision; it remains readable but is not raw history.
+        row=db.scalar(select(DecisionCycleSample))
+        row.sampled_at=iso_time(at)
+        row.snapshot=dict(cells={'level':dict(snap['level_observation'],value=65)},
+            level_observation=dict(snap['level_observation'],value=65))
+        point=db.get(TelemetryPoint,(cfg.source_id,'point2'))
+        point.latest=normalize(cfg.points[2],75,0,at,at,at)
     levels(sessions,cfg,[])
     with sessions() as db:
         before=deepcopy(db.scalar(select(DecisionCycleSample)).snapshot)
-        assert shared_snapshot(db)['cells']['level']['value']==65
+        assert shared_snapshot(db)['cells']['level']['value'] is None
         assert db.scalar(select(DecisionCycleSample)).snapshot==before
 
 

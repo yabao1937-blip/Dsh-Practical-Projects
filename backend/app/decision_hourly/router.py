@@ -19,6 +19,7 @@ from .tracking import action_view,assess_window
 from .archive import read_sample, archived_rows
 from .service import window
 from .evidence import summarize
+from .references import hydrate_rows
 
 router = APIRouter(prefix='/decision/evidence',tags=['GPT 工况与调密跟踪'],route_class=MeasurementRoute)
 
@@ -54,7 +55,7 @@ def segments(start: datetime | None=None,db: Session=Depends(get_db)):
     _,begin=window(now)
     rows=list(db.scalars(select(DecisionCycleSample).where(DecisionCycleSample.sampled_at>=iso_time(begin),
         DecisionCycleSample.sampled_at<=iso_time(now)).order_by(DecisionCycleSample.slot)))
-    return dict(period=dict(start=iso_time(begin),end=iso_time(now)),frozen=False,evidence=summarize(rows,now))
+    return dict(period=dict(start=iso_time(begin),end=iso_time(now)),frozen=False,evidence=summarize(hydrate_rows(db,rows),now))
 
 
 @router.get('/samples/{slot}')
@@ -76,7 +77,7 @@ def samples(start:datetime,limit:int=Query(40,ge=1,le=100),offset:int=Query(0,ge
     end=start+timedelta(hours=1)
     rows=list(db.scalars(select(DecisionCycleSample).where(DecisionCycleSample.sampled_at>=iso_time(start),
         DecisionCycleSample.sampled_at<iso_time(end)).order_by(DecisionCycleSample.slot.desc())))
-    data=[dict(slot=r.slot,sampled_at=r.sampled_at,context_key=r.context_key,snapshot=r.snapshot) for r in rows]
+    data=[dict(slot=r.slot,sampled_at=r.sampled_at,context_key=r.context_key,snapshot=r.snapshot) for r in hydrate_rows(db,rows)]
     if not data:
         data=sorted(archived_rows(db,iso_time(start)),key=lambda r:r['slot'],reverse=True)
     return dict(total=len(data),items=[dict(slot=r['slot'],sampled_at=r['sampled_at'],context_key=r['context_key'],

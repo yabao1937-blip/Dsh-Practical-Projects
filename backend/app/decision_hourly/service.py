@@ -16,6 +16,7 @@ from .history import historical_cells
 from .evidence import POLICY, PROVISIONAL, SEGMENT_POLICY, summarize
 from .tracking import density_channels, observe
 from .archive import archive_old_hour
+from .references import pack_snapshot, hydrate_rows
 
 
 def window(now):
@@ -26,13 +27,18 @@ def window(now):
 def compact_cell(c):
     result = {k:deepcopy(c[k]) for k in ('value','status','reason','source','unit','observed_at','created_at',
         'record_id','metric','input_path','item_id','source_id','point_key','raw_value','density_label','entered_at',
-        'retained_sample','alignment') if k in c}
+        'retained_sample','raw_sample','key','alignment') if k in c}
+    effective = c.get('effective_density') or {}
+    if effective.get('raw_sample'):
+        result['raw_sample'] = deepcopy(effective['raw_sample'])
     sample = c.get('sample') or {}
     if sample:
         for key in ('batch_id','definition_id','quality','status_code','issue','source_at','server_at','received_at','raw_value'):
             result[key] = deepcopy(sample.get(key))
     if isinstance(c.get('components'),dict):
         result['components'] = {k:compact_cell(v) for k,v in c['components'].items()}
+    elif isinstance(c.get('components'),list):
+        result['components'] = [compact_cell(v) for v in c['components']]
     return result
 
 
@@ -82,8 +88,6 @@ def record(db, now, result=None, store=None):
         'coarse_ash','heavy_amount','total_ash','suggested_density','guidance','warnings')}
     snapshot['cells'] = cells
     snapshot['input_timing'] = deepcopy(result.get('input_timing'))
-    if result.get('level_observation'):
-        snapshot['level_observation'] = compact_cell(result['level_observation'])
     snapshot['evidence_policy'] = POLICY
     snapshot.update({k:deepcopy(result[k]) for k in ('features','expert_explanation') if k in result})
     snapshot['inputs'] = {k:compact_cell(c) for k,c in result['inputs'].items()}
@@ -93,12 +97,15 @@ def record(db, now, result=None, store=None):
         fingerprint=digest([key,identities]),snapshot=snapshot)
     db.add(row)
     observe(db,row)
+    row.snapshot = pack_snapshot(db,snapshot,slot)
+    db.flush()
     return True
 
 
 def build_hour(db, start, end, now):
     rows = list(db.scalars(select(DecisionCycleSample).where(DecisionCycleSample.sampled_at>=iso_time(start),
         DecisionCycleSample.sampled_at<iso_time(end)).order_by(DecisionCycleSample.slot)))
+    rows = hydrate_rows(db,rows)
     cells, sources, basis = historical_cells(db,start,end,rows)
     context = db.get(DecisionCycleContext,rows[-1].context_key) if rows else None
     step = (context.definition.get('density_guide') or {}).get('maxStep',.03) if context else .03

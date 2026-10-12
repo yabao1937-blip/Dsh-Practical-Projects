@@ -74,7 +74,8 @@ def density_cell(inputs, points):
         sample = inputs.latest(p)
         items.append(dict(source_id=p.source_id, key=p.key, item_id=p.config['item_id'],
             unit=p.config.get('unit', ''), definition_id=definition_id(p.config), sample=sample, as_of=inputs.cutoff,
-            available=inputs.usable(p, sample), last_density_sample=density_history(inputs.db, p, inputs.cutoff)))
+            available=inputs.usable(p, sample), last_density_sample=density_history(inputs.db, p, inputs.cutoff,
+                authoritative=inputs.authoritative)))
     effective = effective_average(items) if len(points) == 2 else effective_component(items[0])
     label = 'A303/A304 平均' if len(points) == 2 else points[0].config['item_id'].split('.')[-1].split('/')[0]
     return cell(effective['value'], 'KEPServer · '+label, effective['received_at'], effective['status'],
@@ -148,7 +149,7 @@ def collect_shared(inputs, config):
 def shared_snapshot(db, when=None):
     live = when is None
     when = when or utc_now()
-    inputs = Inputs(db, when, live=live)
+    inputs = Inputs(db, when, live=live, authoritative=True)
     config = config_view(db, when, inputs)
     cells = collect_shared(inputs, config)
     level_observation = deepcopy(cells['level'])

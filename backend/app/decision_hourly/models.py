@@ -27,6 +27,13 @@ class DecisionCycleHour(Base):
     snapshot: Mapped[dict] = mapped_column(JSON)
 
 
+class DecisionTelemetryPin(Base):
+    """Keep authoritative readings as long as hot OR compressed decisions cite them."""
+    __tablename__ = 'decision_telemetry_pins'
+    reading_id: Mapped[int] = mapped_column(Integer, ForeignKey('telemetry_readings.id', ondelete='RESTRICT'), primary_key=True)
+    first_slot: Mapped[int] = mapped_column(Integer)
+
+
 class DecisionEvidenceArchive(Base):
     __tablename__ = 'gpt_decision_evidence_archives'
     start: Mapped[str] = mapped_column(String(32), primary_key=True)

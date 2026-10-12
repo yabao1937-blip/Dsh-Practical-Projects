@@ -121,6 +121,21 @@ def test_history_is_throttled_quality_changes_recorded_and_replay_idempotent(cfg
         assert db.get(TelemetryPoint, (cfg.source_id, "density")).latest["value"] == 1.47
 
 
+def test_five_second_history_keeps_all_batches_despite_receipt_jitter(cfg,repo):
+    cfg.poll_seconds=cfg.history_interval_seconds=5
+    repo.acquire(cfg,'owner')
+    now=utc_now()
+    payloads=[batch(cfg,1.48,when=now+timedelta(seconds=s)) for s in (0,4.99,10.01,15)]
+    payloads.append(batch(cfg,1.0,0x80000000,now+timedelta(seconds=19.99)))
+    for payload in payloads+payloads:
+        repo.persist(cfg,'owner',payload)
+    assert count(repo)==5
+    with repo.sessions() as db:
+        saved=list(db.scalars(select(TelemetryReading).order_by(TelemetryReading.received_at)))
+        assert [r.received_at for r in saved]==[p['samples'][0]['received_at'] for p in payloads]
+        assert saved[-1].sample['quality']=='bad'
+
+
 def test_reconfigured_scale_rejects_old_spool_as_current_value(cfg, repo):
     first = batch(cfg)
     repo.acquire(cfg, "owner")

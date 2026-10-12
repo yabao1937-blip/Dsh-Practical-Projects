@@ -42,7 +42,7 @@ class CollectorConfig(BaseModel):
     timeout_seconds: float = Field(default=10, ge=0.1, le=30)
     retry_min_seconds: float = Field(default=1, ge=0.1, le=30)
     retry_max_seconds: float = Field(default=30, ge=0.1, le=120)
-    history_interval_seconds: float = Field(default=60, ge=1, le=3600)
+    history_interval_seconds: float = Field(default=5, ge=1, le=3600)
     retention_days: int = Field(default=7, ge=1, le=90)
     security: Literal["Basic256Sha256", "None"] = "Basic256Sha256"
     allow_insecure: bool = False

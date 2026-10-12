@@ -1,0 +1,27 @@
+{
+  "decision_cycle_hours": {
+    "count": 14,
+    "sha256": "0ff9ef59fa89c93ffd827963247c206135f575c9bcb84f91b116a8f12c9c8ce5"
+  },
+  "hourly_brief_rows": {
+    "count": 96,
+    "sha256": "ec5c17822b65da14f41d039780214b665b1cb2c007956dcfdba61b6914266b54"
+  },
+  "coarse_models": {
+    "count": 2,
+    "sha256": "3bea55ce3fcb909124a26f6bddebd44114762e54bd92d017235f1f8010e7879a"
+  },
+  "gpt_coarse_model_revisions": {
+    "count": 1,
+    "sha256": "054a8972ef47b6d427bab1cea04b007227a191caee894dc024c8d143e3e4468b"
+  },
+  "legacy_decisions": {
+    "count": 7475,
+    "sha256": "74de3e9f4c877c5befe316eac67e74f163dc1b0c4d995c98ef3d92395c880080"
+  },
+  "legacy_max_slot": 358353362,
+  "backup": "D:\\dense-medium-density-control-system\\backend\\data\\backups\\before-authoritative-5s-20261012-090016.db",
+  "deployment_started_at": "2026-10-12T09:00:20.392691",
+  "poll_seconds": 5.0,
+  "history_interval_seconds": 5
+}

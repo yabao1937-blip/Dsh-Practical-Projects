@@ -1,0 +1,34 @@
+{
+  "backend_tests": {
+    "passed": 175,
+    "command": "python -m pytest tests/test_telemetry.py tests/test_telemetry_retained.py tests/test_telemetry_control.py tests/test_telemetry_migrations.py tests/test_decision_references.py tests/test_gpt_level_timing.py tests/test_decision_sources.py tests/test_decision_hourly.py tests/test_decision_evidence.py tests/test_hourly_brief.py tests/test_training.py -q",
+    "includes_ds_original_golden": true
+  },
+  "frontend_checks": {
+    "passed": 5,
+    "scripts": [
+      "verify_decision_sources.js",
+      "verify_decision_realtime.js",
+      "verify_decision_hourly.js",
+      "verify_decision_evidence.js",
+      "verify_gpt_expert9.js"
+    ]
+  },
+  "contract": {
+    "authority": "telemetry_readings, every unique collector batch at nominal 5-second cadence",
+    "new_decisions": "versioned references to telemetry and append-only manual measurements; decision-time interpretations and outputs frozen inline",
+    "legacy": "Existing inline decisions and compressed archives remain readable and unchanged; sparse historical sampling is not filled in",
+    "lag": "Use latest raw history at or before prediction minus 90 seconds, within 30 seconds; never use decision archive or latest cache as substitute raw history",
+    "retention": "Unreferenced telemetry follows configured retention; decision_telemetry_pins keeps referenced readings even after hot decisions move to compressed archives",
+    "missing_references": "Explicit failure; never substitute current values or recompute old predictions",
+    "manual_defaults": "Mutable legacy input settings and transformed/computed values remain frozen decision evidence"
+  },
+  "deployment": {
+    "database_backup": "backend/data/backups/before-authoritative-5s-20261012-090016.db",
+    "local_config": "backend/config/kepserver.local.json",
+    "local_history_seconds": 5,
+    "http_listening_pid": 58816,
+    "collector_launcher_pid": 11936,
+    "compatibility": "Unversioned existing site uses its existing create_all/schema_upgrade deployment path. Direct Alembic upgrade encountered an existing alerts table; no existing table was rebuilt. New/previously versioned database migrations verified separately."
+  }
+}

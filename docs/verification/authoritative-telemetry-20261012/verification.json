@@ -1,0 +1,74 @@
+{
+  "verified_at": "2026-10-12T01:03:26.375739+00:00",
+  "storage_version": "authoritative-readings-v1",
+  "collector_started_at": "2026-10-12T01:01:11.466+00:00",
+  "history_interval_seconds": 5,
+  "read_only": true,
+  "preserved": {
+    "decision_cycle_hours": {
+      "count": 14,
+      "sha256": "0ff9ef59fa89c93ffd827963247c206135f575c9bcb84f91b116a8f12c9c8ce5"
+    },
+    "hourly_brief_rows": {
+      "count": 96,
+      "sha256": "ec5c17822b65da14f41d039780214b665b1cb2c007956dcfdba61b6914266b54"
+    },
+    "coarse_models": {
+      "count": 2,
+      "sha256": "3bea55ce3fcb909124a26f6bddebd44114762e54bd92d017235f1f8010e7879a"
+    },
+    "gpt_coarse_model_revisions": {
+      "count": 1,
+      "sha256": "054a8972ef47b6d427bab1cea04b007227a191caee894dc024c8d143e3e4468b"
+    },
+    "legacy_decisions": {
+      "count": 7475,
+      "sha256": "74de3e9f4c877c5befe316eac67e74f163dc1b0c4d995c98ef3d92395c880080"
+    }
+  },
+  "cadence": {
+    "batch_count": 27,
+    "points_per_batch": 50,
+    "first_at": "2026-10-12T01:01:12.742+00:00",
+    "last_at": "2026-10-12T01:03:22.949+00:00",
+    "minimum_seconds": 4.08,
+    "maximum_seconds": 5.695,
+    "mean_seconds": 5.007961538461538,
+    "median_seconds": 5.009
+  },
+  "decisions": {
+    "count": 34,
+    "protected_reading_count": 515,
+    "latest_slot": 358353401,
+    "sampled_at": "2026-10-12T01:03:25.099+00:00",
+    "level_observed_at": "2026-10-12T01:01:52.756+00:00",
+    "level_lag_seconds": 92.343,
+    "coarse_ash": {
+      "value": 16.159091825880147,
+      "status": "predicted",
+      "reason": "GPT专家基准九因子预测；待现场验证"
+    },
+    "total_ash": {
+      "value": 8.987679879851067,
+      "status": "calculated",
+      "reason": "三组分灰分按煤量加权"
+    },
+    "suggested_density": {
+      "value": 1.483564853668213,
+      "status": "calculated",
+      "reason": "预测总灰分 8.99% 在目标范围 8.5–9.0% 内，密度保持"
+    },
+    "latest_encoded_bytes": 21526,
+    "latest_resolved_bytes": 31533
+  },
+  "http_status": {
+    "/api/v1/health": 200,
+    "/api/v1/telemetry/latest": 200,
+    "/api/v1/decision/current": 200,
+    "/api/v1/decision/hourly": 200,
+    "/api/v1/decision/evidence/segments": 200,
+    "/api/v1/decision/evidence/samples/358353401": 200
+  },
+  "ds_baseline_sha256": "aa09b7a4574ec19be5f840b68f3611394b0584f2ec435b0abd062416f8566bbd",
+  "deployment_note": "Existing site uses create_all/schema_upgrade without Alembic stamps; new reference table created with checkfirst. No existing table rebuilt."
+}

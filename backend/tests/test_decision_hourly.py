@@ -242,6 +242,15 @@ def test_full_hour_integrates_saved_outputs_with_last_meter_basis(sessions,seede
                     c['observed_at']=stamp
             snap['cells']['density']['value']=1.4 if i<719 else 1.5
             snap['inputs']['density']['value']=snap['cells']['density']['value']
+            # Each new batch is real authority now, not a fabricated archive-only event.
+            for c in snap['cells'].values():
+                sample=c.get('sample') or {}
+                if sample.get('batch_id')==str(i):
+                    sample['value']=c['value']
+                    sample['raw_value']=c['value']
+                    db.add(TelemetryReading(source_id=c['source_id'],point_key=c['point_key'],
+                        batch_id=str(i),received_at=stamp,sample=deepcopy(sample)))
+            db.flush()
             snap['suggested_density']=dict(value=snap['cells']['density']['value']-.02,status='calculated',reason='test')
             snap['cells']['suggested_density']=snap['suggested_density']
             snap['cells']['total_ash']=dict(value=9 if i%2 else 10,status='calculated',unit='%')
