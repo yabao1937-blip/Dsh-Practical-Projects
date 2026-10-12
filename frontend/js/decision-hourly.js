@@ -14,6 +14,58 @@ const DecisionHourly = {
         return r && this.resultEpoch===this.epoch() && serverNow<Date.parse(r.period.apply_end) ? r : null;
     },
     pending() { return !this.presentation() && !!this.inFlight; },
+    dataGaps(result=this.presentation()) {
+        const gaps=new Map(), advice=result?.suggested_density;
+        if(!advice || Number.isFinite(advice.value)) return gaps;
+        // Only inputs used by the recommendation chain. Reference-only cards do
+        // not become blockers, and one carried manual reading is still valid.
+        const fields={'raw-ash':'raw_ash','coal-rate':'coal_amount','tail-level':'level',
+            'heavy-ash':'heavy_ash','heavy-amount':'heavy_amount','float-ash':'float_ash',
+            'float-amount':'float_amount','coarse-amount':'coarse_amount','density-current':'density',
+            coarse:'coarse_ash','total-ash':'total_ash'};
+        for(const [id,key] of Object.entries(fields)) {
+            const cell=result.cells?.[key];
+            if(!Number.isFinite(cell?.value) || ['missing','held','invalid'].includes(cell.status))
+                gaps.set(id,cell?.reason || '该小时缺少有效数据');
+        }
+        const groups={'system-switches':['systems',['401','402','A','B']],desliming:['desliming',['473','474']]};
+        for(const [id,[key,labels]] of Object.entries(groups)) {
+            const missing=labels.filter(label=>!Number.isFinite(result.cells?.[key]?.components?.[label]?.value));
+            if(missing.length) gaps.set(id,`${missing.join('、')} 状态缺少有效数据`);
+        }
+        const basis=result.density_basis || {value:result.guidance?.rhoCur,observed_at:result.guidance?.basis_at};
+        const age=(Date.parse(result.period?.end)-Date.parse(basis.observed_at))/1000;
+        if(!Number.isFinite(basis.value) || basis.value<=0 || Math.abs(basis.value-1)<=1e-9 ||
+            ['missing','held','invalid'].includes(basis.status) || !(age>0 && age<=30))
+            gaps.set('density-current','小时末 30 秒内没有有效实测密度；小时均值仅供查看');
+        // A valid hourly mean can conceal a period of missing/held readings.
+        // Use recorded segment quality, never infer sensor gaps from sample counts.
+        const valid=new Set(['good','manual','historical','default','predicted','calculated','average','carried']);
+        const missingSeconds=new Map();
+        for(const segment of result.evidence?.segments || []) {
+            const affected=new Set();
+            for(const [id,key] of Object.entries(fields)) {
+                const quality=segment.state?.quality?.[key];
+                if(quality && !valid.has(quality)) affected.add(id);
+            }
+            for(const [id,[key,labels]] of Object.entries(groups)) {
+                const switches=segment.state?.switches?.[key];
+                if(switches && labels.some(label=>typeof switches[label]!=='boolean')) affected.add(id);
+            }
+            for(const id of affected) missingSeconds.set(id,(missingSeconds.get(id)||0)+Math.max(0,segment.duration_seconds||0));
+        }
+        for(const [id,seconds] of missingSeconds) if(!gaps.has(id))
+            gaps.set(id,seconds>0?`小时内约 ${Math.round(seconds)} 秒无有效数据；显示其余有效均值`:'小时内存在无效数据；显示其余有效均值');
+        for(const [id,children] of [['heavy',['heavy-ash','heavy-amount']],['float',['float-ash','float-amount']]]) {
+            const reasons=children.filter(key=>gaps.has(key)).map(key=>gaps.get(key));
+            if(reasons.length) gaps.set(id,[...new Set(reasons)].join('；'));
+        }
+        const coverage=result.coverage || {};
+        const adviceGap=Number.isFinite(coverage.ratio) && coverage.ratio<coverage.required_ratio ||
+            Number.isFinite(coverage.longest_gap_seconds) && coverage.longest_gap_seconds>coverage.max_gap_seconds;
+        if(gaps.size || adviceGap) gaps.set('density',advice.reason || '有效建议记录不足，暂不调密');
+        return gaps;
+    },
     async update(page,force=false) {
         if(!page.hourMode() || this.inFlight || (!force && Date.now()-this.lastAttempt<4500)) return;
         const epoch=this.epoch();
@@ -65,6 +117,8 @@ const DecisionHourly = {
     inspector(page,node) {
         const r=this.presentation(),d=this.display(page,node),c=r?.cells?.[this.keys[node.id]],pairs=[
             ['统计时段',r?.period.label || '等待读取'],['显示值',d.value],['统计口径',d.reason || '左侧两项小时统计汇总']];
+        const gap=this.dataGaps(r).get(node.id);
+        if(gap) pairs.unshift(['数据缺口',gap]);
         if(c) {
             if(c.sample_count!==undefined) pairs.push(['有效样本',String(c.sample_count)],['排除样本',String(c.excluded_count)]);
             if(c.source) pairs.push(['来源',c.source]);
