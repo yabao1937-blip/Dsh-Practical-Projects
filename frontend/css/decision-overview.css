@@ -59,6 +59,7 @@
 .decision-component[data-family="float"] { border-top-color: var(--dm-orange); }
 .decision-component[data-family="coarse"] { border-top-color: var(--dm-green); }
 .decision-component .decision-node-heading { font-size: 19px; }
+.decision-component-amount { display:block; margin-top:8px; font-size:13px; font-weight:400; line-height:1.5; opacity:.85; }
 .decision-badge { color: var(--dm-muted); font-size: 11px; border: 1px solid var(--dm-border); border-radius: 5px; padding: 2px 5px; font-weight: 400; white-space: nowrap; }
 .decision-formula { position: absolute; top: 640px; left: 658px; width: 280px; padding: 18px; text-align: center; border: 1px solid var(--dm-border); background: var(--dm-bg); border-radius: 10px; font-size: 12px; color: var(--dm-muted); line-height: 1.8; }
 .decision-formula strong { color: var(--dm-text); display: block; font-weight: 500; margin-bottom: 4px; }

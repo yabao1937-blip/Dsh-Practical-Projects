@@ -731,6 +731,24 @@ const DecisionOverviewPage = {
         });
     },
 
+    sourceBadge(node,display) {
+        if(display.stopped) return '设备停机';
+        if(!this.displayAvailable(display) && !(display.pending && Number.isFinite(display.numericValue))) return '不可用';
+        if(['heavy','float'].includes(node.id)) return '汇总';
+        if(['coarse','heavy-amount'].includes(node.id)) return '计算';
+        const hourly=this.hourMode();
+        const result=hourly?DecisionHourly.presentation():typeof DecisionRealtime!=='undefined'?DecisionRealtime.result:null;
+        const key=typeof DecisionSources!=='undefined'?DecisionSources.nodes[node.id]:null;
+        const cell=result?.cells?.[key] || {};
+        const choice=(hourly?result?.sources?.resolved_choices:this.pointChoices)?.[node.id] || '';
+        const source=cell.source || display.source || node.source || '';
+        if(display.manual || display.item?.kind==='manual_measurement' || cell.source_id==='manual-measurements' || choice.startsWith('["manual-measurements",')) return '补录';
+        if(cell.status==='calculated' || /计算/.test(source) || display.item?.kind==='numeric_average' || cell.point_key==='a303_a304_density_average') return '计算';
+        if(cell.item_id || cell.point_key || choice || /KEP|采集/.test(source)) return '采集';
+        if(['manual','historical','default'].includes(cell.status) || /手工|人工|补录|历史|默认/.test(source)) return '补录';
+        return ['raw-ash','coal-rate','tail-level','density-current','system-switches','desliming','float-press'].includes(node.id)?'采集':'补录';
+    },
+
     renderGraph() {
         const s = this.snapshot, selected = this.nodes.find(n => n.id === this.selected);
         const targetAsh = (typeof CollectPage !== 'undefined' ? CollectPage.instruments.find(i => i.id === 'total_ash') : null);
@@ -764,16 +782,20 @@ const DecisionOverviewPage = {
         const cards = this.nodes.map((node,index) => {
             const active = node.id === this.selected;
             const display = displays.get(node.id), root = node.id === 'density';
+            const compact=this.view==='gpt' && !root;
             const gap=hourlyGaps.get(node.id);
             const preview = node.id === 'coarse' && !this.liveMode() ? `<span>查看${this.view === 'gpt' ? ' GPT' : '生产'}预测 ${this.number(s.prediction,2,'%')}${!s.model ? ' · 未训练' : s.previewOnly ? ' · 对照' : ' · 未平滑'}</span>` : '';
             const unit = node.id === 'density' ? '<span class="decision-root-unit">g/cm³</span>' : '';
             const sub = node.id === 'density' ? `<span>${hourly?'小时末':'当前'} ${this.number(hourly?hourResult?.guidance?.rhoCur:this.liveMode()?displays.get('density-current').numericValue:s.guide.rhoCur,3)}${this.liveMode()?' · '+this.escape(this.densityLabel()):''}</span><span>目标灰分范围${hourSummary?`<span class="decision-density-target">${targetAshRange}</span>`:' '+targetAshRange}</span>` : '';
             const phase = -((now+index*.41)%5).toFixed(3);
-            const badge = gap ? `<span class="decision-badge">${this.escape(gap.label)}</span>` : display.aggregate || display.calculated || display.shared ? `<span class="decision-badge">${display.badge}</span>` : display.bound && !root ? `<span class="decision-badge">${display.manual ? (display.held ? '待刷新' : display.available ? '补录' : '无补录') : display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
+            const badge = compact ? `<span class="decision-badge">${this.sourceBadge(node,display)}</span>` : gap ? `<span class="decision-badge">${this.escape(gap.label)}</span>` : display.aggregate || display.calculated || display.shared ? `<span class="decision-badge">${display.badge}</span>` : display.bound && !root ? `<span class="decision-badge">${display.manual ? (display.held ? '待刷新' : display.available ? '补录' : '无补录') : display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
             const compare = display.bound && root ? `<span class="decision-live-comparison">采集对照 ${this.escape(display.value)}${display.available ? '' : '（不可用）'}</span>` : '';
             const groupHtml = display.components && !root ? `<span class="decision-state-grid">${display.components.map(c => `<span>${this.escape(c.label)} ${c.available && (display.shared || !window.Operations?.telemetryFailed) ? c.fraction ? this.number(c.value*100,0,'%') : c.value ? '开' : '关' : '未知'}</span>`).join('')}</span>` : this.escape(root && !this.liveMode() ? node.value : display.value);
+            const componentAmount=compact && node.type==='component' ? node.id==='coarse'?displays.get('coarse-amount')?.value:display.summaryParts?.[1]?.display.value:null;
+            const amountHtml=componentAmount?`<span class="decision-component-amount">煤量 ${this.escape(componentAmount)}</span>`:'';
             const content = root && hourSummary
-                ? `<span class="decision-density-main"><span class="decision-node-heading"><span class="decision-density-period">即时</span>建议密度</span><span class="decision-node-value">${groupHtml}${unit}</span></span><span class="decision-density-meta">${badge}<span class="decision-node-source"><span>${this.escape(display.source)}</span>${sub}${compare}</span></span>`
+                ? `<span class="decision-density-main"><span class="decision-node-heading"><span class="decision-density-period">即时</span>建议密度</span><span class="decision-node-value">${groupHtml}${unit}</span></span><span class="decision-density-meta"><span class="decision-node-source"><span>目标灰分</span><span class="decision-density-target">${targetAshRange}</span></span></span>`
+                : compact ? `<span class="decision-node-heading">${this.escape(hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}${amountHtml}</span>`
                 : `<span class="decision-node-heading">${this.escape(hourly && root?'本小时建议密度':hourSummary && root?'即时建议密度':hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(gap ? gap.message : root && !this.liveMode() ? node.source : display.source)}</span>${sub}${preview}${compare}</span>`;
             return `<button type="button" class="decision-node${hourly?DecisionHourly.gapClass(gap):''}${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${display.pending ? ' is-updating' : ''}${(display.bound || display.aggregate || display.calculated) && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}${root && hourSummary?' decision-density-instant':''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" aria-busy="${!!display.pending}"${display.bound || display.aggregate || display.calculated ? ` title="${this.escape(gap?.reason || display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-pulse-delay:${phase}s">${content}</button>`;
         }).join('');
