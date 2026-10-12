@@ -396,8 +396,10 @@ const DecisionOverviewPage = {
         document.getElementById('decision-fit').addEventListener('click', () => { this.zoom = null; this.fit(); });
         document.getElementById('decision-zoom-in').addEventListener('click', () => this.changeZoom(.15));
         document.getElementById('decision-zoom-out').addEventListener('click', () => this.changeZoom(-.15));
-        document.getElementById('decision-canvas-scroll').addEventListener('click', event => {
+        document.getElementById('decision-workspace').addEventListener('click', event => {
             if (event.target.closest('[data-ash-history]') && this.view === 'gpt') { DecisionAshHistory.open(this); return; }
+        });
+        document.getElementById('decision-canvas-scroll').addEventListener('click', event => {
             const node = event.target.closest('[data-decision-node]');
             if (node) { this.select(node.dataset.decisionNode); return; }
             if (!event.target.closest('.decision-formula,button,a,input,select,textarea,label,[contenteditable="true"]')) this.closeInspector(false);
@@ -562,18 +564,7 @@ const DecisionOverviewPage = {
         board.classList.toggle('is-instant-layout',instant);
         const space = document.getElementById('decision-canvas-space');
         space.style.width = `${1540 * scale}px`; space.style.height = `${height * scale}px`;
-        // Keep the original manual button and its listener while sharing graph
-        // coordinates with total ash and the hourly recommendation above it.
-        const actions=document.getElementById('decision-actions');
-        const toolbar=document.querySelector('.decision-toolbar');
-        const actionHost=instant?space:toolbar;
-        if(actions.parentElement!==actionHost) {
-            if(instant) space.insertBefore(actions,board);
-            else toolbar.insertBefore(actions,toolbar.querySelector('.decision-zoom'));
-        }
-        actions.classList.toggle('is-on-canvas',instant);
-        actions.style.transform=instant?`scale(${scale})`:'';
-        actions.querySelectorAll('[data-instant-action]').forEach(button=>{button.hidden=!instant;});
+        document.querySelectorAll('[data-instant-action]').forEach(button=>{button.hidden=!instant;});
         this.background?.resize();
         document.getElementById('decision-fit').textContent = `适应画布 · ${Math.round(scale * 100)}%`;
         this.queueInspectorPosition(true);
