@@ -1,0 +1,447 @@
+{
+  "kind": "gpt-coal-response-offline-v1",
+  "status": "offline_only_not_activated",
+  "protocol_sha256": "4d9ec63c754a17fc8e86f56900a5b8821a8e90db44194d9f6a1955ede6e5fb10",
+  "selected": {
+    "EXPERT8": {
+      "name": "EXPERT8",
+      "family": "EXPERT8"
+    },
+    "mean": {
+      "name": "training_mean",
+      "family": "mean"
+    },
+    "bias": {
+      "name": "bias_h2_c2",
+      "family": "bias",
+      "half_life": 2,
+      "cap": 2
+    },
+    "K1": {
+      "name": "K1_p1",
+      "family": "K1",
+      "k": 1,
+      "prior": 1
+    },
+    "K2": {
+      "name": "K2_p4",
+      "family": "K2",
+      "k": 2,
+      "prior": 4
+    },
+    "K3": {
+      "name": "K3_p4",
+      "family": "K3",
+      "k": 3,
+      "prior": 4
+    }
+  },
+  "model": {
+    "kind": "gpt-coal-response-offline-v1",
+    "base": {
+      "kind": "gpt-expert8-no-raw-v1",
+      "feature_names": [
+        "coal_amount",
+        "sysA",
+        "sysB",
+        "sys401",
+        "sys402",
+        "desliming473",
+        "desliming474",
+        "level"
+      ],
+      "expert": {
+        "intercept": 30.5,
+        "slope": -0.3,
+        "level_range": [
+          25,
+          75
+        ]
+      },
+      "reference": [
+        866.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "scale": [
+        142.03971374320466,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "bounds": [
+        [
+          416.0,
+          1222.0
+        ],
+        [
+          0.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ],
+        [
+          0.0,
+          1.0
+        ]
+      ],
+      "coefs": [
+        0.45990807390300403,
+        0.0,
+        0.45956455851314887,
+        -0.5917084301083879,
+        0.12122016446875544,
+        0.039343511513798626,
+        -0.20452781735939143
+      ],
+      "correction_limit": 2.0,
+      "alpha": 0.1,
+      "n": 177,
+      "days": 51,
+      "inactive_factors": [
+        "sysA"
+      ],
+      "fit_policy": "Huber(1.5); equal total weight per date; no intercept; ridge; bounded tanh residual",
+      "level_policy": "clamp-to-expert-range; show-boundary-estimate; pause-density-advice-outside"
+    },
+    "curves": {
+      "K1_p1": {
+        "kind": "gpt-coal-response-offline-v1",
+        "components": 1,
+        "prior_strength": 1,
+        "curves": [
+          [
+            14.35200564280851,
+            -3.3922715232980196
+          ]
+        ],
+        "mixing": [
+          1.0
+        ],
+        "sigma": 1.8071369465357063,
+        "support": [
+          {
+            "rows": 177,
+            "days": 51,
+            "level_range": [
+              29,
+              76
+            ],
+            "supported": true
+          }
+        ],
+        "identifiable": true,
+        "converged": true,
+        "iterations": 14,
+        "objective": 225.94462959542713,
+        "fit_n": 177
+      },
+      "K2_p4": {
+        "kind": "gpt-coal-response-offline-v1",
+        "components": 2,
+        "prior_strength": 4,
+        "curves": [
+          [
+            14.266360531649864,
+            -3.535020347261925
+          ],
+          [
+            16.538686150972218,
+            -6.984634809976989
+          ]
+        ],
+        "mixing": [
+          0.8586278648469124,
+          0.14137213515308716
+        ],
+        "sigma": 1.8581159901383737,
+        "support": [
+          {
+            "rows": 172,
+            "days": 51,
+            "level_range": [
+              29,
+              76
+            ],
+            "supported": true
+          },
+          {
+            "rows": 5,
+            "days": 5,
+            "level_range": [
+              30,
+              45
+            ],
+            "supported": false
+          }
+        ],
+        "identifiable": false,
+        "converged": true,
+        "iterations": 82,
+        "objective": 238.52439624252034,
+        "fit_n": 177
+      },
+      "K3_p4": {
+        "kind": "gpt-coal-response-offline-v1",
+        "components": 3,
+        "prior_strength": 4,
+        "curves": [
+          [
+            14.238304754043659,
+            -3.4499682613437272
+          ],
+          [
+            16.177661176752114,
+            -6.958802693800108
+          ],
+          [
+            16.178671911953472,
+            -6.958633087356524
+          ]
+        ],
+        "mixing": [
+          0.8050885730542316,
+          0.0974089133204626,
+          0.0975025136253054
+        ],
+        "sigma": 1.8703210899518512,
+        "support": [
+          {
+            "rows": 175,
+            "days": 51,
+            "level_range": [
+              29,
+              76
+            ],
+            "supported": true
+          },
+          {
+            "rows": 0,
+            "days": 0,
+            "level_range": [
+              null,
+              null
+            ],
+            "supported": false
+          },
+          {
+            "rows": 2,
+            "days": 2,
+            "level_range": [
+              30,
+              36
+            ],
+            "supported": false
+          }
+        ],
+        "identifiable": false,
+        "converged": false,
+        "iterations": 120,
+        "objective": 245.42534560347514,
+        "fit_n": 177
+      }
+    },
+    "training_ids": [
+      "old:4",
+      "old:5",
+      "old:6",
+      "old:7",
+      "old:8",
+      "old:9",
+      "old:10",
+      "old:11",
+      "old:12",
+      "old:13",
+      "old:14",
+      "old:15",
+      "old:16",
+      "old:17",
+      "old:18",
+      "old:19",
+      "old:20",
+      "old:21",
+      "old:22",
+      "old:23",
+      "old:24",
+      "old:25",
+      "old:27",
+      "old:28",
+      "old:29",
+      "old:30",
+      "old:31",
+      "old:32",
+      "old:34",
+      "old:35",
+      "old:36",
+      "old:37",
+      "old:38",
+      "old:39",
+      "old:40",
+      "old:41",
+      "old:43",
+      "old:44",
+      "old:45",
+      "old:46",
+      "old:47",
+      "old:49",
+      "old:50",
+      "old:51",
+      "old:52",
+      "old:53",
+      "old:54",
+      "old:55",
+      "old:56",
+      "old:57",
+      "old:58",
+      "old:59",
+      "old:60",
+      "old:61",
+      "old:63",
+      "old:64",
+      "old:65",
+      "old:66",
+      "old:67",
+      "old:71",
+      "old:68",
+      "old:69",
+      "old:70",
+      "old:73",
+      "old:74",
+      "old:75",
+      "old:76",
+      "old:77",
+      "old:80",
+      "old:81",
+      "old:78",
+      "old:79",
+      "old:85",
+      "old:82",
+      "old:83",
+      "old:84",
+      "old:89",
+      "old:86",
+      "old:87",
+      "old:88",
+      "old:90",
+      "old:91",
+      "old:95",
+      "old:92",
+      "old:93",
+      "old:94",
+      "old:96",
+      "old:97",
+      "old:98",
+      "old:103",
+      "old:100",
+      "old:101",
+      "old:102",
+      "old:107",
+      "old:104",
+      "old:105",
+      "old:106",
+      "old:111",
+      "old:108",
+      "old:109",
+      "old:110",
+      "old:115",
+      "old:112",
+      "old:113",
+      "old:114",
+      "old:118",
+      "old:116",
+      "old:117",
+      "old:120",
+      "old:119",
+      "old:124",
+      "old:121",
+      "old:122",
+      "old:123",
+      "old:126",
+      "old:125",
+      "old:127",
+      "old:128",
+      "old:129",
+      "old:130",
+      "old:131",
+      "old:132",
+      "old:133",
+      "old:134",
+      "old:135",
+      "old:136",
+      "old:137",
+      "old:138",
+      "old:139",
+      "old:140",
+      "old:141",
+      "old:142",
+      "old:143",
+      "old:144",
+      "old:145",
+      "old:146",
+      "old:147",
+      "old:148",
+      "old:149",
+      "old:150",
+      "old:151",
+      "old:153",
+      "old:154",
+      "old:155",
+      "old:156",
+      "old:157",
+      "old:158",
+      "old:159",
+      "old:160",
+      "old:161",
+      "old:162",
+      "old:163",
+      "old:164",
+      "old:165",
+      "old:166",
+      "old:167",
+      "old:168",
+      "old:169",
+      "old:170",
+      "old:171",
+      "old:172",
+      "old:173",
+      "old:174",
+      "old:175",
+      "old:176",
+      "old:177",
+      "old:178",
+      "old:179",
+      "old:180",
+      "old:181",
+      "old:182",
+      "old:183",
+      "old:184",
+      "old:185",
+      "old:186",
+      "old:187",
+      "old:188"
+    ],
+    "training_max_available_at": "2026-09-23T00:00:00+08:00",
+    "training_mean": 14.08559322033898
+  }
+}

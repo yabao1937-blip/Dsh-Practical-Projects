@@ -1,0 +1,18 @@
+{
+  "version": "gpt-coal-response-offline-v1",
+  "status": "locked_before_first_fit",
+  "scope": "GPT offline experiment only; no production activation or database writes",
+  "data": "177 previously developed historical rows; five minute-cadence recent pairs only for a separate exploratory check",
+  "historical_label_availability": "production day + 2 days 00:00 Asia/Shanghai; conservative assumption covering ambiguous midnight records, not an observed report timestamp",
+  "recent_label_availability": "actual sample date + 1 day 00:00 Asia/Shanghai; retrospective simulation only",
+  "folds": "51 dates: first 40 development, last 11 historical forward check; inner development 16/8,24/8,32/8 dates; purge training labels unavailable at first validation time",
+  "base": {"kind": "EXPERT8", "alpha": 0.1, "refit_each_training_window": true},
+  "bias": {"half_life_days": [2, 7], "cap": [2, 4], "prior_weight": 3, "residual_clip": 6},
+  "curves": {"components": [1, 2, 3], "prior_strength": [1, 4], "expert_center_slope": [15.5, -7.5], "level_coordinate": "(clip(level,25,75)-50)/25", "center_bounds": [5,35], "slope_bounds": [-15,0], "shared_seven_factor_correction": true, "student_t_df": 4, "sigma_floor": 1.5, "date_balanced": true, "starts": 3, "max_iter": 120},
+  "training_support": {"minimum_rows_per_component": 15, "minimum_dates_per_component": 6, "minimum_level_span": 15},
+  "gate": {"memory_days": 14, "half_life_days": 3, "minimum_labels": 3, "minimum_level_span": 10, "minimum_posterior": 0.75, "date_balanced_evidence": true, "fallback_base": "K1", "prediction_when_confident": "posterior weighted curves", "outside_selected_component_level_support": "fallback K1", "exclude_current_sample_and_unavailable_labels": true},
+  "selection": "minimum pooled rolling day-balanced MAE within each family; exact ties prefer smaller cap/shorter memory/stronger curve prior",
+  "complexity_evidence": "K2/K3 must improve rolling day-balanced MAE over K1 by at least 5 percent and improve at least 2 of 3 folds; require forward improvement and supported training components; these are engineering gates, not significance tests",
+  "recent_data_use": "never fitting or selecting; previously inspected and approximately aligned, not a blind or precise field acceptance test",
+  "promotion": "none; historical reuse and zero strictly aligned recent samples preclude automatic production switch"
+}
