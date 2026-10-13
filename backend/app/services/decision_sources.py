@@ -15,6 +15,7 @@ from .manual_measurements import METRICS
 from .decision_live import calculate, gpt_group
 from .state import load_store, AUTO_STATE_KEYS, SETTING_TO_STORE
 from ..gpt_coarse.timing import aligned_level, POLICY as TIMING_POLICY
+from ..gpt_coarse.amount import from_wash
 
 NODE_CELLS = {'raw-ash':'raw_ash', 'coal-rate':'coal_amount', 'tail-level':'level',
     'system-switches':'systems', 'desliming':'desliming', 'heavy-ash':'heavy_ash',
@@ -58,6 +59,7 @@ def config_view(db, when=None, inputs=None):
     inputs = inputs or Inputs(db, when)
     config = config_at(db, when)
     config['resolved_choices'] = {node:config['choices'].get(node, default_choice(inputs, node)) for node in NODE_CELLS}
+    config['resolved_choices']['coarse-amount'] = ''  # Always derived; old bindings remain only in saved history.
     choice = config['resolved_choices']['density-current']
     config['density_label'] = '未指定'
     if choice:
@@ -143,6 +145,7 @@ def collect_shared(inputs, config):
         cells[key].setdefault('unit', UNITS.get(key, ''))
     for belt in ('501','502'):
         cells['belt'+belt] = inputs.telemetry(f'TIA_3_4.TIA_3_4.{belt}/COAL_CAP', unit='t/h')
+    cells['coarse_amount'] = from_wash(cells['coal_amount'], inputs.hour)
     return cells
 
 

@@ -24,6 +24,8 @@ def historical_cells(db, start, end, rows):
     # Use the frozen end-of-hour configuration if it exists (including old point labels).
     if rows and rows[-1].snapshot['sources']['revision']==sources['revision']:
         sources = deepcopy(rows[-1].snapshot['sources'])
+    if rows and not rows[-1].snapshot['cells'].get('coarse_amount', {}).get('derivation'):
+        fallback['coarse_amount'] = deepcopy(rows[-1].snapshot['cells'].get('coarse_amount', {}))
     series = defaultdict(list)
     for key,c in fallback.items():
         if c.get('status') in ('manual','historical','default'):
@@ -78,6 +80,8 @@ def historical_cells(db, start, end, rows):
 
     # Unbound manual metrics still have durable event histories.
     for key,c in fallback.items():
+        if c.get('derivation'):
+            continue  # Derived values come from saved decisions, never raw manual amounts.
         node = next((n for n,k in NODE_CELLS.items() if k==key),None)
         if node and sources['resolved_choices'].get(node):
             continue
@@ -151,6 +155,9 @@ def historical_cells(db, start, end, rows):
         result[key] = mean_cell(key,series[key],dict(unit='t/h' if key=='heavy_amount' else '%',source='逐次决策存档'),start,end)
     if any(r.snapshot.get('input_timing') for r in rows):
         result['level'] = level_mean(rows,start,end,mean_cell)
+    amount_policies = {(r.snapshot['cells'].get('coarse_amount', {}).get('derivation') or {}).get('version') for r in rows}
+    if len(amount_policies) > 1:
+        result['coarse_amount'].update(value=None,status='missing',reason='小时内粗精煤泥量计算口径变化，暂不混合均值')
     densities = [c for c in series['density'] if valid(c,'density') and c.get('observed_at') and
                  start <= business_time(c['observed_at']) < end]
     basis = max(densities,key=lambda c:c['observed_at'],default={})

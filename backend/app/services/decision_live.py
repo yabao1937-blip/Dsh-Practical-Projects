@@ -10,6 +10,7 @@ from .guidance import density_guard_state
 from .modeling import MLR_FEATURES, predict_coarse_ash
 from ..gpt_coarse.runtime import ENGINES, features as expert_features, valid as valid_expert, explain as explain_expert
 from ..gpt_coarse.timing import POLICY as TIMING_POLICY, LEVEL_LAG_SECONDS, LEVEL_TOLERANCE_SECONDS
+from ..gpt_coarse.amount import from_wash, POLICY as AMOUNT_POLICY
 
 LABELS = dict(raw_ash='原煤灰分', coal_amount='入洗原煤量', level='精磁尾液位',
     sysA='A系统', sysB='B系统', sys401='401系统', sys402='402系统',
@@ -40,6 +41,7 @@ def gpt_group(store):
 def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sources=False):
     now = now or datetime.now(timezone.utc)
     cells = deepcopy(cells)
+    cells['coarse_amount'] = from_wash(cells.get('coal_amount'), now)
     stamp = now.isoformat(timespec='milliseconds')
     def output(value=None, status='missing', reason=''):
         return dict(value=value, status=status, reason=reason)
@@ -92,6 +94,7 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
         valid_model = valid_expert(model, method)
     model_id = hashlib.sha256(json.dumps(model, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16] if valid_model else None
     result = dict(policy='decision-live-v1', generated_at=stamp, inputs=cells,
+        input_derivations=dict(coarse_amount=deepcopy(AMOUNT_POLICY)),
         model=dict(engine='gpt', method=method, trained_at=(group or {}).get('trainedAt'), id=model_id),
         features=[], coarse_ash=output(), heavy_amount=output(), total_ash=output(),
         suggested_density=output(), guidance=None, warnings=warnings,

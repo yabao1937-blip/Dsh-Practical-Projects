@@ -4,7 +4,7 @@ const {App,ctx,elements}=require('./app_vm')();
 if(process.argv.includes('--parity-json')) {
     const cases=JSON.parse(fs.readFileSync(0,'utf8'));
     const values=cases.map(({cells,model})=>{
-        const v=k=>cells[k].value;
+        const v=k=>k==='coarse_amount'?cells.coal_amount.value/40:cells[k].value;
         const coarse=App._coarsePredict(Object.fromEntries(App.MLR_FEATURES.map(k=>[k,v(k)])),model);
         const heavy=v('belt501')+v('belt502')-v('float_amount')-v('coarse_amount');
         const total=App.calcTotalAsh(v('heavy_ash'),heavy,v('float_ash'),v('float_amount'),coarse,v('coarse_amount'));

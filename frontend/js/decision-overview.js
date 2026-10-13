@@ -62,7 +62,7 @@ const DecisionOverviewPage = {
             }
         }
     },
-    fixedSource(id) { return this.summaryChildren.has(id) || id === 'heavy-amount'; },
+    fixedSource(id) { return this.summaryChildren.has(id) || id === 'heavy-amount' || (this.liveMode() && id==='coarse-amount'); },
     sharedSources() { return typeof DecisionSources!=='undefined' && DecisionSources.enabled(this); },
     densityLabel() { return this.hourMode() ? DecisionHourly.presentation()?.density_label || '等待读取' : this.sharedSources() ? DecisionRealtime.result?.density_label || '等待读取' : 'A304'; },
     sourceLocked(id) { return this.fixedSource(id) || (this.liveMode() && (['coarse','density'].includes(id) || (id==='density-current' && !this.sharedSources()))); },
@@ -160,6 +160,15 @@ const DecisionOverviewPage = {
             if(this.sharedSources()) {
                 const shared=DecisionSources.display(this,node);
                 if(shared) return shared;
+            }
+            if(node.id==='coarse-amount') {
+                const input=this.pointDisplay(this.nodes.find(n=>n.id==='coal-rate'));
+                const valid=Number.isFinite(input.numericValue) && input.numericValue>=0 && input.unit==='t/h' && (this.displayAvailable(input) || input.held);
+                const value=valid?input.numericValue/40:null;
+                return {calculated:true,formula:'入洗原煤量 ÷ 40',bound:false,value:this.number(value,2,'t/h'),
+                    numericValue:value,unit:'t/h',available:valid && !input.held && !input.stopped,held:input.held,stopped:input.stopped,
+                    badge:input.stopped?'设备停机':valid?'计算':'不可用',source:'计算 · 入洗原煤量 ÷ 40',sampleAt:input.sampleAt,
+                    reason:valid?'入洗：粗精 = 40：1':'入洗原煤量不可用',inputs:[{node:{title:'入洗原煤量'},display:input}]};
             }
             if (node.id === 'density-current') {
                 const matches=this.displayPoints().filter(p=>p.item_id==='TIA_4_1.TIA_4_1.A304/MD');
@@ -710,7 +719,7 @@ const DecisionOverviewPage = {
             feature('desliming','脱粉系统状态',['desliming473','desliming474'],370,flags),
             feature('tail-level','精磁尾液位',['level'],485),
             n('coarse-amount','粗精煤泥量',rate(s.amounts.coarse),s.reader.coarseAmountLayer() === '计算' ? '315 筛量 − 筛下水量' : s.reader.coarseAmountLayer(),
-                `量的计算：315 筛量 ${rate(s.store.coarseCalc?.screen315)} − 筛下水量 ${rate(s.store.coarseCalc?.waterUnder)}。这是组分产量，与“入洗原煤量”模型因素不同。`,
+                this.liveMode()?'自动采用同次入洗原煤量 ÷ 40，入洗：粗精 = 40：1；缺数与停机状态跟随入洗量。':`量的计算：315 筛量 ${rate(s.store.coarseCalc?.screen315)} − 筛下水量 ${rate(s.store.coarseCalc?.waterUnder)}。这是组分产量，与“入洗原煤量”模型因素不同。`,
                 {...family('coarse',1260,600),parent:'coarse',unit:'t/h',numericValue:s.amounts.coarse,...amountInfo('coarseAmount','coarse')}),
             n('coarse-slime','原煤煤泥含量','待补充','工艺因素 · 尚未进入模型','目前的粗精模型使用 10 个输入因素；原煤煤泥含量尚无独立输入字段，也未进入模型。后续需要人工采样或可验证的测量来源。',
                 {...family('coarse',1260,715),parent:'coarse',reference:true}),
@@ -773,6 +782,7 @@ const DecisionOverviewPage = {
         if(!this.displayAvailable(display) && !(display.pending && Number.isFinite(display.numericValue))) return '不可用';
         if(['heavy','float'].includes(node.id)) return '汇总';
         if(['coarse','heavy-amount'].includes(node.id)) return '计算';
+        if(this.liveMode() && node.id==='coarse-amount') return '计算';
         const hourly=this.hourMode();
         const result=hourly?DecisionHourly.presentation():typeof DecisionRealtime!=='undefined'?DecisionRealtime.result:null;
         const key=typeof DecisionSources!=='undefined'?DecisionSources.nodes[node.id]:null;

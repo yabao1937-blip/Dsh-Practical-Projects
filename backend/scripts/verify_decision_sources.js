@@ -8,7 +8,7 @@ const copy=x=>JSON.parse(JSON.stringify(x)),choice='["kep","float_amount"]';
 ctx.window.location.protocol='http:';
 page.view='gpt';page.renderGraph=page.renderContext=page.renderInspector=()=>{};
 page.active=()=>true;page.displayPoints=()=>[];
-page.pointChoices={'float-amount':choice,'density-current':'["kep","a303"]'};
+page.pointChoices={'float-amount':choice,'density-current':'["kep","a303"]','coarse-amount':'["manual-measurements","coarse_slime_amount"]'};
 const calls=[],toasts=[];
 App.showToast=(message,kind)=>toasts.push({message,kind});
 let config={revision:0,choices:{},resolved_choices:{'density-current':'["kep","a304"]'},density_label:'A304'};
@@ -42,6 +42,18 @@ async function verify(){
     live.result.cells.level={...live.result.cells.level,value:null,status:'missing',reason:'提前 90 秒液位缺失'};
     assert.equal(sources.display(page,{id:'tail-level'}).available,false);
     assert.equal(sources.display(page,{id:'tail-level'}).value,'—');
+    live.result={cells:{coal_amount:{value:800,status:'good',unit:'t/h'},
+        coarse_amount:{value:20,status:'calculated',source:'计算 · 入洗原煤量 ÷ 40',unit:'t/h'}}};
+    let derived=page.pointDisplay({id:'coarse-amount'});
+    assert.equal(derived.numericValue,20);assert.equal(derived.calculated,true);
+    assert.equal(derived.inputs[0].display.numericValue,800);assert.equal(derived.formula,'入洗原煤量 ÷ 40');
+    assert.equal(page.sourceLocked('coarse-amount'),true);assert.equal(page.sourceBadge({id:'coarse-amount'},derived),'计算');
+    live.result.cells.coarse_amount.status='stopped';
+    derived=page.pointDisplay({id:'coarse-amount'});
+    assert.equal(derived.available,false);assert.equal(derived.numericValue,20);assert.equal(page.sourceBadge({id:'coarse-amount'},derived),'设备停机');
+    live.result.cells.coarse_amount={value:null,status:'missing'};
+    assert.equal(page.pointDisplay({id:'coarse-amount'}).value,'—');
+    page.view='production';assert.equal(page.sourceLocked('coarse-amount'),false);page.view='gpt';
     ctx.Api.decisionSources=api;live.update=update;
     const pending=[];
     ctx.Api.getDecisionCurrent=()=>new Promise(resolve=>pending.push(resolve));

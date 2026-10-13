@@ -17,7 +17,7 @@ const DecisionSources = {
             let config=await Api.decisionSources();
             if (!config.revision) {
                 const choices=Object.fromEntries(Object.entries(this.legacyChoices).filter(([node,value])=>
-                    node in this.nodes && node!=='density-current'));
+                    node in this.nodes && !['density-current','coarse-amount'].includes(node)));
                 try { config=await Api.decisionSources({revision:0,choices}); }
                 catch (error) { config=await Api.decisionSources(); if(!config.revision) throw error; }
             }
@@ -54,6 +54,15 @@ const DecisionSources = {
         const key=this.nodes[node.id];
         if(!key) return null;
         const c=DecisionRealtime.result?.cells?.[key];
+        if(node.id==='coarse-amount') {
+            const input=this.display(page,{id:'coal-rate'});
+            return {bound:false,shared:true,calculated:true,formula:'入洗原煤量 ÷ 40',
+                value:page.number(c?.value,2,'t/h'),numericValue:c?.value ?? null,unit:'t/h',
+                available:c?.status==='calculated' && Number.isFinite(c?.value),held:c?.status==='held',
+                stopped:c?.status==='stopped',badge:c?.status==='stopped'?'设备停机':c?.status==='calculated'?'计算':'不可用',
+                source:c?.source || '计算 · 入洗原煤量 ÷ 40',reason:c?.reason || '等待入洗原煤量',sampleAt:c?.observed_at,
+                inputs:[{node:{title:'入洗原煤量'},display:input}]};
+        }
         const choice=this.config?.resolved_choices[node.id];
         const item=page.displayPoints().find(p=>page.pointIdentity(p)===choice);
         if(!c) return {bound:true,item,available:false,value:'—',numericValue:null,source:this.error || '等待读取共享输入'};
