@@ -53,10 +53,9 @@ const DecisionRecentAsh = {
         const rows=this.rows(), html=rows.map(row=>{
             const [date,start]=this.parts(row.start), [endDate,end]=this.parts(row.end);
             const coverage=Number.isFinite(row.coverage)?` · 有效覆盖 ${(row.coverage*100).toFixed(1)}%`:'';
-            const title=`${date} ${start} — ${endDate} ${end} · ${row.reason}${coverage}`;
+            const title=`${this.error?this.error+' · ':''}${date} ${start} — ${endDate} ${end} · ${row.reason}${coverage}`;
             return `<tr data-decision-key="recent-ash-${row.start}" class="is-${row.status}" title="${page.escape(title)}"><td>${start}–${end}</td><td>${page.number(row.value,2)}</td></tr>`;
         }).join('');
-        const note=this.error?'读取失败 · 点击刷新数据重试':'北京时间 · 最新小时在上';
-        return `<section class="decision-recent-ash" data-decision-key="recent-ash" aria-labelledby="decision-recent-ash-title" aria-busy="${!!this.inFlight}" style="left:${anchor.x}px;top:0;width:${anchor.w}px;height:${anchor.y-22}px"><h3 id="decision-recent-ash-title">近10小时平均灰分</h3><table aria-label="最近10个已结束小时的平均总灰分"><thead><tr><th scope="col">时段</th><th scope="col">灰分 (%)</th></tr></thead><tbody>${html || `<tr><td colspan="2" class="decision-recent-ash-empty">${this.error?'暂时无法读取':this.enabled(page)?'正在读取…':'请通过服务地址查看'}</td></tr>`}</tbody></table><p class="decision-recent-ash-note${this.error?' is-error':''}" title="${page.escape(this.error || '沿用已保存小时统计；悬停查看日期、覆盖情况与缺数原因')}">${note}</p></section>`;
+        return `<section class="decision-recent-ash" data-decision-key="recent-ash" aria-label="近10小时平均灰分" aria-busy="${!!this.inFlight}" style="left:${anchor.x}px;top:0;width:${anchor.w}px;height:${anchor.y-22}px"><table aria-label="最近10个已结束小时的时段与平均总灰分（%）"><colgroup><col style="width:62%"><col></colgroup><tbody>${html || `<tr><td colspan="2" class="decision-recent-ash-empty" title="${page.escape(this.error || (this.enabled(page)?'正在读取':'请通过服务地址查看'))}">—</td></tr>`}</tbody></table></section>`;
     },
 };
