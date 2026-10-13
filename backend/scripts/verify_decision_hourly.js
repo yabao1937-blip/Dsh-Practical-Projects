@@ -8,7 +8,7 @@ vm.runInContext(fs.readFileSync('frontend/js/decision-hourly.js','utf8')+';this.
 const h=context.hourly;
 const page={view:'gpt',hourMode:()=>true,active:()=>true,renderGraph(){},renderContext(){},renderInspector(){},
     summaryChildren:new Map(),number:(v,d=2,u='')=>Number.isFinite(v)?v.toFixed(d)+(u?' '+u:''):'—',time:v=>v,escape:v=>String(v??'')};
-const response=()=>({period:{start:'2026-10-09T02:00:00Z',end:'2026-10-09T03:00:00Z',apply_end:'2026-10-09T04:00:00Z',apply_label:'11:00–12:00'},
+const response=()=>({period:{start:'2026-10-09T02:00:00Z',end:'2026-10-09T03:00:00Z',apply_end:'2026-10-09T04:00:00Z',label:'10-09 10:00–11:00',apply_label:'11:00–12:00'},
     checked_at:'2026-10-09T03:24:00Z',cells:{raw_ash:{value:40,status:'average',unit:'%',sample_count:3},
         systems:{components:{'401':{value:.5},'402':{value:0}}}},coverage:{}});
 const completeHour=()=>({...response(),
@@ -120,6 +120,7 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
     const source={resolved_choices:{density:'A304'}};
     const advised=()=>{
         const result={...completeHour(),sources:source,density_label:'A304',
+            total_ash:{value:8.76,status:'average',aggregation:'output-mass-v1',sample_count:100,reason:'部分有效产煤量加权'},
             suggested_density:{value:1.472,status:'calculated',reason:'按上一小时工况建议整体下调'},guidance:{direction:'down'}};
         result.cells.suggested_density=result.suggested_density;
         return result;
@@ -128,6 +129,7 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
     await h.update(page,true); assert.equal(h.inFlight,shared,'Instant/hour views share one request');
     const htmlPending=h.summary(page,root);
     assert(!htmlPending.includes('1.472') && htmlPending.includes('更新于 —'));
+    assert(h.ashSummary(page).includes('小时灰分') && h.ashSummary(page).includes('<strong>—<small>'));
     resolve(advised()); await pending;
     assert.equal(renders,1,'Hourly completion redraws the instant page');
     let summary=h.summary(page,root);
@@ -135,7 +137,25 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
     assert(!summary.includes('decision-badge') && !summary.includes('11:00–12:00') && !summary.includes('A304'));
     assert(summary.includes('top:118px') && !summary.includes('data-decision-node='),'Summary sits above the root without adding a calculation node');
     assert.equal(h.display(page,{id:'density'}).value,'1.472','Summary and cumulative view use the same value');
+    assert(h.ashSummary(page).includes('<strong>8.76<small>') && h.ashSummary(page).includes('10-09 10:00–11:00'),
+        'Toolbar displays the returned hourly statistic and its own period, not the application period');
+    const savedAdvice=h.result.suggested_density;
+    h.result.suggested_density={value:null};h.result.coverage.ratio=0;
+    assert(h.ashSummary(page).includes('<strong>8.76<small>'),'Valid partial ash remains visible without a density recommendation');
+    for(const value of [null,NaN,Infinity,-1,101]) {
+        h.result.total_ash.value=value;
+        assert(h.ashSummary(page).includes('<strong>—<small>'),'Missing or invalid hourly ash must not be fabricated');
+    }
+    h.result.total_ash.value=0;
+    assert(h.ashSummary(page).includes('<strong>0.00<small>'),'Zero is a valid hourly ash');
+    h.result.total_ash.value=8.76;h.result.total_ash.status='missing';
+    assert(h.ashSummary(page).includes('<strong>—<small>'),'An invalid status cannot expose a retained numeric value');
+    h.result.total_ash.status='average';h.result.suggested_density=savedAdvice;
+    clock=36*60*1000;
+    assert(h.ashSummary(page).includes('<strong>—<small>'),'At the next hour the old statistic expires');
+    clock=0;
     page.hourMode=()=>true; assert.equal(h.summary(page,root),'','No duplicate summary in cumulative mode');
+    assert.equal(h.ashSummary(page),'','Hourly toolbar metric only belongs to the instant view');
     await h.update(page); assert.equal(h.inFlight,null,'Switching modes respects the shared refresh throttle');
     page.hourMode=()=>false;
     context.DecisionSources.config={resolved_choices:{density:'A303'}};
@@ -150,6 +170,7 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
     context.DecisionSources.config=null;
     pending=h.update(page,true); reject(new Error('小时统计离线')); await pending;
     assert(h.summary(page,root).includes('更新于 —') && !h.summary(page,root).includes('1.472'));
+    assert(h.ashSummary(page).includes('<strong>—<small>') && h.ashSummary(page).includes('小时统计离线'));
     context.DecisionSources.saving=true;
     await h.update(page,true); assert.equal(h.inFlight,null,'Do not query hourly advice while source selection is being saved');
     context.DecisionSources.saving=false;
@@ -158,7 +179,14 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
     resolve({...advised(),checked_at:'2026-10-09T03:59:56Z'}); await pending;
     assert.equal(h.presentation(),null,'Slow replies cannot prolong the previous hour');
     assert(!h.summary(page,root).includes('1.472'));
+    assert(h.ashSummary(page).includes('<strong>—<small>'),'Delayed responses cannot show the previous period ash');
+    clock=0;pending=h.update(page,true);
+    resolve({...advised(),checked_at:'2026-10-12T08:30:00Z',period:{start:'2026-10-12T07:00:00Z',end:'2026-10-12T08:00:00Z',
+        apply_end:'2026-10-12T09:00:00Z',label:'10-12 15:00–16:00'}});await pending;
+    assert(h.ashSummary(page).includes('15:00–16:00') && h.ashSummary(page).includes('<strong>8.76<small>'),
+        'At 16:30 Beijing time show the completed 15:00–16:00 hour');
     page.view='production'; await h.update(page,true);
     assert.equal(h.inFlight,null); assert.equal(h.summary(page,root),'','DS does not request or display the hourly summary');
+    assert.equal(h.ashSummary(page),'','DS has no hourly ash toolbar');
     console.log('Hourly UI: gap severity, instant summary, shared requests, source changes, failures and rollover passed.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

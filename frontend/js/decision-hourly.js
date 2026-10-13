@@ -122,6 +122,13 @@ const DecisionHourly = {
         return gaps;
     },
     gapClass(gap) { return gap ? gap.severity==='error'?' is-hourly-gap':' is-hourly-warning' : ''; },
+    ashSummary(page) {
+        if(!this.enabled(page) || page.hourMode()) return '';
+        const r=this.presentation(), ash=r?.total_ash;
+        const value=ash?.status==='average' && Number.isFinite(ash.value) && ash.value>=0 && ash.value<=100 ? ash.value : null;
+        const title=[r?.period?.label || '上一完整小时',ash?.reason || this.error || (value===null?'该小时暂无有效总灰分':'小时平均总灰分')].join(' · ');
+        return `<span class="decision-ash-metric" data-decision-key="hourly-ash" title="${page.escape(title)}"><span class="decision-total-label">小时灰分</span><strong>${page.number(value,2)}<small> %</small></strong></span>`;
+    },
     summary(page,root) {
         if(!this.enabled(page) || page.hourMode() || !root) return '';
         const r=this.presentation(), value=r?.suggested_density?.value, available=Number.isFinite(value);

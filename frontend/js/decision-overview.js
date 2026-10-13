@@ -564,8 +564,11 @@ const DecisionOverviewPage = {
         const density=document.querySelector('#decision-board [data-decision-node="density"]');
         if(!density) return;
         const bar=toolbar.getBoundingClientRect(), card=density.getBoundingClientRect();
-        const half=total.offsetWidth/2, center=card.left+card.width/2-bar.left;
+        const half=total.offsetWidth/2, first=total.querySelector('.decision-ash-metric');
+        // Keep the instant value above density; place the hourly value on its right.
+        const center=card.left+card.width/2-bar.left+half-(first?.offsetWidth ?? total.offsetWidth)/2;
         total.style.left=`${Math.max(half+12,Math.min(bar.width-half-12,center))}px`;
+        toolbar.style.setProperty('--dm-total-height',`${total.offsetHeight}px`);
         const ash=total.getBoundingClientRect();
         const actions=document.getElementById('decision-actions').getBoundingClientRect();
         const zoom=toolbar.querySelector('.decision-zoom').getBoundingClientRect();
@@ -884,7 +887,8 @@ const DecisionOverviewPage = {
         const totalReason=this.liveMode() ? pending?'更新中 · 上轮结果仅供对照':shown?.total_ash?.reason || (hourly?DecisionHourly.error:DecisionRealtime.error) || '正在计算' : '';
         const total=this.liveMode()?`<strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'产煤量加权总灰分':'小时平均总灰分'):pending?'上轮总灰分':'预测总灰分'} ${this.number(shown?.total_ash?.value,2,'%')}</strong><span title="${this.escape(totalReason)}">${this.escape(totalReason.length>45?(hourly && Number.isFinite(shown?.total_ash?.value)?'按已保存口径统计 · 详见小时灰分': '输入待补充，点击建议密度查看原因'):totalReason)}</span>`:`公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}`;
         const ashHistory=this.view==='gpt'?'<button type="button" class="decision-ash-open" data-ash-history aria-haspopup="dialog">查看小时灰分 ↗</button><button type="button" class="decision-ash-open" data-evidence-open>工况分段 / 调密跟踪 ↗</button>':'';
-        this.renderHTML('decision-toolbar-total',this.instantLayout()?`<span class="decision-total-label">预测总灰分</span><strong>${this.number(this.liveMode()?shown?.total_ash?.value:s.formula,2)}<small> %</small></strong>`:'');
+        const hourAsh=typeof DecisionHourly!=='undefined'?DecisionHourly.ashSummary(this):'';
+        this.renderHTML('decision-toolbar-total',this.instantLayout()?`<span class="decision-ash-metric" data-decision-key="instant-ash"><span class="decision-total-label">预测总灰分</span><strong>${this.number(this.liveMode()?shown?.total_ash?.value:s.formula,2)}<small> %</small></strong></span>${hourAsh}`:'');
         document.getElementById('decision-toolbar-total').hidden=!this.instantLayout();
         const totalPanel=this.instantLayout()
             ? ''

@@ -282,9 +282,11 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .decision-actions .decision-manual-open { margin:0; white-space:nowrap; }
 .decision-actions [hidden] { display:none; }
 .decision-toolbar { position:relative; }
-.decision-total-ash { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:240px; display:flex; align-items:center; justify-content:center; gap:12px; color:var(--dm-text); white-space:nowrap; }
+.decision-total-ash { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:max-content; max-width:calc(100% - 24px); display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:12px 28px; color:var(--dm-text); white-space:nowrap; }
+.decision-ash-metric { display:flex; align-items:center; justify-content:center; gap:12px; width:220px; }
+.decision-ash-metric[data-decision-key="instant-ash"] { width:240px; }
 .decision-total-ash[hidden] { display:none; }
-.decision-toolbar.has-total-row { padding-bottom:64px; }
+.decision-toolbar.has-total-row { padding-bottom:calc(var(--dm-total-height,40px) + 24px); }
 .decision-toolbar.has-total-row .decision-total-ash { top:auto; bottom:12px; transform:translateX(-50%); }
 .decision-total-label { font-size:18px; font-weight:600; }
 .decision-total-ash strong { font:600 30px/1.2 Bahnschrift, 'DIN Alternate', 'Microsoft YaHei', sans-serif; font-variant-numeric:tabular-nums; color:var(--dm-cyan); }
