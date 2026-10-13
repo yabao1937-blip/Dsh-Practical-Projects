@@ -27,7 +27,7 @@ def window(now):
 def compact_cell(c):
     result = {k:deepcopy(c[k]) for k in ('value','status','reason','source','unit','observed_at','created_at',
         'record_id','metric','input_path','item_id','source_id','point_key','raw_value','density_label','entered_at',
-        'retained_sample','raw_sample','key','alignment','derivation') if k in c}
+        'retained_sample','raw_sample','key','alignment','derivation','definition_id') if k in c}
     effective = c.get('effective_density') or {}
     if effective.get('raw_sample'):
         result['raw_sample'] = deepcopy(effective['raw_sample'])
@@ -50,9 +50,10 @@ def context_definition(result, store):
     definitions = {}
     def collect(c):
         sample = c.get('sample') or {}
-        if sample.get('definition_id'):
+        definition = sample.get('definition_id') or c.get('definition_id')
+        if definition:
             identity = str([c.get('source_id'),c.get('point_key'),c.get('item_id')])
-            definitions[identity] = dict(definition_id=sample['definition_id'],unit=c.get('unit'))
+            definitions[identity] = dict(definition_id=definition,unit=c.get('unit'))
         parts = c.get('components') or []
         for part in parts.values() if isinstance(parts,dict) else parts:
             collect(part)

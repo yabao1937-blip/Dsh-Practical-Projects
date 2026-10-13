@@ -15,7 +15,8 @@ from app.telemetry.domain import iso_time, normalize
 from app.telemetry.models import TelemetryReading, TelemetryPoint
 from app.decision_hourly.models import DecisionCycleSample
 from app.decision_hourly.service import record, context_definition, build_hour
-from app.decision_hourly.statistics import mean_cell
+from app.decision_hourly.statistics import mean_cell, hour_advice, digest
+from app.decision_hourly.references import hydrate_rows
 from app.models import DecisionSourceRevision
 from test_hourly_brief import sessions, HOUR
 from test_decision_sources import seeded
@@ -60,6 +61,56 @@ def test_bad_latest_is_not_replaced_with_older_good(sessions,seeded):
         c=shared_snapshot(db)['cells']['level']
         assert c['value'] is None and '质量异常' in c['reason']
         assert c['sample']['received_at']==iso_time(HOUR-timedelta(seconds=91))
+
+
+def test_missing_level_keeps_context_but_not_a_reading_or_valid_advice(sessions,seeded):
+    levels(sessions,seeded[0],[(90,75,0)])
+    with sessions() as db:
+        good=shared_snapshot(db)
+        context=context_definition(good,load_store(db))
+    levels(sessions,seeded[0],[])
+    with sessions.begin() as db:
+        missing=shared_snapshot(db)
+        level=missing['cells']['level']
+        assert level['status']=='missing' and level['value'] is None
+        assert not level.get('sample') and level['observed_at'] is None
+        assert level['definition_id']==good['cells']['level']['sample']['definition_id']
+        assert missing['suggested_density']['value'] is None
+        assert context_definition(missing,load_store(db))==context
+        assert record(db,HOUR,missing)
+        stored=hydrate_rows(db,list(db.scalars(select(DecisionCycleSample))))[0]
+        assert stored.snapshot['cells']['level']['definition_id']==level['definition_id']
+        assert stored.snapshot['cells']['level']['value'] is None
+        assert not stored.snapshot['cells']['level'].get('batch_id')
+    # A 50-second gap still counts as ten invalid slots, not a context change.
+    start=HOUR-timedelta(hours=1)
+    rows=[]
+    for i in range(720):
+        snapshot=deepcopy(missing if 100<=i<110 else good)
+        if not 100<=i<110:
+            snapshot['suggested_density']=dict(value=1.5,status='calculated')
+            snapshot['cells']['density'].update(value=1.48,status='good')
+        rows.append(SimpleNamespace(slot=int(start.timestamp())//5+i,fingerprint=str(i),
+            context_key=digest(context_definition(snapshot,{})),snapshot=snapshot))
+    output,coverage,_=hour_advice(rows,start,HOUR,dict(value=1.48,status='good',observed_at=iso_time(HOUR-timedelta(seconds=2))))
+    assert output['value']==1.5
+    assert coverage['valid_count']==710 and coverage['longest_gap_seconds']==50
+
+
+@pytest.mark.parametrize('change',['scale','node_id','disabled'])
+def test_missing_level_still_detects_real_definition_changes(sessions,seeded,change):
+    levels(sessions,seeded[0],[])
+    with sessions.begin() as db:
+        original=context_definition(shared_snapshot(db),load_store(db))
+        point=db.get(TelemetryPoint,(seeded[0].source_id,'point2'))
+        if change=='disabled':
+            point.enabled=False
+        else:
+            point.config={**point.config,change:1.01 if change=='scale' else 'ns=2;s=changed-level'}
+        db.flush()
+        changed=shared_snapshot(db)
+        assert changed['cells']['level']['value'] is None
+        assert context_definition(changed,load_store(db))!=original
 
 
 def test_old_point_definition_and_manual_default_cannot_supply_level(sessions,seeded):

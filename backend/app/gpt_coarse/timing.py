@@ -34,6 +34,8 @@ def aligned_level(inputs, current):
     if not point or not point.enabled:
         return cell(reason='提前 90 秒液位缺失：未指定有效液位采集点', **meta)
     identity = definition_id(point.config)
+    # Configuration identity survives a missing observation; it is not a reading.
+    meta['definition_id'] = identity
     candidates = []
 
     def add(sample):
