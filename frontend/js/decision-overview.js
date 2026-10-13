@@ -733,8 +733,8 @@ const DecisionOverviewPage = {
         if(modeLabel) modeLabel.textContent=this.liveMode()?'实时计算 · 人工执行':'只读决策视图';
         if(modeNote) modeNote.textContent=this.liveMode()?'GPT 链路：当前输入 → 粗精煤泥灰分预测 → 三组分总灰分 → 建议密度。数据来源与后续小时简报共享；输入变化后重新计算，缺失时显示原因。建议由人工确认执行。虚线表示尚未进入模型的工况参考。':'点击节点选择采集点，卡片随读数更新；点击画布空白处收起。采集显示不改变建议计算，相关连线作为虚线对照。建议密度保留计算值，点位显示为采集对照。';
         if (this.liveMode()) {
-            const result=DecisionRealtime.presentation(),pending=DecisionRealtime.pending();
-            this.renderHTML('decision-context',`<span>计算链 <strong>GPT 实时预测 → 总灰分 → 建议密度</strong></span><span>密度基准 <strong>${this.escape(this.densityLabel())}</strong></span><span>模型 <strong>${this.escape(result?.model?.method?.toUpperCase() || '等待模型')}</strong></span>${this.sharedSources()?`<span role="status">${this.escape(DecisionSources.error || (DecisionSources.saving?'来源保存中':DecisionSources.config?'来源已共享 · 后续小时简报同步':'来源读取中'))}</span>`:''}<span>${pending?'上次计算':'计算时间'} <strong>${this.escape(result?this.time(result.generated_at):DecisionRealtime.error || '正在计算')}</strong></span><span class="decision-refresh-status" role="status">${pending?'更新中 · 上轮结果仅供对照':result?'当前输入已参与计算 · 建议由人工执行':DecisionRealtime.error || '等待读取共享输入'}</span>`);
+            const result=DecisionRealtime.presentation();
+            this.renderHTML('decision-context',`<span>模型：<strong>${this.escape(result?.model?.method?.toUpperCase() || '—')}</strong></span><span>${this.escape(result?this.time(result.generated_at):'—')}</span>`);
             return;
         }
         const s = this.snapshot, sources = {manual:'人工总灰分',formula:'三组分公式',entry:'501 导入 / 录入',ash501:'501 灰分取值'};
