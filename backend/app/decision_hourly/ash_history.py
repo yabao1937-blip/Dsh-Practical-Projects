@@ -67,6 +67,7 @@ def read_ash_hours(db, start: datetime | None = None, end: datetime | None = Non
             frozen=row is not None))
         items[-1].update(aggregation=MASS if is_mass else 'legacy-sample-mean',
             mass_t=mass if available and is_mass else None,
+            ash_mass_t=ash_mass if available and is_mass else None,
             valid_seconds=cell.get('valid_seconds') if is_mass else None)
         if available and is_mass:
             seconds = cell.get('valid_seconds',0)

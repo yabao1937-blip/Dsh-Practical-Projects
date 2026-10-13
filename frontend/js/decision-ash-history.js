@@ -1,20 +1,19 @@
-/* Frozen hourly prediction history. Never recompute old hours in the browser. */
+/* Minute-bounded saved prediction history. Never replay a model in the browser. */
 const DecisionAshHistory = {
     dialog:null, requestId:0, controller:null, result:null, page:null, position:null, drag:null,
     escape(value) { return String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
     number(value,digits=2) { return Number.isFinite(value)?value.toFixed(digits):'—'; },
     localParts(stamp) { return new Date(Date.parse(stamp)+8*3600000).toISOString().slice(0,16).split('T'); },
     label(stamp) { return this.localParts(stamp).join(' '); },
-    hours() { return Array.from({length:24},(_,i)=>`<option value="${String(i).padStart(2,'0')}">${String(i).padStart(2,'0')}:00</option>`).join(''); },
     ensure() {
         if(this.dialog) return;
         this.dialog=document.createElement('dialog');
         this.dialog.id='decision-ash-dialog'; this.dialog.className='decision-ash-dialog';
         this.dialog.setAttribute('aria-labelledby','decision-ash-title');
-        this.dialog.innerHTML=`<header class="ash-dialog-header" tabindex="0" aria-label="拖动标题栏或按方向键移动窗口"><div><h2 id="decision-ash-title">总灰分 · 小时统计</h2><span>拖动标题栏移动 · 北京时间</span></div><button type="button" data-ash-close aria-label="关闭小时灰分弹窗">×</button></header>
+        this.dialog.innerHTML=`<header class="ash-dialog-header" tabindex="0" aria-label="拖动标题栏或按方向键移动窗口"><div><h2 id="decision-ash-title">总灰分 · 区间统计</h2><span>拖动标题栏移动 · 北京时间</span></div><button type="button" data-ash-close aria-label="关闭区间灰分弹窗">×</button></header>
             <div class="ash-dialog-body"><form id="ash-range-form"><fieldset id="ash-range-fields"><div class="ash-range-fields">
-            <label>开始时间<span><input type="date" id="ash-start-date" aria-label="开始日期" required><select id="ash-start-hour" aria-label="开始小时">${this.hours()}</select></span></label>
-            <label>结束时间<span><input type="date" id="ash-end-date" aria-label="结束日期" required><select id="ash-end-hour" aria-label="结束小时">${this.hours()}</select></span></label>
+            <label>开始时间<span><input type="date" id="ash-start-date" aria-label="开始日期" required><input type="time" id="ash-start-time" aria-label="开始时分" step="60" required></span></label>
+            <label>结束时间<span><input type="date" id="ash-end-date" aria-label="结束日期" required><input type="time" id="ash-end-time" aria-label="结束时分" step="60" required></span></label>
             <button type="submit" class="ash-query">查询区间</button></div></fieldset></form>
             <div id="ash-history-status" role="status" aria-live="polite"></div><div id="ash-history-result"></div></div>`;
         document.body.append(this.dialog);
@@ -91,14 +90,14 @@ const DecisionAshHistory = {
     },
     selectedRange() {
         const value=id=>this.dialog.querySelector('#'+id).value;
-        return {start:`${value('ash-start-date')}T${value('ash-start-hour')}:00:00+08:00`,
-            end:`${value('ash-end-date')}T${value('ash-end-hour')}:00:00+08:00`};
+        return {start:`${value('ash-start-date')}T${value('ash-start-time')}:00+08:00`,
+            end:`${value('ash-end-date')}T${value('ash-end-time')}:00+08:00`};
     },
     setRange(period,latest) {
         for(const key of ['start','end']) {
             const [date,time]=this.localParts(period[key]);
             this.dialog.querySelector(`#ash-${key}-date`).value=date;
-            this.dialog.querySelector(`#ash-${key}-hour`).value=time.slice(0,2);
+            this.dialog.querySelector(`#ash-${key}-time`).value=time;
             this.dialog.querySelector(`#ash-${key}-date`).max=this.localParts(latest)[0];
         }
     },
@@ -113,15 +112,15 @@ const DecisionAshHistory = {
         const fields=this.dialog.querySelector('#ash-range-fields');
         fields.disabled=!range;
         this.result=null; this.dialog.querySelector('#ash-history-result').innerHTML='';
-        this.status('正在读取小时统计…');
+        this.status('正在读取区间统计…');
         try {
-            const result=await Api.getTotalAshHours(range || {},controller.signal);
+            const result=await Api.getTotalAshInterval(range || {},controller.signal);
             if(id!==this.requestId || !this.dialog.open) return;
             this.result=result; this.setRange(result.period,result.latest_end);
             this.render(result); this.status('');
         } catch(error) {
             if(id!==this.requestId || !this.dialog.open) return;
-            this.status(error.name==='AbortError'?'读取超时，请重新查询。':error.message || '小时灰分读取失败，请重试',true);
+            this.status(error.name==='AbortError'?'读取超时，请重新查询。':error.message || '区间灰分读取失败，请重试',true);
         } finally {
             clearTimeout(timeout);
             if(id===this.requestId) {fields.disabled=false;this.controller=null;}
@@ -132,12 +131,12 @@ const DecisionAshHistory = {
         const rows=[...result.items].reverse().map(item=>{
             const [date,time]=this.localParts(item.start),end=this.localParts(item.end)[1];
             const state={complete:'完整',partial:'部分数据',missing:'无有效数据'}[item.status] || '无有效数据';
-            return `<tr><td><strong>${time}–${end}</strong><span>${date}</span></td><td class="ash-table-value">${this.number(item.value)}</td><td title="${esc(item.reason)}"><span class="ash-state ${esc(item.status)}">${state}</span><small>${item.aggregation==='output-mass-v1'?this.number(item.mass_t,2)+' t · 产煤量加权':'旧样本均值'}</small><small>${item.sample_count}/${item.expected_count} · ${this.number(item.coverage*100,1)}%</small></td></tr>`;
+            return `<tr><td><strong>${time}–${end}</strong><span>${date}</span></td><td class="ash-table-value">${this.number(item.value)}</td><td title="${esc(item.reason)}"><span class="ash-state ${esc(item.status)}">${state}</span><small>${item.aggregation==='output-mass-v1'?this.number(item.mass_t,2)+' t · 产煤量加权':item.aggregation==='mixed'?'不同统计口径':'旧样本均值'}</small><small>${item.sample_count} 条 · ${this.number(item.coverage*100,1)}%</small></td></tr>`;
         }).join('');
         const averageHint=s.aggregation==='mixed'?'区间含不同统计口径，无法合并平均值':s.value===null?'此区间暂无有效总灰分':result.method;
-        this.dialog.querySelector('#ash-history-result').innerHTML=`<section class="ash-summary" aria-label="区间平均灰分"><div><p>区间平均灰分</p><div class="ash-average" title="${esc(averageHint)}">${this.number(s.value)}<span>%</span></div><p class="ash-summary-range">${esc(this.label(result.period.start))} — ${esc(this.label(result.period.end))}</p></div><dl><div><dt>有值小时</dt><dd>${s.valid_hours}<span> / ${s.total_hours} 小时</span></dd></div><div><dt>有效样本覆盖</dt><dd>${this.number(s.coverage*100,1)}<span>%</span></dd></div></dl></section>
-            <div class="ash-table-title"><h3>每小时平均灰分</h3><span>最新小时在前 · 单位 %</span></div>
-            <div class="ash-table-scroll" tabindex="0" role="region" aria-label="每小时灰分记录"><table><thead><tr><th>统计时段</th><th>灰分 (%)</th><th>数据 / 覆盖</th></tr></thead><tbody>${rows}</tbody></table></div>
-            <p class="ash-history-footnote">预测值 · 仅已结束小时 · 悬停数据状态查看说明</p>`;
+        this.dialog.querySelector('#ash-history-result').innerHTML=`<section class="ash-summary" aria-label="区间平均灰分"><div><p>区间平均灰分</p><div class="ash-average" title="${esc(averageHint)}">${this.number(s.value)}<span>%</span></div><p class="ash-summary-range">${esc(this.label(result.period.start))} — ${esc(this.label(result.period.end))}</p></div><dl><div><dt>有值时段</dt><dd>${s.valid_segments}<span> / ${s.total_segments} 段</span></dd></div><div><dt>有效样本覆盖</dt><dd>${this.number(s.coverage*100,1)}<span>%</span></dd></div></dl></section>
+            <div class="ash-table-title"><h3>分时段平均灰分</h3><span>按小时分段 · 单位 %</span></div>
+            <div class="ash-table-scroll" tabindex="0" role="region" aria-label="区间灰分记录"><table><thead><tr><th>统计时段</th><th>灰分 (%)</th><th>数据 / 覆盖</th></tr></thead><tbody>${rows}</tbody></table></div>
+            <p class="ash-history-footnote">预测值 · 精确到分钟 · 悬停数据状态查看说明</p>`;
     },
 };

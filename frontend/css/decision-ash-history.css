@@ -19,6 +19,7 @@
 .ash-range-fields label>span { display:flex; flex:1; min-width:0; gap:6px; }
 .ash-range-fields input,.ash-range-fields select { min-width:0; padding:5px 7px; border:1px solid var(--ah-rule); border-radius:2px; background:var(--ah-card); color:var(--ah-text); height:32px; }
 .ash-range-fields input { flex:1; width:100%; }
+.ash-range-fields input[type="time"] { flex:0 0 100px; width:100px; }
 .ash-range-fields select { flex:0 0 86px; width:86px; }
 .ash-query { background:var(--ah-accent); color:var(--ah-paper); border:1px solid var(--ah-accent); padding:5px 12px; height:32px; }
 #ash-range-form { flex:none; margin-bottom:10px; }

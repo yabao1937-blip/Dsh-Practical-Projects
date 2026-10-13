@@ -152,3 +152,14 @@ def total_ash_hours(start: datetime | None = None, end: datetime | None = None, 
         return read_ash_hours(db, start, end)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
+
+
+@router.get('/total-ash-interval')
+def total_ash_interval(start: datetime | None = None, end: datetime | None = None, db: Session = Depends(get_db)):
+    from ..decision_hourly.ash_interval import read_ash_interval
+    if db.bind.dialect.name == 'sqlite':
+        db.execute(text('BEGIN'))
+    try:
+        return read_ash_interval(db,start,end)
+    except ValueError as error:
+        raise HTTPException(422,str(error)) from error
