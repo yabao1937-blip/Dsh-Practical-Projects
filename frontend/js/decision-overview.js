@@ -370,6 +370,7 @@ const DecisionOverviewPage = {
         document.getElementById('decision-refresh').addEventListener('click', () => {
             this.sourceInteractionUntil = 0;
             this.refresh();
+            if (typeof DecisionRecentAsh !== 'undefined') DecisionRecentAsh.update(this,true);
             if (window.Operations) window.Operations.refresh().then(() => this.renderInspector());
         });
         document.getElementById('decision-theme').addEventListener('click', event => {
@@ -474,6 +475,7 @@ const DecisionOverviewPage = {
         this.snapshot = this.buildSnapshot();
         this.nodes = this.buildNodes(this.snapshot);
         if (this.liveMode()) DecisionRealtime.update(this);
+        if (typeof DecisionRecentAsh !== 'undefined') DecisionRecentAsh.update(this);
         this.renderGraph(); this.renderContext(); this.renderInspector(); this.fit();
         if (typeof DecisionCoarseCharts !== 'undefined') DecisionCoarseCharts.refresh();
         if (typeof DecisionFloatAnalysis !== 'undefined') DecisionFloatAnalysis.refresh();
@@ -903,7 +905,8 @@ const DecisionOverviewPage = {
         const totalPanel=this.instantLayout()
             ? ''
             : `<div class="decision-formula${hourly?DecisionHourly.gapClass(hourlyGaps.get('total-ash')):''}" title="${this.escape(hourlyGaps.get('total-ash')?.reason || '')}"><strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'逐次质量平衡 · 产煤量加权':'逐次质量平衡 · 小时平均'):'三组分质量平衡'}</strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'Σ（逐次总灰分 × 实际产煤量）/ Σ 实际产煤量':'先按各次组分灰分和煤量计算总灰分，再对有效结果求平均'):'总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量'}<br>${total}${ashHistory}</div>`;
-        this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 ${this.graphWidth()} ${this.graphHeight()}" style="width:${this.graphWidth()}px;height:${this.graphHeight()}px"><defs>${markers}</defs>${paths}${hourLink}</svg>${cards}${hourSummary}${totalPanel}`);
+        const recentAsh=typeof DecisionRecentAsh!=='undefined'?DecisionRecentAsh.markup(this,this.nodes.find(n=>n.id==='coarse')):'';
+        this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 ${this.graphWidth()} ${this.graphHeight()}" style="width:${this.graphWidth()}px;height:${this.graphHeight()}px"><defs>${markers}</defs>${paths}${hourLink}</svg>${cards}${hourSummary}${totalPanel}${recentAsh}`);
     },
 
     telemetryState(item, failed = window.Operations?.telemetryFailed) {

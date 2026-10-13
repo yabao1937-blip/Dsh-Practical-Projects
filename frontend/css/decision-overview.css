@@ -277,6 +277,23 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .decision-workspace.is-motion-paused .decision-heartbeat-scan, #page-decision:not(.active) .decision-heartbeat-scan { animation-play-state:paused; visibility:hidden; }
 @media (prefers-reduced-motion:reduce), print { .decision-heartbeat-scan { display:none; animation:none; } }
 .decision-hourly-link { opacity:.9; stroke-width:2.6; }
+/* Ten compact hourly rows in the empty space above the coarse summary. */
+.decision-recent-ash { position:absolute; display:flex; flex-direction:column; gap:6px; padding:10px 12px 8px; box-sizing:border-box; border:1px solid var(--dm-border); border-top:2px solid var(--dm-cyan); border-radius:3px; background:var(--dm-card); color:var(--dm-text); box-shadow:3px 3px 0 color-mix(in srgb,var(--dm-border) 35%,transparent); }
+.decision-recent-ash h3 { margin:0; font-size:15px; line-height:24px; font-weight:600; }
+.decision-recent-ash table { width:100%; flex:1; table-layout:fixed; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+.decision-recent-ash th, .decision-recent-ash td { padding:2px 0; border-bottom:1px solid color-mix(in srgb,var(--dm-border) 65%,transparent); background:transparent; line-height:18px; white-space:nowrap; text-align:left; }
+.decision-recent-ash th { font-size:11px; font-weight:400; color:var(--dm-muted); }
+.decision-recent-ash th:first-child { width:62%; }
+.decision-recent-ash td { font-size:13px; }
+.decision-recent-ash :is(th,td):last-child { text-align:right; }
+.decision-recent-ash td:last-child { font-size:16px; font-weight:600; color:var(--dm-cyan); }
+.decision-recent-ash tbody tr:first-child { background:color-mix(in srgb,var(--dm-cyan) 6%,transparent); }
+.decision-recent-ash tbody tr:hover { background:color-mix(in srgb,var(--dm-cyan) 10%,transparent); }
+.decision-recent-ash tbody tr:last-child td { border-bottom:0; }
+.decision-recent-ash .is-missing td:last-child { color:var(--dm-muted); }
+.decision-recent-ash .decision-recent-ash-empty { text-align:center; font-size:13px; font-weight:400; color:var(--dm-muted); }
+.decision-recent-ash-note { margin:0; font-size:10px; line-height:16px; color:var(--dm-muted); }
+.decision-recent-ash-note.is-error { color:var(--dm-gap); }
 /* Toolbar actions stay fixed while the graph scales below them. */
 .decision-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-right:auto; }
 .decision-actions .decision-manual-open { margin:0; white-space:nowrap; }
