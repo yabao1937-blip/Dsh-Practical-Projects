@@ -8,7 +8,7 @@ from sqlalchemy import select, delete
 
 from app.decision_hourly.models import DecisionCycleSample, DecisionCycleHour, DecisionCycleContext
 from app.decision_hourly.service import build_hour, record, read_hour, tick, window, context_definition
-from app.decision_hourly.statistics import hour_advice, mean_cell, EXPECTED
+from app.decision_hourly.statistics import hour_advice, mean_cell, EXPECTED, refresh_coverage_policy, digest
 from app.decision_hourly.worker import next_delay
 from app.services.decision_sources import shared_snapshot
 from app.telemetry.domain import iso_time
@@ -60,16 +60,91 @@ def test_signed_mean_is_not_sum_or_absolute_recommendation():
     assert advice(fake_rows([.02,-.02]))[0]['value'] == 1.5
 
 
-@pytest.mark.parametrize('omitted,allowed', [(range(0,720,10),True), (list(range(0,720,10))+[1],False),
-    (range(12),True),(range(13),False),(range(708,720),True),(range(707,720),False),(range(360),False)])
-def test_coverage_uses_full_hour_and_gap_including_edges(omitted,allowed):
-    output,_,_ = advice(fake_rows(omit=omitted))
+@pytest.mark.parametrize('omitted,allowed', [(range(0,720,10),False), (list(range(0,720,10))+[1],False),
+    (range(12),True),(range(13),True),(range(708,720),True),(range(707,720),True),
+    (range(71),True),(range(72),False),(range(73),False),(range(360),False)])
+def test_coverage_requires_over_90_percent_without_continuous_gap_limit(omitted,allowed):
+    output,coverage,_ = advice(fake_rows(omit=omitted))
     assert (output['value'] is not None) == allowed
+    assert coverage['max_gap_seconds'] is None
+    assert coverage['required_ratio_exclusive']
+    if len(omitted)==71:
+        assert coverage['longest_gap_seconds']==355
+        assert coverage['valid_count']==649
 
 
 def test_duplicate_reading_does_not_manufacture_hour_coverage():
     output,coverage,_ = advice(fake_rows(same_event=True))
     assert output['value'] is None and coverage['valid_count']==1
+
+
+def legacy_hour(omit=71, other_reason=''):
+    basis=dict(value=1.5,status='good',observed_at=iso_time(HOUR-timedelta(seconds=2)))
+    output,coverage,guide=advice(fake_rows(omit=range(omit)),basis)
+    coverage.pop('policy'); coverage.pop('required_ratio_exclusive'); coverage['max_gap_seconds']=60
+    old_reason=(f'有效建议覆盖 {720-omit}/720（{(720-omit)/720:.1%}），连续缺口 {omit*5} 秒；'
+        '需覆盖至少 90% 且缺口不超过 60 秒')
+    guide.update(reason=old_reason+('；'+other_reason if other_reason else ''),rhoNew=None)
+    output.update(value=None,status='missing',reason=guide['reason']+'；专家经验建议')
+    return dict(period={'start':iso_time(START),'end':iso_time(HOUR)},coverage=coverage,
+        guidance=guide,suggested_density=output,cells={'suggested_density':output},density_basis=basis,
+        corrections=[{'version':'previous-correction'}])
+
+
+def test_legacy_gate_is_rechecked_without_replaying_or_mutating_frozen_records():
+    saved=legacy_hour()
+    response=deepcopy(saved)
+    refresh_coverage_policy(response)
+    assert response['suggested_density']['value']==1.52
+    assert response['coverage']['longest_gap_seconds']==355
+    assert response['coverage']['max_gap_seconds'] is None
+    assert response['corrections']==saved['corrections']
+    assert saved['suggested_density']['value'] is None
+    assert saved['coverage']['max_gap_seconds']==60
+    assert response['guidance']['mean_delta']==saved['guidance']['mean_delta']
+    assert response['guidance']['deltaRho']==saved['guidance']['deltaRho']
+    again=deepcopy(response)
+    refresh_coverage_policy(response)
+    assert response==again
+
+
+@pytest.mark.parametrize('reason',['小时内数据来源、模型或调密参数发生变化，暂不合并建议',
+                                 '小时末 30 秒内没有有效实测密度','未知保护条件'])
+def test_policy_refresh_cannot_remove_other_blockers(reason):
+    result=legacy_hour(other_reason=reason)
+    refresh_coverage_policy(result)
+    assert result['suggested_density']['value'] is None
+    assert reason in result['suggested_density']['reason']
+
+
+def test_policy_refresh_requires_more_than_90_and_valid_frozen_basis():
+    result=legacy_hour(omit=72)
+    result['suggested_density'].update(value=1.52,status='calculated',reason='previously valid')
+    result['guidance'].update(reason='previously valid',rhoNew=1.52)
+    refresh_coverage_policy(result)
+    assert result['suggested_density']['value'] is None
+    assert '需超过 90%' in result['suggested_density']['reason']
+    result=legacy_hour()
+    result['density_basis']['value']=1
+    refresh_coverage_policy(result)
+    assert result['suggested_density']['value'] is None
+
+
+def test_frozen_policy_upgrade_keeps_storage_and_live_guards(sessions,seeded):
+    with sessions.begin() as db:
+        current=shared_snapshot(db)
+        summary=legacy_hour()
+        summary['context_key']=digest(context_definition(current,load_store(db)))
+        db.add(DecisionCycleHour(start=iso_time(START),end=iso_time(HOUR),generated_at=iso_time(HOUR),snapshot=summary))
+    with sessions() as db:
+        assert read_hour(db,HOUR,live=current)['suggested_density']['value']==1.52
+        stopped=deepcopy(current)
+        stopped['suggested_density']=dict(value=None,status='missing',reason='设备停机')
+        assert '设备停机' in read_hour(db,HOUR,live=stopped)['suggested_density']['reason']
+        changed=deepcopy(current)
+        changed['cells']['belt501']['sample']['definition_id']='changed'
+        assert '变化' in read_hour(db,HOUR,live=changed)['suggested_density']['reason']
+        assert db.get(DecisionCycleHour,iso_time(START)).snapshot==summary
 
 
 def test_context_change_bad_last_density_and_missing_suggestions_withhold():

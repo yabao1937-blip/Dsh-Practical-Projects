@@ -27,12 +27,16 @@ const DecisionHourly = {
         return r && this.resultEpoch===this.epoch() && serverNow<Date.parse(r.period.apply_end) ? r : null;
     },
     pending() { return !this.presentation() && !!this.inFlight; },
+    coverageLow(ratio,coverage) {
+        return Number.isFinite(ratio) && (coverage.required_ratio_exclusive
+            ? ratio<=coverage.required_ratio : ratio<coverage.required_ratio);
+    },
     dataGaps(result=this.presentation()) {
         const gaps=new Map(), advice=result?.suggested_density;
         if(!advice) return gaps;
         const blocked=!Number.isFinite(advice.value), coverage=result.coverage || {};
-        const coverageLow=Number.isFinite(coverage.ratio) && coverage.ratio<coverage.required_ratio;
-        const gapLong=Number.isFinite(coverage.longest_gap_seconds) && coverage.longest_gap_seconds>coverage.max_gap_seconds;
+        const coverageLow=this.coverageLow(coverage.ratio,coverage);
+        const gapLong=Number.isFinite(coverage.max_gap_seconds) && Number.isFinite(coverage.longest_gap_seconds) && coverage.longest_gap_seconds>coverage.max_gap_seconds;
         const adviceGap=blocked && (coverageLow || gapLong);
         const put=(id,severity,label,message,reason=message)=>gaps.set(id,{severity,label,message,reason});
         // Only inputs used by the recommendation chain. Reference-only cards do
@@ -93,13 +97,13 @@ const DecisionHourly = {
             for(const slot of [...slots].sort((a,b)=>a-b)) {
                 run=slot===previous+1?run+1:1; longest=Math.max(longest,run); previous=slot;
             }
-            const tooLong=longest*cadence>coverage.max_gap_seconds;
-            const tooFew=slotEvidence && 1-slots.size/expected<coverage.required_ratio;
+            const tooLong=Number.isFinite(coverage.max_gap_seconds) && longest*cadence>coverage.max_gap_seconds;
+            const tooFew=slotEvidence && this.coverageLow((expected-slots.size)/expected,coverage);
             const error=adviceGap && !referenceOnly(id) && (tooLong || tooFew);
             const existing=gaps.get(id);
             if(existing && (existing.severity==='error' || !error)) continue;
             const message=error ? tooLong?`该项连续无效 ${longest*cadence} 秒，超过 ${coverage.max_gap_seconds} 秒门槛`:
-                `该项无效时隙占比 ${(slots.size/expected*100).toFixed(1)}%，有效覆盖不足 ${coverage.required_ratio*100}%` :
+                `该项无效时隙占比 ${(slots.size/expected*100).toFixed(1)}%，有效覆盖需${coverage.required_ratio_exclusive?'超过':'至少'} ${coverage.required_ratio*100}%` :
                 seconds>0?`小时内累计约 ${Math.round(seconds)} 秒无效；显示其余有效均值`:'小时内存在无效数据；显示其余有效均值';
             put(id,error?'error':'warning',error?'数据不足':seconds>0 && seconds<=60?'短时缺失':'部分缺失',message,
                 message+(error?'；该项缺失已超过小时建议的数据门槛':'；局部缺失提示，不代表该项导致建议暂缓'));
@@ -114,7 +118,7 @@ const DecisionHourly = {
         }
         if(adviceGap || blocked && basisMissing) {
             const messages=[];
-            if(coverageLow) messages.push(`有效建议 ${(coverage.ratio*100).toFixed(1)}%（需 ≥${coverage.required_ratio*100}%）`);
+            if(coverageLow) messages.push(`有效建议 ${(coverage.ratio*100).toFixed(1)}%（需 ${coverage.required_ratio_exclusive?'>':'≥'}${coverage.required_ratio*100}%）`);
             if(gapLong) messages.push(`连续无有效建议 ${coverage.longest_gap_seconds} 秒（限 ${coverage.max_gap_seconds} 秒）`);
             if(basisMissing) messages.push('小时末密度基准缺失');
             put('density','error','建议不足',messages.join('；'),advice.reason || messages.join('；'));
@@ -206,8 +210,8 @@ const DecisionHourly = {
             ['基准采样时间',page.time(r.guidance.basis_at)],['平均建议偏移',page.number(r.guidance.mean_delta,5,'g/cm³')],
             ['单次执行步幅',`±${page.number(r.guidance.maxStep,3)}`],['验证状态','专家经验建议 · 非实验验证的达标区间'],
             ['达标区间','等待响应实验；不把执行步幅当成区间宽度'],['建议使用时段',r.period.apply_label],
-            ['有效覆盖',`${r.coverage.valid_count}/${r.coverage.expected_count}（至少 ${r.coverage.required_ratio*100}%）`],
-            ['最长连续缺口',`${r.coverage.longest_gap_seconds} 秒（不超过 ${r.coverage.max_gap_seconds} 秒）`]);
+            ['有效覆盖',`${r.coverage.valid_count}/${r.coverage.expected_count}（${r.coverage.required_ratio_exclusive?'超过':'至少'} ${r.coverage.required_ratio*100}%）`],
+            ['最长连续缺口',`${r.coverage.longest_gap_seconds} 秒（${Number.isFinite(r.coverage.max_gap_seconds)?`不超过 ${r.coverage.max_gap_seconds} 秒`:'仅统计，不参与拦截'}）`]);
         if(c?.components) for(const [label,part] of Object.entries(c.components)) pairs.push([
             label,`${Number.isFinite(part.value)?page.number(part.value*100,1,'%'):'—'} 运行 · ${part.sample_count} 条有效样本`]);
         if(d.summaryParts) for(const p of d.summaryParts) pairs.push([p.node.title,p.display.value]);

@@ -9,7 +9,7 @@ from ..hourly_brief.inputs import business_time, numeric
 CADENCE = 5
 EXPECTED = 3600 // CADENCE
 MIN_COVERAGE = .9
-MAX_GAP = 60
+COVERAGE_POLICY = 'coverage-over-90-v1'
 VALID = {'good', 'manual', 'historical', 'default', 'predicted', 'calculated'}
 COMPUTED = {'coarse_ash', 'heavy_amount', 'total_ash'}
 
@@ -76,12 +76,12 @@ def hour_advice(rows, start, end, density, max_step=.03):
     mean = fsum(deltas)/len(deltas) if deltas else None
     coverage = dict(valid_count=count, recorded_count=len(rows), expected_count=EXPECTED,
         ratio=count/EXPECTED, longest_gap_seconds=gap, required_ratio=MIN_COVERAGE,
-        max_gap_seconds=MAX_GAP, cadence_seconds=CADENCE,
+        max_gap_seconds=None, required_ratio_exclusive=True, policy=COVERAGE_POLICY, cadence_seconds=CADENCE,
         up=sum(v > 1e-9 for v in deltas), down=sum(v < -1e-9 for v in deltas),
         stable=sum(abs(v) <= 1e-9 for v in deltas))
     reasons = []
-    if count/EXPECTED < MIN_COVERAGE or gap > MAX_GAP:
-        reasons.append(f'有效建议覆盖 {count}/{EXPECTED}（{count/EXPECTED:.1%}），连续缺口 {gap} 秒；需覆盖至少 90% 且缺口不超过 60 秒')
+    if count/EXPECTED <= MIN_COVERAGE:
+        reasons.append(f'有效建议覆盖 {count}/{EXPECTED}（{count/EXPECTED:.1%}）；需超过 90%')
     if len({r.context_key for r in rows}) > 1:
         reasons.append('小时内数据来源、模型或调密参数发生变化，暂不合并建议')
     at = business_time(density.get('observed_at')) if density.get('observed_at') else None
@@ -96,3 +96,49 @@ def hour_advice(rows, start, end, density, max_step=.03):
         rhoCur=density.get('value'), basis_at=density.get('observed_at'), mean_delta=mean,
         deltaRho=delta, rhoNew=value, maxStep=limit,
         direction='stable' if delta is None or abs(delta)<.0005 else 'up' if delta>0 else 'down', reason=reason)
+
+
+def refresh_coverage_policy(result):
+    """Apply today's coverage gate to a response copy of frozen statistics.
+
+    No model replay or storage writes. Only the exact legacy coverage blocker can
+    be removed; source/model/basis blockers and subsequent live guards remain.
+    """
+    coverage = result['coverage']
+    if coverage.get('policy') == COVERAGE_POLICY:
+        return
+    count, expected = coverage['valid_count'], coverage['expected_count']
+    ratio = count/expected
+    old_reason = (f'有效建议覆盖 {count}/{expected}（{ratio:.1%}），连续缺口 '
+        f'{coverage["longest_gap_seconds"]} 秒；需覆盖至少 90% 且缺口不超过 60 秒')
+    coverage.update(ratio=ratio, required_ratio=MIN_COVERAGE, required_ratio_exclusive=True,
+                    max_gap_seconds=None, policy=COVERAGE_POLICY)
+    advice, guide = result['suggested_density'], result['guidance']
+    reason = guide.get('reason', '')
+    legacy_blocked = old_reason in reason
+    if not legacy_blocked and ratio > MIN_COVERAGE:
+        return  # No changed gate: preserve existing advice or other blockers.
+    remaining = reason.replace(old_reason, '').strip('；') if legacy_blocked else (reason if advice['value'] is None else '')
+    if ratio <= MIN_COVERAGE:
+        required = f'有效建议覆盖 {count}/{expected}（{ratio:.1%}）；需超过 90%'
+        remaining = required+('；'+remaining if remaining else '')
+    value = None
+    if not remaining:
+        density, delta = result['density_basis'], guide.get('deltaRho')
+        end = business_time(result['period']['end'])
+        at = business_time(density.get('observed_at')) if density.get('observed_at') else None
+        step = guide.get('maxStep', .03)
+        if (valid(density,'density') and at and 0 < (end-at).total_seconds() <= 30
+                and numeric(delta) and numeric(step) and 0 < step <= .03 and abs(delta) <= step):
+            value = round(density['value']+delta, 3)
+        else:
+            remaining = '小时末密度基准或已存建议偏移无效，暂缓建议'
+    reason = remaining or '上一小时各次建议调密量取平均，以小时末有效实测密度为基准'
+    # Keep any explanatory suffix (e.g. expert guidance validation status).
+    suffix = advice.get('reason','').removeprefix(guide.get('reason',''))
+    if not suffix.startswith('；'):
+        suffix = ''
+    result['suggested_density'] = dict(advice, value=value,
+        status='calculated' if value is not None else 'missing', reason=reason+suffix)
+    result['cells']['suggested_density'] = result['suggested_density']
+    guide.update(rhoNew=value, reason=reason)

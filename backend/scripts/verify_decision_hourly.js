@@ -95,6 +95,23 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
     assert.equal(h.gapClass({severity:'warning'}),' is-hourly-warning');
     assert.equal(h.gapClass({severity:'error'}),' is-hourly-gap');
     assert.equal(h.gapClass(null),'');
+    // New policy: continuous gaps are descriptive; strictly more than 90% is required.
+    hour=completeHour();
+    Object.assign(hour.coverage,{ratio:649/720,valid_count:649,longest_gap_seconds:355,
+        max_gap_seconds:null,required_ratio_exclusive:true,policy:'coverage-over-90-v1'});
+    hour.suggested_density.value=1.48;
+    hour.evidence={segments:[segment(100,71,badSwitches)]};
+    gaps=h.dataGaps(hour);
+    assert(!gaps.has('density') && gaps.get('system-switches').severity==='warning',
+        '649 valid slots pass even with a continuous 355s gap');
+    hour.suggested_density.value=null;
+    assert(!h.dataGaps(hour).has('density'),'Another protection must not turn a long gap into a data blocker');
+    hour.coverage.ratio=648/720;
+    hour.evidence.segments=[segment(100,72,badSwitches)];
+    gaps=h.dataGaps(hour);
+    assert(gaps.get('density').message.includes('>90%'));
+    assert.equal(gaps.get('system-switches').severity,'error','Exactly 90% is insufficient');
+    assert(!gaps.get('system-switches').message.includes('秒门槛'));
     let pending=h.update(page,true); resolve(response()); await pending;
     assert(h.presentation(),'Server time, not the local calendar, determines the valid hour');
     assert.equal(h.display(page,{id:'raw-ash'}).value,'40.00 %');

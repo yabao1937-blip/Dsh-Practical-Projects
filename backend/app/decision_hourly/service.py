@@ -11,7 +11,7 @@ from ..services.decision_live import gpt_group
 from ..services.state import load_store
 from ..telemetry.domain import iso_time, utc_now
 from .models import DecisionCycleContext, DecisionCycleSample, DecisionCycleHour
-from .statistics import CADENCE, digest, hour_advice
+from .statistics import CADENCE, digest, hour_advice, refresh_coverage_policy
 from .history import historical_cells
 from .evidence import POLICY, PROVISIONAL, SEGMENT_POLICY, summarize
 from .tracking import density_channels, observe
@@ -161,6 +161,7 @@ def read_hour(db, now=None, live=None):
     start,end = window(now)
     saved = db.get(DecisionCycleHour,iso_time(start))
     result = deepcopy(saved.snapshot) if saved else build_hour(db,start,end,now)
+    refresh_coverage_policy(result)
     result['frozen'] = bool(saved)
     result['checked_at'] = iso_time(now)
     result['guidance'].update(validation='awaiting_experiment', empirical_note=PROVISIONAL,
