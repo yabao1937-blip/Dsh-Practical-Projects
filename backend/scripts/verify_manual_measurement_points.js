@@ -49,6 +49,7 @@ page.renderInspector();
 assert.match(elements['decision-inspector'].innerHTML,/显示值<\/dt><dd>8.5 %/);
 assert.doesNotMatch(elements['decision-inspector'].innerHTML,/<select|当前业务值|加权灰分贡献/);
 elements['decision-board'] = {};
+elements['decision-toolbar-total'] = {};
 page.renderGraph();
 const edge = (from,to) => elements['decision-board'].innerHTML.match(new RegExp(`<path class="decision-edge[^>]*data-decision-from="${from}" data-decision-to="${to}"[^>]*>`))[0];
 assert.doesNotMatch(edge('heavy-ash','heavy'),/is-reference/,'Manual ash really feeds the summary');

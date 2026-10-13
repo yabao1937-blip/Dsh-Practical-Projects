@@ -40,7 +40,7 @@ def setup(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("metric,unit,value", [
     ("heavy_clean_coal_ash", "%", 8.52), ("raw_coal_slime_content", "%", 16.5),
-    ("coarse_slime_amount", "t/h", 250.25),
+    ("coarse_slime_ash", "%", 23.25),
 ])
 def test_default_time_and_persistent_history(setup, metric, unit, value):
     client, sessions = setup
@@ -61,7 +61,7 @@ def test_default_time_and_persistent_history(setup, metric, unit, value):
 @pytest.mark.parametrize("time", ["2026-10-07T09:12:35", "2026-10-07 09:12:35", "2026-10-07T09:12:35+08:00"])
 def test_explicit_beijing_time(setup, time):
     client, _ = setup
-    response = client.post(URL, json={"metric": "coarse_slime_amount", "value": 40, "observed_at": time})
+    response = client.post(URL, json={"metric": "coarse_slime_ash", "value": 40, "observed_at": time})
     assert response.status_code == 201, response.text
     assert response.json()["observed_at"] == "2026-10-07T01:12:35.000+00:00"
 
@@ -75,8 +75,9 @@ def test_blank_time_uses_server_time(setup, time):
 
 @pytest.mark.parametrize("body", [
     {"metric": "unknown", "value": 8}, {"metric": "heavy_clean_coal_ash", "value": 100.01},
-    {"metric": "raw_coal_slime_content", "value": -1}, {"metric": "coarse_slime_amount", "value": -0.1},
-    {"metric": "coarse_slime_amount", "value": True}, {"metric": "coarse_slime_amount", "value": ""},
+    {"metric": "raw_coal_slime_content", "value": -1}, {"metric": "coarse_slime_ash", "value": -0.1},
+    {"metric": "coarse_slime_ash", "value": True}, {"metric": "coarse_slime_ash", "value": ""},
+    {"metric": "coarse_slime_ash", "value": 100.01}, {"metric": "coarse_slime_amount", "value": 20},
     {"metric": "heavy_clean_coal_ash", "value": "NaN"}, {"metric": "heavy_clean_coal_ash", "value": "Infinity"},
     {"metric": "heavy_clean_coal_ash"}, {"metric": "heavy_clean_coal_ash", "value": 8, "observed_at": "2026-02-30T09:00"},
     {"metric": "heavy_clean_coal_ash", "value": 8, "observed_at": "2026-10-07"},
@@ -118,7 +119,7 @@ def test_retry_reuses_original_default_time_and_conflicts_on_changes(setup):
 
 def test_filter_pagination_and_backfill_entry_order(setup):
     client, _ = setup
-    for metric in ["heavy_clean_coal_ash", "coarse_slime_amount", "heavy_clean_coal_ash"]:
+    for metric in ["heavy_clean_coal_ash", "coarse_slime_ash", "heavy_clean_coal_ash"]:
         client.post(URL, json={"metric": metric, "value": 8, "observed_at": "2026-01-01T12:00"})
     data = client.get(URL, params={"metric": "heavy_clean_coal_ash", "limit": 1, "offset": 1}).json()
     assert data["total"] == 2 and len(data["items"]) == 1
@@ -180,13 +181,35 @@ def test_latest_tie_uses_last_entry_and_future_record_waits(setup):
                                        "observed_at": "2026-01-02T11:04:13+08:00"}).json()
     client.post(URL, json={"metric": "heavy_clean_coal_ash", "value": 9,
                           "observed_at": "2099-01-01T12:00:00+08:00"})
-    client.post(URL, json={"metric": "coarse_slime_amount", "value": 0,
+    client.post(URL, json={"metric": "raw_coal_slime_content", "value": 0,
                           "observed_at": "2026-01-01T12:00:00+08:00"})
     points = {point["key"]: point for point in client.get(URL + "/latest").json()["items"]}
     assert points["heavy_clean_coal_ash"]["sample"]["record_id"] == record["id"]
     assert points["heavy_clean_coal_ash"]["sample"]["value"] == 8.7
-    assert points["coarse_slime_amount"]["available"] and points["coarse_slime_amount"]["sample"]["value"] == 0
-    assert not points["raw_coal_slime_content"]["available"]
+    assert points["raw_coal_slime_content"]["available"] and points["raw_coal_slime_content"]["sample"]["value"] == 0
+    assert not points["coarse_slime_amount"]["available"]
+
+
+def test_archive_only_catalog_persistence_retry_and_legacy_history(setup):
+    client, sessions = setup
+    metrics = {item['key']: item for item in client.get(URL+'/metrics').json()['items']}
+    assert set(metrics) == {'heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_ash'}
+    assert metrics['coarse_slime_ash']['archive_only'] and metrics['coarse_slime_ash']['unit'] == '%'
+    body = dict(metric='coarse_slime_ash', value=8.25, observed_at='2026-01-01T12:00+08:00', client_id='archive-retry')
+    first = client.post(URL, json=body)
+    assert first.status_code == 201
+    assert first.json()['name'] == '粗精煤泥灰分'
+    assert client.post(URL, json=body).json() == first.json()
+    assert client.get(URL, params={'metric':'coarse_slime_ash'}).json()['total'] == 1
+    assert 'coarse_slime_ash' not in {p['key'] for p in client.get(URL+'/latest').json()['items']}
+    # Retired measurements remain readable, even above the new assay's 100% limit.
+    with sessions.begin() as db:
+        db.add(ManualMeasurement(metric='coarse_slime_amount', name='粗精煤泥量', value=250.25,
+            unit='t/h', observed_at='2026-01-01T04:00:00.000+00:00', created_at='2026-01-01T04:00:00.000+00:00', request_hash='legacy'))
+    assert client.get(URL).json()['total'] == 2
+    old = client.get(URL, params={'metric':'coarse_slime_amount'})
+    assert old.status_code == 200 and old.json()['items'][0]['value'] == 250.25
+    assert client.post(URL, json={'metric':'coarse_slime_amount','value':20}).status_code == 422
 
 
 def test_manual_latest_does_not_require_kepserver(setup, monkeypatch):

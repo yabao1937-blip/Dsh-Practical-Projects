@@ -13,7 +13,7 @@ from ..services.state import load_store
 from ..auth import require_write
 from ..models import DecisionSourceRevision
 from ..services.decision_sources import NODE_CELLS, GROUPS, config_at, config_view, shared_snapshot
-from ..services.manual_measurements import METRICS
+from ..services.manual_measurements import POINT_METRICS
 from ..telemetry.domain import iso_time, utc_now
 from ..telemetry.models import TelemetryPoint
 from ..telemetry.density_effective import DENSITY_ITEMS
@@ -109,7 +109,7 @@ def patch_sources(body: SourcesPatch, db: Session = Depends(get_db)):
                 raise HTTPException(422, '数值指标不能选择设备状态组合')
             if node == 'density-current' and key != 'a303_a304_density_average' and (not point or point.config.get('item_id') not in DENSITY_ITEMS):
                 raise HTTPException(422, '当前密度请选择 A303、A304 实际密度或两路平均')
-            valid = key in METRICS if source == 'manual-measurements' else (
+            valid = key in POINT_METRICS if source == 'manual-measurements' else (
                 (point is not None and point.enabled) or ((key in GROUPS or key == 'a303_a304_density_average')
                     and db.scalar(select(TelemetryPoint.key).where(TelemetryPoint.source_id == source,
                         TelemetryPoint.enabled.is_(True)).limit(1)) is not None))

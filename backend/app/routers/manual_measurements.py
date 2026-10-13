@@ -11,7 +11,7 @@ from ..auth import require_write
 from ..database import get_db
 from ..models import ManualMeasurement
 from ..schemas import ManualMeasurementIn, ManualMeasurementList, ManualMeasurementOut, ManualMetric
-from ..services.manual_measurements import METRICS, latest_points, request_hash, timestamp_now
+from ..services.manual_measurements import METRICS, ENTRY_METRICS, latest_points, request_hash, timestamp_now
 
 class MeasurementRoute(APIRoute):
     def get_route_handler(self):
@@ -34,7 +34,8 @@ router = APIRouter(prefix="/manual-measurements", tags=["业务指标补录"], r
 @router.get("/metrics")
 def metrics():
     return {"items": [{"key": key, "name": value["name"], "unit": value["unit"],
-                       "minimum": 0, "maximum": value["maximum"]} for key, value in METRICS.items()]}
+                       "minimum": 0, "maximum": value["maximum"],
+                       "archive_only": value.get("archive_only", False)} for key, value in ENTRY_METRICS.items()]}
 
 
 @router.get("/latest")

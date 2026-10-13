@@ -136,12 +136,13 @@ class ManualEntryOut(BaseModel):
 
 
 # ---------- Single-value manual process measurements ----------
-ManualMetric = Literal["heavy_clean_coal_ash", "raw_coal_slime_content", "coarse_slime_amount"]
+ManualMetric = Literal["heavy_clean_coal_ash", "raw_coal_slime_content", "coarse_slime_amount", "coarse_slime_ash"]
+ManualEntryMetric = Literal["heavy_clean_coal_ash", "raw_coal_slime_content", "coarse_slime_ash"]
 
 
 class ManualMeasurementIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    metric: ManualMetric
+    metric: ManualEntryMetric
     value: float = Field(ge=0, strict=True, allow_inf_nan=False)
     observed_at: str | None = Field(default=None, max_length=64)
     client_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")

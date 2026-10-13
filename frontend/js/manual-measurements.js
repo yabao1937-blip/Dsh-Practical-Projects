@@ -37,6 +37,8 @@ const ManualMeasurements = {
     updateUnit() {
         const definition = this.definitions.find(d => d.key === this.el('metric').value);
         this.el('unit').textContent = definition ? `（${definition.unit}）` : '';
+        this.el('purpose').hidden = !definition?.archive_only;
+        this.el('purpose').textContent = definition?.archive_only ? '仅保存记录，不参与实时计算。' : '';
         if (definition?.maximum != null) this.el('value').max = definition.maximum;
         else this.el('value').removeAttribute('max');
     },
@@ -70,7 +72,7 @@ const ManualMeasurements = {
             this.pending = null;
             this.el('value').value = '';
             this.el('time').value = '';
-            this.message(`已保存到数据库：${record.name} ${record.value} ${record.unit}，时间 ${this.time(record.observed_at)}`,'success');
+            this.message(`已保存到数据库：${record.name} ${record.value} ${record.unit}，时间 ${this.time(record.observed_at)}${definition.archive_only?'（仅保存记录，不参与实时计算）':''}`,'success');
             this.offset = 0;
             this.el('filter').value = '';
             if (window.Operations) window.Operations.manualMeasurementSaved();

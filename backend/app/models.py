@@ -101,7 +101,7 @@ class ManualMeasurement(Base):
         UniqueConstraint("client_id", name="uq_manual_measurements_client_id"),
         Index("ix_manual_measurement_metric_id", "metric", "id"),
         CheckConstraint("value >= 0", name="ck_manual_measurement_nonnegative"),
-        CheckConstraint("metric IN ('heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_amount')", name="ck_manual_measurement_metric"),
+        CheckConstraint("metric IN ('heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_amount', 'coarse_slime_ash')", name="ck_manual_measurement_metric"),
         CheckConstraint("metric = 'coarse_slime_amount' OR value <= 100", name="ck_manual_measurement_percentage"),
     )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

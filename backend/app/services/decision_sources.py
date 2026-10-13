@@ -11,7 +11,7 @@ from ..telemetry.derived import STATUS_GROUPS, DENSITY_AVERAGE_MEMBERS
 from ..telemetry.density_effective import effective_component, effective_average, DENSITY_ITEMS
 from ..telemetry.domain import definition_id, iso_time, utc_now
 from ..telemetry.retained import density_history
-from .manual_measurements import METRICS
+from .manual_measurements import POINT_METRICS
 from .decision_live import calculate, gpt_group
 from .state import load_store, AUTO_STATE_KEYS, SETTING_TO_STORE
 from ..gpt_coarse.timing import aligned_level, POLICY as TIMING_POLICY
@@ -45,7 +45,7 @@ def identity(source, key):
 
 def default_choice(inputs, node):
     target = DEFAULTS.get(node)
-    if target in METRICS:
+    if target in POINT_METRICS:
         return identity('manual-measurements', target) if inputs.manual(target) else ''
     if target in GROUPS:
         sources = {p.source_id for _, item in GROUPS[target]['members'] for p in inputs.points.get(item, [])}
@@ -90,8 +90,10 @@ def density_cell(inputs, points):
 def selected_cell(inputs, node, choice):
     source, key = json.loads(choice)
     if source == 'manual-measurements':
+        if key not in POINT_METRICS:
+            return cell(reason='该手工指标仅作记录，不可用于决策计算', source_id=source, point_key=key)
         found = inputs.manual(key) or cell(reason='暂无整点前已录入的有效手工补录')
-        return dict(found, unit=METRICS[key]['unit'], source_id=source, point_key=key)
+        return dict(found, unit=POINT_METRICS[key]['unit'], source_id=source, point_key=key)
     if key in GROUPS:
         return dict(inputs.group(GROUPS[key]['members'], source), source_id=source, point_key=key)
     if key == 'a303_a304_density_average':
@@ -140,7 +142,7 @@ def collect_shared(inputs, config):
         elif node == 'density-current':
             # An unavailable configured meter must never silently turn into a mean or a placeholder.
             cells[key] = cell(reason='当前分选密度尚无唯一有效采集来源', unit='g/cm³', density_label='未选择')
-        elif node not in config['choices'] and node in DEFAULTS and DEFAULTS[node] not in METRICS:
+        elif node not in config['choices'] and node in DEFAULTS and DEFAULTS[node] not in POINT_METRICS:
             cells[key] = cell(reason='默认采集来源缺失或不唯一')
         cells[key].setdefault('unit', UNITS.get(key, ''))
     for belt in ('501','502'):

@@ -110,6 +110,9 @@ def test_revision_conflict_noop_and_effective_time(sessions, seeded, client, mon
     ('system-switches','kepserver-main','point0'), ('desliming','kepserver-main','four_system_status'),
     ('raw-ash','kepserver-main','four_system_status'), ('density-current','kepserver-main','point0'),
     ('density-current','absent','a303_a304_density_average'), ('heavy-ash','manual-measurements','absent'),
+    ('heavy-ash','manual-measurements','coarse_slime_ash'),
+    ('float-ash','manual-measurements','coarse_slime_ash'),
+    ('tail-level','manual-measurements','coarse_slime_ash'),
 ])
 def test_invalid_source_type_is_rejected_without_saving(sessions, seeded, client, node, source, key):
     r = client.patch('/api/v1/decision/sources', json={'revision':0,'choices':{node:identity(source,key)}})
@@ -132,6 +135,23 @@ def test_density_hold_and_offline_do_not_issue_fresh_advice(sessions, seeded):
     with sessions() as db:
         assert shared_snapshot(db)['cells']['raw_ash']['value'] is None
         assert build_snapshot(db,HOUR)['cells']['raw_ash']['value'] == 40
+
+
+@pytest.mark.parametrize('value', [0, 99])
+def test_manual_coarse_assay_cannot_replace_model_or_change_decisions(sessions, seeded, value):
+    from app.hourly_brief.inputs import Inputs
+    from app.services.decision_sources import selected_cell
+    with sessions() as db:
+        before = shared_snapshot(db)
+        hour_before = build_snapshot(db, HOUR)
+    with sessions.begin() as db:
+        add_manual(db, value, HOUR-timedelta(seconds=3), HOUR-timedelta(seconds=2), 'coarse_slime_ash')
+    with sessions() as db:
+        assert shared_snapshot(db) == before
+        assert build_snapshot(db, HOUR) == hour_before
+        attempted = selected_cell(Inputs(db,HOUR), 'heavy-ash', identity('manual-measurements','coarse_slime_ash'))
+        assert attempted['value'] is None and attempted['status'] == 'missing'
+        assert '仅作记录' in attempted['reason']
 
 
 def test_saved_hour_unchanged_after_binding_and_manual_change(sessions, seeded, client, monkeypatch):

@@ -9,7 +9,11 @@ METRICS = {
     "heavy_clean_coal_ash": {"name": "重介精煤灰分", "unit": "%", "maximum": 100},
     "raw_coal_slime_content": {"name": "原煤煤泥含量", "unit": "%", "maximum": 100},
     "coarse_slime_amount": {"name": "粗精煤泥量", "unit": "t/h", "maximum": None},
+    "coarse_slime_ash": {"name": "粗精煤泥灰分", "unit": "%", "maximum": 100, "archive_only": True},
 }
+# Retain the old amount definition for historical reads and legacy point users.
+ENTRY_METRICS = {key: value for key, value in METRICS.items() if key != "coarse_slime_amount"}
+POINT_METRICS = {key: value for key, value in METRICS.items() if not value.get("archive_only")}
 BEIJING = timezone(timedelta(hours=8))
 TIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?$")
 
@@ -45,7 +49,7 @@ def latest_points(db):
 
     now = timestamp_now()
     items = []
-    for metric, definition in METRICS.items():
+    for metric, definition in POINT_METRICS.items():
         record = (db.query(ManualMeasurement)
                   .filter(ManualMeasurement.metric == metric, ManualMeasurement.observed_at <= now)
                   .order_by(ManualMeasurement.observed_at.desc(), ManualMeasurement.id.desc()).first())
