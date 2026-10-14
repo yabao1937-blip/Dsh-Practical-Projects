@@ -6,7 +6,7 @@
     <title>重介密控系统 - 密度推荐与灰分监控平台</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css?v=11">
-    <link rel="stylesheet" href="css/decision-overview.css?v=16">
+    <link rel="stylesheet" href="css/decision-overview.css?v=17">
     <link rel="stylesheet" href="css/decision-ash-history.css?v=3">
     <link rel="stylesheet" href="css/decision-evidence.css?v=1">
     <link rel="stylesheet" href="css/manual-measurements.css?v=2">
@@ -112,6 +112,7 @@
                     <div class="decision-canvas-scroll" id="decision-canvas-scroll" aria-label="建议密度因素关系图">
                         <div class="decision-canvas-space" id="decision-canvas-space"><div class="decision-board" id="decision-board"></div></div>
                     </div>
+                    <div class="decision-recent-ash-layer" id="decision-recent-ash-layer"></div>
                     <div class="decision-inspector" id="decision-inspector" aria-label="节点详情"></div>
                     <p class="decision-footnote" id="decision-mode-note">GPT 链路：当前输入 → 粗精煤泥灰分预测 → 三组分总灰分 → 建议密度。当前密度采用 A304；输入变化后重新计算，缺失时显示原因。建议由人工确认执行。虚线表示尚未进入模型的工况参考。</p>
                 </div>
@@ -999,8 +1000,8 @@
     <script src="js/decision-coarse-charts.js?v=4"></script>
     <script src="js/decision-float-analysis.js?v=1"></script>
     <script src="js/decision-ash-history.js?v=3"></script>
-    <script src="js/decision-recent-ash.js?v=1"></script>
-    <script src="js/decision-overview.js?v=19"></script>
+    <script src="js/decision-recent-ash.js?v=2"></script>
+    <script src="js/decision-overview.js?v=20"></script>
     <script src="js/decision-realtime.js?v=2"></script>
     <script src="js/decision-hourly.js?v=2"></script>
     <script src="js/decision-evidence.js?v=1"></script>

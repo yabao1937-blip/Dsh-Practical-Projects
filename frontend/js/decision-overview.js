@@ -418,7 +418,10 @@ const DecisionOverviewPage = {
         let totalAlignFrame=null;
         document.getElementById('decision-canvas-scroll').addEventListener('scroll',()=>{
             if(totalAlignFrame) return;
-            totalAlignFrame=requestAnimationFrame(()=>{totalAlignFrame=null;this.alignToolbarTotal();});
+            totalAlignFrame=requestAnimationFrame(()=>{
+                totalAlignFrame=null; this.alignToolbarTotal();
+                if(typeof DecisionRecentAsh!=='undefined') DecisionRecentAsh.position(this);
+            });
         },{passive:true});
         document.getElementById('decision-inspector').addEventListener('change', event => {
             if (event.target.id === 'decision-source-point' && !this.sourceLocked(this.selected)) {
@@ -591,7 +594,11 @@ const DecisionOverviewPage = {
         const scale = this.zoom ?? Math.min(1, Math.max(.65, viewport.clientWidth / width));
         const instant=this.instantLayout(), height=this.graphHeight();
         const geometryKey=`${scale}|${viewport.clientWidth}|${innerHeight}|${width}|${height}|${instant}`;
-        if(this.liveMode() && this.fitKey===geometryKey) { this.alignToolbarTotal(); this.queueInspectorPosition(); return; }
+        if(this.liveMode() && this.fitKey===geometryKey) {
+            this.alignToolbarTotal();
+            if(typeof DecisionRecentAsh!=='undefined') DecisionRecentAsh.position(this);
+            this.queueInspectorPosition(); return;
+        }
         this.fitKey=geometryKey;
         this.actualZoom = scale;
         const board=document.getElementById('decision-board');
@@ -603,6 +610,7 @@ const DecisionOverviewPage = {
         space.style.width = `${width * scale}px`; space.style.height = `${height * scale}px`;
         document.querySelectorAll('[data-instant-action]').forEach(button=>{button.hidden=!instant;});
         this.alignToolbarTotal();
+        if(typeof DecisionRecentAsh!=='undefined') DecisionRecentAsh.position(this);
         this.background?.resize();
         document.getElementById('decision-fit').textContent = `适应画布 · ${Math.round(scale * 100)}%`;
         this.queueInspectorPosition(true);
@@ -905,7 +913,9 @@ const DecisionOverviewPage = {
             ? ''
             : `<div class="decision-formula${hourly?DecisionHourly.gapClass(hourlyGaps.get('total-ash')):''}" title="${this.escape(hourlyGaps.get('total-ash')?.reason || '')}"><strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'逐次质量平衡 · 产煤量加权':'逐次质量平衡 · 小时平均'):'三组分质量平衡'}</strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'Σ（逐次总灰分 × 实际产煤量）/ Σ 实际产煤量':'先按各次组分灰分和煤量计算总灰分，再对有效结果求平均'):'总灰分 = Σ（组分灰分 × 组分煤量）/ Σ 组分煤量'}<br>${total}${ashHistory}</div>`;
         const recentAsh=typeof DecisionRecentAsh!=='undefined'?DecisionRecentAsh.markup(this,this.nodes.find(n=>n.id==='coarse')):'';
-        this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 ${this.graphWidth()} ${this.graphHeight()}" style="width:${this.graphWidth()}px;height:${this.graphHeight()}px"><defs>${markers}</defs>${paths}${hourLink}</svg>${cards}${hourSummary}${totalPanel}${recentAsh}`);
+        this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 ${this.graphWidth()} ${this.graphHeight()}" style="width:${this.graphWidth()}px;height:${this.graphHeight()}px"><defs>${markers}</defs>${paths}${hourLink}</svg>${cards}${hourSummary}${totalPanel}`);
+        this.renderHTML('decision-recent-ash-layer',recentAsh);
+        if(typeof DecisionRecentAsh!=='undefined') DecisionRecentAsh.position(this);
     },
 
     telemetryState(item, failed = window.Operations?.telemetryFailed) {

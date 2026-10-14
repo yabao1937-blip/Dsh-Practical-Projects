@@ -49,6 +49,21 @@ const DecisionRecentAsh = {
         if(this.enabled(page) && page.active()) page.renderGraph();
     },
     parts(stamp) { return new Date(stamp+8*this.hourMs).toISOString().slice(0,16).split('T'); },
+    position(page) {
+        const table=document.querySelector('#decision-recent-ash-layer .decision-recent-ash');
+        const card=document.querySelector('#decision-board [data-decision-node="coarse"]');
+        const toolbar=document.querySelector('#decision-workspace .decision-toolbar');
+        if(!table || !card || !toolbar) return;
+        const workspace=toolbar.parentElement, base=workspace.getBoundingClientRect();
+        const bottom=card.getBoundingClientRect(), top=toolbar.getBoundingClientRect();
+        const scale=page.actualZoom || 1, gap=16*scale;
+        // Span the context row too, so both visible gaps match at every zoom.
+        table.style.left=`${bottom.left-base.left-workspace.clientLeft}px`;
+        table.style.top=`${top.bottom-base.top-workspace.clientTop+gap}px`;
+        table.style.width=`${bottom.width/scale}px`;
+        table.style.height=`${(bottom.top-top.bottom-2*gap)/scale}px`;
+        table.style.transform=`scale(${scale})`;
+    },
     markup(page,anchor) {
         if(!page.instantLayout() || !anchor) return '';
         const rows=this.rows(), html=rows.map(row=>{

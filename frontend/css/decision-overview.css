@@ -278,10 +278,11 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 @media (prefers-reduced-motion:reduce), print { .decision-heartbeat-scan { display:none; animation:none; } }
 .decision-hourly-link { opacity:.9; stroke-width:2.6; }
 /* Ten compact hourly rows in the empty space above the coarse summary. */
-.decision-recent-ash { position:absolute; display:flex; flex-direction:column; padding:8px 12px; box-sizing:border-box; border:1px solid var(--dm-border); border-top:2px solid var(--dm-cyan); border-radius:3px; background:var(--dm-card); color:var(--dm-text); box-shadow:3px 3px 0 color-mix(in srgb,var(--dm-border) 35%,transparent); }
+.decision-recent-ash-layer { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
+.decision-recent-ash { position:absolute; display:flex; flex-direction:column; padding:8px 12px; box-sizing:border-box; border:1px solid var(--dm-border); border-top:2px solid var(--dm-cyan); border-radius:3px; background:var(--dm-card); color:var(--dm-text); box-shadow:3px 3px 0 color-mix(in srgb,var(--dm-border) 35%,transparent); transform-origin:top left; pointer-events:auto; }
 .decision-recent-ash table { width:100%; flex:1; table-layout:fixed; border-collapse:collapse; font-variant-numeric:tabular-nums; }
-.decision-recent-ash td { padding:2px 0; border-bottom:1px solid color-mix(in srgb,var(--dm-border) 65%,transparent); background:transparent; font-size:17px; line-height:26px; white-space:nowrap; text-align:left; vertical-align:middle; }
-.decision-recent-ash td:last-child { text-align:right; font-size:22px; font-weight:600; color:var(--dm-cyan); }
+.decision-recent-ash td { padding:2px 0; border-bottom:1px solid color-mix(in srgb,var(--dm-border) 65%,transparent); background:transparent; font-size:20px; line-height:28px; white-space:nowrap; text-align:left; vertical-align:middle; }
+.decision-recent-ash td:last-child { text-align:right; font-size:25px; font-weight:600; color:var(--dm-cyan); }
 .decision-recent-ash tbody tr:first-child { background:color-mix(in srgb,var(--dm-cyan) 6%,transparent); }
 .decision-recent-ash tbody tr:hover { background:color-mix(in srgb,var(--dm-cyan) 10%,transparent); }
 .decision-recent-ash tbody tr:last-child td { border-bottom:0; }
