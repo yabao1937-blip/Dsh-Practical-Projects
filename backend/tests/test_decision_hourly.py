@@ -237,10 +237,11 @@ def test_archived_results_mean_dedup_state_and_freeze(sessions,seeded,monkeypatc
 
 def test_hourly_endpoint_is_read_only(sessions,seeded,client,monkeypatch):
     monkeypatch.setattr('app.decision_hourly.service.utc_now',lambda:HOUR)
+    monkeypatch.setattr('app.decision_hourly.service.build_hour',lambda *args:pytest.fail('Polling launched an hour calculation'))
     response=client.get('/api/v1/decision/hourly')
     assert response.status_code==200,response.text
-    assert response.json()['period']['apply_label']=='10:00–11:00'
-    assert response.json()['cells']['density']['value']==1.48
+    assert response.json()['status']=='pending'
+    assert response.json()['period']['end']==iso_time(HOUR)
     with sessions() as db:
         assert db.scalar(select(DecisionCycleSample)) is None
         assert db.scalar(select(DecisionCycleHour)) is None

@@ -121,7 +121,7 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
             result['expert_explanation'] = expert_detail
             result['warnings'].append('GPT专家基准模型；历史标签与专家经验存在差异，尚待新化验验证')
             if expert_detail['outside_expert_range']:
-                result['warnings'].append('液位超出专家基准25–75%，显示边界估算，暂缓调密')
+                result['warnings'].append('液位超出专家基准25–75%，按边界估算参与决策')
         if numeric(prediction) and 0 <= prediction <= 100:
             held = any(cells[k]['status'] in ('held','stopped') for k in features_used)
             result['coarse_ash'] = output(prediction, 'held' if held else 'predicted', '采用沿用输入，仅供观察' if held else
@@ -165,8 +165,6 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
     if total_errors:
         result['total_ash'] = output(reason='；'.join(total_errors))
     advice_errors = []
-    if expert_detail and expert_detail['outside_expert_range']:
-        advice_errors.append('液位超出专家基准25–75%，边界估算仅供观察')
     if expert and (error := problem('is_stoppage')):
         advice_errors.append(error)
     if result['total_ash']['value'] is None:

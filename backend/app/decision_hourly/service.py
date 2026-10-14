@@ -1,6 +1,7 @@
 """Forward-only decision archive and immutable previous-hour summaries."""
 from copy import deepcopy
 from datetime import timedelta
+from types import SimpleNamespace
 
 from sqlalchemy import select, text
 
@@ -15,7 +16,7 @@ from .statistics import CADENCE, digest, hour_advice, refresh_coverage_policy
 from .history import historical_cells
 from .evidence import POLICY, PROVISIONAL, SEGMENT_POLICY, summarize
 from .tracking import density_channels, observe
-from .archive import archive_old_hour
+from .archive import archive_tick
 from .references import pack_snapshot, hydrate_rows
 
 
@@ -110,8 +111,17 @@ def record(db, now, result=None, store=None):
 
 
 def build_hour(db, start, end, now):
-    rows = list(db.scalars(select(DecisionCycleSample).where(DecisionCycleSample.sampled_at>=iso_time(start),
-        DecisionCycleSample.sampled_at<iso_time(end)).order_by(DecisionCycleSample.slot)))
+    # Only restore fields actually consumed by hour statistics. Full detail also
+    # contains duplicate input/density-channel evidence and model explanations.
+    fields = ('sources','model','input_timing','evidence_policy','total_ash',
+              'suggested_density','cells','storage_version')
+    # Parse each JSON once; separate SQLite JSON_EXTRACT expressions repeatedly
+    # scan the same large document and cost more than the hydration they save.
+    data = db.scalars(select(DecisionCycleSample).where(DecisionCycleSample.sampled_at>=iso_time(start),
+        DecisionCycleSample.sampled_at<iso_time(end)).order_by(DecisionCycleSample.slot))
+    rows = [SimpleNamespace(slot=r.slot,sampled_at=r.sampled_at,context_key=r.context_key,
+        fingerprint=r.fingerprint,snapshot={**{k:r.snapshot[k] for k in fields if k in r.snapshot},
+            'inputs':{k:v for k,v in r.snapshot.get('inputs',{}).items() if k=='is_stoppage'}}) for r in data]
     rows = hydrate_rows(db,rows)
     cells, sources, basis = historical_cells(db,start,end,rows)
     context = db.get(DecisionCycleContext,rows[-1].context_key) if rows else None
@@ -140,28 +150,60 @@ def build_hour(db, start, end, now):
                PROVISIONAL+'；等待响应实验，不限制未来估计区间宽度，单次执行仍限 ±0.03。'])
 
 
-def tick(now=None, sessions=SessionLocal):
+def observation_tick(now=None, sessions=SessionLocal):
     with sessions() as db:
         # Serialize duplicate worker ticks; one slot/one hour even during overlapping restarts.
         if db.bind.dialect.name == 'sqlite':
             db.execute(text('BEGIN IMMEDIATE'))
         now = now or utc_now()
-        start,end = window(now)
         record(db,now)
+        db.commit()
+    return now
+
+
+def summary_tick(now, sessions=SessionLocal):
+    start,end = window(now)
+    # WAL readers can calculate a full hour without holding up the collector.
+    with sessions() as db:
+        if db.bind.dialect.name == 'sqlite':
+            db.execute(text('BEGIN'))
+        if db.get(DecisionCycleHour,iso_time(start)):
+            return
+        snapshot = build_hour(db,start,end,now)
+    with sessions() as db:
+        if db.bind.dialect.name == 'sqlite':
+            db.execute(text('BEGIN IMMEDIATE'))
         if not db.get(DecisionCycleHour,iso_time(start)):
             db.add(DecisionCycleHour(start=iso_time(start),end=iso_time(end),generated_at=iso_time(now),
-                                    snapshot=build_hour(db,start,end,now)))
-        # Retain full evidence in verified compressed storage before clearing hot rows.
-        archive_old_hour(db,iso_time(start-timedelta(days=7)))
+                                    snapshot=snapshot))
         db.commit()
+
+
+def maintenance_tick(now, sessions=SessionLocal):
+    # Called only after a current observation commits: no preceding-hour record
+    # can still be waiting for its write lock when we freeze the hour.
+    summary_tick(now,sessions)
+    start,_ = window(now)
+    archive_tick(iso_time(start-timedelta(days=7)),sessions)
     from .ash_settlement import settlement_tick
     settlement_tick(now, sessions)
 
 
-def read_hour(db, now=None, live=None):
+def tick(now=None, sessions=SessionLocal):
+    """Synchronous entry point; the worker runs observation and maintenance separately."""
+    maintenance_tick(observation_tick(now,sessions),sessions)
+
+
+def read_hour(db, now=None, live=None, defer_missing=False):
     now = now or utc_now()
     start,end = window(now)
     saved = db.get(DecisionCycleHour,iso_time(start))
+    if saved is None and defer_missing:
+        # Browser polling must not launch duplicate full-hour calculations while
+        # the background worker is preparing the newly completed hour.
+        return dict(status='pending',checked_at=iso_time(now),
+                    reason='上一小时统计正在生成，请稍候',
+                    period=dict(start=iso_time(start),end=iso_time(end)))
     result = deepcopy(saved.snapshot) if saved else build_hour(db,start,end,now)
     refresh_coverage_policy(result)
     result['frozen'] = bool(saved)

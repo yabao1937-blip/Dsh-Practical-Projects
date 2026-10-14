@@ -61,7 +61,8 @@ def test_raw_ash_is_optional_for_prediction_total_and_advice(inputs, artifact8, 
 @pytest.mark.parametrize('key,change', [
     ('coal_amount',dict(value=None,status='missing')), ('coal_amount',dict(status='held')),
     ('coal_amount',dict(value=10)), ('sysA',dict(value=None)), ('sys401',dict(value=None)),
-    ('desliming473',dict(value=None)), ('level',dict(value=None)), ('level',dict(value=80)),
+    ('desliming473',dict(value=None)), ('level',dict(value=None)), ('level',dict(value=-1)),
+    ('level',dict(value=101)), ('level',dict(status='held')),
     ('is_stoppage',dict(value=1)), ('is_stoppage',dict(value=None)),
     ('density',dict(value=None)), ('density',dict(value=1)),
     ('heavy_ash',dict(value=None)), ('belt501',dict(status='held'))])
@@ -73,6 +74,21 @@ def test_other_required_data_and_protections_still_block(inputs, artifact8, key,
     result = calculate(cells, store, now=NOW)
     assert result['suggested_density']['value'] is None
     assert result['suggested_density']['reason']
+
+
+@pytest.mark.parametrize('level', [0,24.9,25,75,75.1,75.72,80,100])
+def test_level_outside_expert_anchors_still_allows_density_advice(inputs,artifact8,level):
+    cells,store=inputs
+    use8(store,artifact8)
+    cells['level']['value']=level
+    result=calculate(cells,store,now=NOW)
+    cells['level']['value']=min(75,max(25,level))
+    boundary=calculate(cells,store,now=NOW)
+    assert result['coarse_ash']['value']==boundary['coarse_ash']['value']
+    assert result['suggested_density']==boundary['suggested_density']
+    assert result['suggested_density']['value'] is not None
+    if level<25 or level>75:
+        assert any('按边界估算参与决策' in text for text in result['warnings'])
 
 
 def test_raw_refresh_cannot_release_existing_action_latch(inputs, artifact8):

@@ -104,7 +104,7 @@ const GptExpert9 = {
         panel.innerHTML=`<div class="gpt-expert-heading"><div><p>GPT / 专家基准${name}</p><h3>315 灰分预测</h3></div><span>已接入决策总览 · 待现场验证</span></div>
             ${this.error?`<p role="alert">${e(this.error)}；当前展示上次读取的模型</p>`:''}
             <div class="gpt-expert-anchor"><div><small>精磁尾液位 25%</small><strong>23.00%</strong></div><div><small>参考工况 · 液位为主</small><strong>30.5 − 0.3 × 液位</strong></div><div><small>精磁尾液位 75%</small><strong>8.00%</strong></div></div>
-            <p>其余 ${features.length-1} 个因素合计修正不超过 ±2 个灰分百分点。液位在 25–75% 外显示边界估算，并暂缓建议调密。</p>
+            <p>其余 ${features.length-1} 个因素合计修正不超过 ±2 个灰分百分点。液位在 25–75% 外按边界估算参与决策，仍给出建议密度。</p>
             <div class="gpt-expert-metrics">${metrics('历史拟合',r.historical_fit,'最终模型对训练记录回算')}${metrics('调参验证',selected.metrics,'开发窗口内，按完整日期向后验证')}${metrics('历史留后检验',r.forward_time_check.metrics,`${e(r.forward_time_check.start)} 至 ${e(r.forward_time_check.end)}；未用于本次选参`)}</div>
             <p class="gpt-expert-caution">历史记录与专家关系存在明显差异；历史留后结果未超过均值基线（MAE ${fmt(r.forward_time_check.historical_mean.mae)}）。这些数据曾用于开发，不能作为新的独立验收结果。</p>
             <section class="gpt-expert-chart"><h4>历史化验与新模型回算</h4><p><span class="gpt-series-actual">蓝线：历史化验</span>　<span class="gpt-series-pred">橙线：专家模型回算</span>　${g.n} 条正常生产记录 · ${m.days} 个日期</p>

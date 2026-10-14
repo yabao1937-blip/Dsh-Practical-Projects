@@ -149,7 +149,9 @@ window.Api = {
         const response=await fetch(this.base+'/decision/hourly',{signal:AbortSignal.timeout(8000),cache:'no-store'});
         if(!response.ok) throw new Error('小时统计暂不可用，请重试');
         const result=await response.json();
-        if(!['decision-hourly-v1','decision-hourly-v2'].includes(result.policy) || !result.cells || !result.period || !result.coverage) throw new Error('小时统计响应异常');
+        if(result?.status==='pending' && Number.isFinite(Date.parse(result.checked_at)) &&
+            Date.parse(result.period?.end)-Date.parse(result.period?.start)===3600000) return result;
+        if(!['decision-hourly-v1','decision-hourly-v2'].includes(result?.policy) || !result.cells || !result.period || !result.coverage) throw new Error('小时统计响应异常');
         return result;
     },
 

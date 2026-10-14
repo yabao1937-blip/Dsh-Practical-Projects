@@ -67,9 +67,11 @@ def test_live_chain_uses_expert9_and_retains_stop_guard(artifact,inputs):
     assert result['model']['method']=='expert9'
     assert result['coarse_ash']['value']==expected
     assert len(result['features'])==9
-    assert result['total_ash']['value']==pytest.approx((8.5*440+9*40+expected*20)/500)
+    assert result['total_ash']['value']==pytest.approx((8.5*445+9*40+expected*15)/500)
     assert result['suggested_density']['value'] is not None
-    for key,value in [('is_stoppage',1),('is_stoppage',None),('level',80)]:
+    changed=deepcopy(cells);changed['level']['value']=80
+    assert calculate(changed,store,now=NOW)['suggested_density']['value'] is not None
+    for key,value in [('is_stoppage',1),('is_stoppage',None)]:
         changed=deepcopy(cells);changed[key]['value']=value
         after=calculate(changed,store,now=NOW)
         assert after['suggested_density']['value'] is None

@@ -140,7 +140,7 @@ def hourly_decision(db: Session = Depends(get_db)):
     from ..decision_hourly.service import read_hour
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))
-    return read_hour(db)
+    return read_hour(db,defer_missing=True)
 
 
 @router.get('/total-ash-hours')

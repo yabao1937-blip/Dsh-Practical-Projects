@@ -140,8 +140,9 @@ const DecisionHourly = {
         const updatedAt=new Date(r?.period?.apply_start || r?.period?.end || '');
         const updatedTime=Number.isFinite(updatedAt.getTime())?updatedAt.toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}):'—';
         const statusClass=this.gapClass(gap) || (r && !available?' is-hourly-warning':'');
+        const title=r?.suggested_density?.reason || this.error || '正在读取上一小时建议';
           const height=root.summaryHeight??201, spacing=root.summaryGap??24;
-          return `<section class="decision-node decision-hourly-summary${statusClass}" data-decision-key="hourly-summary" aria-label="本小时建议密度" aria-busy="${this.pending()}" style="left:${root.x}px;top:${root.y-height-spacing}px;width:${root.w}px;height:${height}px"><span class="decision-node-heading">本小时建议密度</span><span class="decision-node-value">${page.number(value,3)} <span class="decision-root-unit">g/cm³</span></span><span class="decision-node-source">更新于 ${page.escape(updatedTime)}</span></section>`;
+          return `<section class="decision-node decision-hourly-summary${statusClass}" data-decision-key="hourly-summary" aria-label="本小时建议密度" title="${page.escape(title)}" aria-busy="${this.pending()}" style="left:${root.x}px;top:${root.y-height-spacing}px;width:${root.w}px;height:${height}px"><span class="decision-node-heading">本小时建议密度</span><span class="decision-node-value">${page.number(value,3)} <span class="decision-root-unit">g/cm³</span></span><span class="decision-node-source">更新于 ${page.escape(updatedTime)}</span></section>`;
     },
     async update(page,force=false) {
         if(!this.enabled(page) || this.inFlight || (typeof DecisionSources!=='undefined' && DecisionSources.saving) ||
@@ -154,7 +155,9 @@ const DecisionHourly = {
                 if(epoch!==this.epoch()) return;
                 // Include request time conservatively, so a slow response cannot
                 // extend an old recommendation beyond its applicable hour.
-                this.result=result; this.clockBaseAt=requestedAt; this.resultEpoch=epoch; this.sourceKeyAtRequest=sourceKey;
+                this.result=result?.status==='pending'?null:result;
+                this.error=result?.status==='pending'?(result.reason || '上一小时统计正在生成'):'';
+                this.clockBaseAt=requestedAt; this.resultEpoch=epoch; this.sourceKeyAtRequest=sourceKey;
             } catch(error) { if(epoch===this.epoch()) {this.result=null; this.error=error.message || '小时统计读取失败';} }
         })();
         this.inFlight=work;
