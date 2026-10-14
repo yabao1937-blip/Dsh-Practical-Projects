@@ -28,7 +28,11 @@ class DecisionCycleHour(Base):
 
 
 class DecisionAshSettlement(Base):
-    """Retrospective ash only; never replaces the original decision/advice archive."""
+    """Revisable retrospective ash cache; original decisions/advice stay immutable.
+
+    ``deadline`` is retained for database compatibility; v2 stores publication time,
+    not a cutoff on later manual assays. The snapshot policy/revision validates it.
+    """
     __tablename__ = 'gpt_ash_settlements'
     start: Mapped[str] = mapped_column(String(32), primary_key=True)
     end: Mapped[str] = mapped_column(String(32))

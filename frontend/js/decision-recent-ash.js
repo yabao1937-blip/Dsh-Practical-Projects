@@ -11,7 +11,7 @@ const DecisionRecentAsh = {
         const stamp=useHourly?hourly.result.checked_at:this.result?.generated_at;
         const base=useHourly?hourly.clockBaseAt:this.clockBaseAt;
         const now=Date.parse(stamp)+(this.clock()-base);
-        const delay=Number.isFinite(this.result?.publication_delay_seconds)?this.result.publication_delay_seconds*1000:2*this.hourMs;
+        const delay=Number.isFinite(this.result?.publication_delay_seconds)?this.result.publication_delay_seconds*1000:this.hourMs;
         return Number.isFinite(now)?Math.floor((now-delay)/this.hourMs)*this.hourMs:null;
     },
     rows() {
@@ -36,7 +36,7 @@ const DecisionRecentAsh = {
         this.inFlight=(async()=>{
             try {
                 // The endpoint's default window is based on server time; take its
-                // latest ten slots without replaying or recalculating history.
+                // latest ten slots using the server's assay-attribution policy.
                 const result=await Api.getTotalAshHours();
                 if(!Number.isFinite(Date.parse(result.generated_at)) || !Number.isFinite(Date.parse(result.latest_end)))
                     throw new Error('小时灰分时间信息异常');
@@ -47,6 +47,12 @@ const DecisionRecentAsh = {
         await this.inFlight;
         this.inFlight=null;
         if(this.enabled(page) && page.active()) page.renderGraph();
+    },
+    async measurementSaved(page) {
+        this.lastAttempt=-Infinity;
+        // A pre-save request must finish before fetching the newly entered assay.
+        while(this.inFlight) await this.inFlight;
+        return this.update(page,true);
     },
     parts(stamp) { return new Date(stamp+8*this.hourMs).toISOString().slice(0,16).split('T'); },
     position(page) {
@@ -72,6 +78,6 @@ const DecisionRecentAsh = {
             const title=`${this.error?this.error+' · ':''}${date} ${start} — ${endDate} ${end} · ${row.reason}${coverage}`;
             return `<tr data-decision-key="recent-ash-${row.start}" class="is-${row.status}" title="${page.escape(title)}"><td>${start}–${end}</td><td>${page.number(row.value,2)}</td></tr>`;
         }).join('');
-        return `<section class="decision-recent-ash" data-decision-key="recent-ash" aria-label="近10小时平均灰分" aria-busy="${!!this.inFlight}" style="left:${anchor.x}px;top:0;width:${anchor.w}px;height:${anchor.y-22}px"><table aria-label="延迟两小时结算的最近10小时平均总灰分（%）"><colgroup><col style="width:62%"><col></colgroup><tbody>${html || `<tr><td colspan="2" class="decision-recent-ash-empty" title="${page.escape(this.error || (this.enabled(page)?'正在读取':'请通过服务地址查看'))}">—</td></tr>`}</tbody></table></section>`;
+        return `<section class="decision-recent-ash" data-decision-key="recent-ash" aria-label="近10小时平均灰分" aria-busy="${!!this.inFlight}" style="left:${anchor.x}px;top:0;width:${anchor.w}px;height:${anchor.y-22}px"><table aria-label="按重介采样归属更新的最近10小时平均总灰分（%）"><colgroup><col style="width:62%"><col></colgroup><tbody>${html || `<tr><td colspan="2" class="decision-recent-ash-empty" title="${page.escape(this.error || (this.enabled(page)?'正在读取':'请通过服务地址查看'))}">—</td></tr>`}</tbody></table></section>`;
     },
 };

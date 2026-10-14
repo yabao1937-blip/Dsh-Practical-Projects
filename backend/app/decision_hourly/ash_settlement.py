@@ -1,4 +1,4 @@
-"""Two-hour delayed ash settlement, using frozen process data and released assays.
+"""Retrospective ash with lagged assay attribution and revisable estimates.
 
 This is a retrospective quality statistic, not a replay of an online decision.
 The original coarse prediction, hour advice and cycle snapshots are immutable.
@@ -6,11 +6,12 @@ The original coarse prediction, hour advice and cycle snapshots are immutable.
 from collections import Counter
 from copy import deepcopy
 from datetime import timedelta
+from hashlib import sha256
 import json
 from math import fsum
 from types import SimpleNamespace
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from ..hourly_brief.inputs import LOCAL, business_time, numeric
 from ..models import ManualMeasurement
@@ -19,12 +20,13 @@ from ..telemetry.domain import iso_time, utc_now
 from .archive import archived_rows
 from .ash_history import read_ash_hours
 from .evidence import MASS, POLICY as EVIDENCE_POLICY, at, weights
-from .models import DecisionAshSettlement, DecisionCycleHour, DecisionCycleSample
+from .models import DecisionAshSettlement, DecisionCycleHour, DecisionCycleSample, DecisionEvidenceArchive
 from .references import resolve_snapshots
 from .statistics import CADENCE, valid
 
-POLICY = 'gpt-ash-settlement-v1'
-DELAY = timedelta(hours=2)
+POLICY = 'gpt-ash-settlement-v2'
+# A sample at 10:00–10:59 describes 08:00–09:00. Publish that hour from 10:00.
+DELAY = timedelta(hours=1)
 LEGACY = 'legacy-sample-mean'
 
 
@@ -52,21 +54,45 @@ def load_rows(db, start):
     return sorted(rows.values(), key=lambda r: r.slot)
 
 
-def manual_basis(db, start, end):
-    deadline = end+DELAY
-    query = select(ManualMeasurement).where(ManualMeasurement.metric == 'heavy_clean_coal_ash',
+def available_assays(db, now):
+    return list(db.scalars(select(ManualMeasurement).where(ManualMeasurement.metric == 'heavy_clean_coal_ash',
         ManualMeasurement.unit == '%', ManualMeasurement.value >= 0, ManualMeasurement.value <= 100,
-        ManualMeasurement.created_at <= iso_time(deadline), ManualMeasurement.observed_at < iso_time(end))
-    records = list(db.scalars(query.where(ManualMeasurement.observed_at >= iso_time(start))
-                             .order_by(ManualMeasurement.observed_at, ManualMeasurement.id)))
+        ManualMeasurement.created_at <= iso_time(now), ManualMeasurement.observed_at <= iso_time(now))
+        .order_by(ManualMeasurement.observed_at, ManualMeasurement.id)))
+
+
+def manual_basis(db, start, end, now=None, available=None):
+    now = now or utc_now()
+    sample_start, sample_end = end+DELAY, end+DELAY+timedelta(hours=1)
+    available = available_assays(db, now) if available is None else available
+    records = [r for r in available if iso_time(sample_start) <= r.observed_at < iso_time(sample_end)]
     carried = not records
     if carried:
-        record = db.scalar(query.where(ManualMeasurement.observed_at < iso_time(start))
-                           .order_by(ManualMeasurement.observed_at.desc(), ManualMeasurement.id.desc()).limit(1))
-        records = [record] if record else []
+        # Latest known preceding assay, never borrow a later production hour's lab.
+        records = [r for r in available if r.observed_at < iso_time(sample_start)][-1:]
     return dict(value=fsum(r.value for r in records)/len(records) if records else None,
-        carried=carried, records=[dict(id=r.id, observed_at=r.observed_at, created_at=r.created_at, value=r.value)
-                                 for r in records], deadline=iso_time(deadline))
+        carried=carried, records=[dict(id=r.id, observed_at=r.observed_at, created_at=r.created_at, value=float(r.value))
+                                 for r in records], sample_window=dict(start=iso_time(sample_start), end=iso_time(sample_end)))
+
+
+def source_revision(db, start):
+    key = iso_time(start)
+    generated = db.scalar(select(DecisionCycleHour.generated_at).where(DecisionCycleHour.start == key))
+    if generated:
+        return generated  # Completed original hours/evidence are immutable, including archival.
+    count, slot = db.execute(select(func.count(), func.max(DecisionCycleSample.slot)).where(
+        DecisionCycleSample.sampled_at >= key,
+        DecisionCycleSample.sampled_at < iso_time(start+timedelta(hours=1)))).one()
+    archived = db.scalar(select(DecisionEvidenceArchive.checksum).where(DecisionEvidenceArchive.start == key))
+    return [count, slot, archived]
+
+
+def revision(basis, source):
+    return sha256(json.dumps([POLICY, basis, source], sort_keys=True).encode()).hexdigest()
+
+
+def manual_revision(db):
+    return db.scalar(select(func.max(ManualMeasurement.id)).where(ManualMeasurement.metric == 'heavy_clean_coal_ash'))
 
 
 def permits_manual(snapshot):
@@ -135,9 +161,11 @@ def contribution_item(contributions, start, end):
                '旧口径样本均值' if legacy else '原时段无有效灰分与实际产量配对记录')
 
 
-def build_settlement(db, start):
+def build_settlement(db, start, now=None, basis=None, source=None):
     end = start+timedelta(hours=1)
-    basis, rows = manual_basis(db, start, end), load_rows(db, start)
+    basis = manual_basis(db, start, end, now) if basis is None else basis
+    source = source_revision(db, start) if source is None else source
+    rows = load_rows(db, start)
     w, contributions, excluded, replaced = weights(rows, end), [], Counter(), 0
     seen_legacy = set()
     for row in rows:
@@ -178,40 +206,76 @@ def build_settlement(db, start):
             item['reason'] = '仅有原冻结小时统计，缺少逐次明细，不能纳入晚补化验或拆分分钟'
     if item.get('legacy_reference'):
         item['reason'] += '；含旧统计参考，旧值未纳入晚补化验'
-    item.update(settlement_policy=POLICY, deadline=iso_time(end+DELAY), manual_count=len(basis['records']),
-                manual_carried=basis['carried'], recalculated_count=replaced)
-    item['reason'] += '；结束后延迟2小时结算'
+    provisional = basis['carried'] and any(permits_manual(r.snapshot) for r in rows)
+    item.update(settlement_policy=POLICY, publication_at=iso_time(end+DELAY),
+                deadline=iso_time(end+DELAY), manual_count=len(basis['records']),
+                manual_carried=basis['carried'], recalculated_count=replaced, provisional=provisional)
+    item['reason'] += '；重介采样按采样整点前两小时归属（10点采样对应8–9点）'
+    if provisional:
+        item['reason'] += '；暂估：对应重介化验待补录，补录后更新'
     if replaced:
-        item['reason'] += f'；采用重介化验{basis["value"]:.2f}%（'+('沿用小时前采样' if basis['carried'] else f'{len(basis["records"])}条均值')+'）'
+        item['reason'] += f'；采用重介化验{basis["value"]:.2f}%（'+('沿用最近前序采样' if basis['carried'] else f'对应{len(basis["records"])}条均值')+'）'
     elif basis['records']:
         item['reason'] += '；本小时未应用晚补化验'
     if not rows and basis['value'] is not None:
         item['reason'] += '；缺少原时段逐次明细，不能回算'
-    return dict(policy=POLICY, item=item, heavy_ash=basis, contributions=contributions,
+    return dict(policy=POLICY, revision=revision(basis, source), item=item, heavy_ash=basis, contributions=contributions,
                 excluded_reasons=dict(excluded), original_sample_count=len(rows))
 
 
 def prepare_due_hours(db, now):
-    """One current due hour plus one backlog hour per worker tick, bounded read work."""
+    """Compare small cache metadata; rebuild at most two stale hours per tick."""
     end = latest_end(now)
-    starts = [end-timedelta(hours=1)]
-    older = db.scalar(select(DecisionCycleHour.start).where(DecisionCycleHour.start < iso_time(starts[0]),
-        ~DecisionCycleHour.start.in_(select(DecisionAshSettlement.start)))
-        .order_by(DecisionCycleHour.start.desc()).limit(1))
-    if older:
-        starts.append(business_time(older))
+    current = iso_time(end-timedelta(hours=1))
+    hours = dict(db.execute(select(DecisionCycleHour.start, DecisionCycleHour.generated_at)
+        .where(DecisionCycleHour.start <= current)).all())
+    cached_keys = list(db.scalars(select(DecisionAshSettlement.start).where(DecisionAshSettlement.start <= current)))
+    backlog = sorted({*hours, *cached_keys}-{current}, reverse=True)
+    available, guard = available_assays(db, now), manual_revision(db)
+    # Visit a bounded slice of old hours, plus newly entered assays' own hours.
+    # Never parse every saved contribution JSON on every five-second worker tick.
+    offset = int(now.timestamp()/CADENCE) % len(backlog) if backlog else 0
+    recent = [iso_time(business_time(r.observed_at).replace(minute=0, second=0, microsecond=0)-timedelta(hours=2))
+              for r in reversed(available) if r.created_at >= iso_time(now-timedelta(minutes=1))]
+    rotated = (backlog[offset:]+backlog[:offset])[:2]
+    starts = list(dict.fromkeys([current, *[key for key in recent if key <= current][:4], *rotated]))
     prepared = []
-    for start in starts:
-        key = iso_time(start)
-        if not db.get(DecisionAshSettlement, key):
-            prepared.append(DecisionAshSettlement(start=key, end=iso_time(start+timedelta(hours=1)),
-                deadline=iso_time(start+timedelta(hours=3)), generated_at=iso_time(now),
-                snapshot=build_settlement(db, start)))
+    for key in starts:
+        start = business_time(key)
+        basis = manual_basis(db, start, start+timedelta(hours=1), now, available)
+        source = hours[key] if key in hours else source_revision(db, start)
+        cached = db.get(DecisionAshSettlement, key)
+        if cached and cached.snapshot.get('revision') == revision(basis, source):
+            continue
+        row = DecisionAshSettlement(start=key, end=iso_time(start+timedelta(hours=1)),
+            deadline=iso_time(start+timedelta(hours=1)+DELAY), generated_at=iso_time(now),
+            snapshot=build_settlement(db, start, now, basis, source))
+        row._manual_revision = guard
+        prepared.append(row)
+        if len(prepared) == 2:
+            break
     return prepared
 
 
+def save_prepared(db, prepared):
+    guard = manual_revision(db)
+    for row in prepared:
+        if guard != row._manual_revision:
+            continue  # A new assay arrived during replay; retry on the next tick.
+        basis = row.snapshot['heavy_ash']
+        if row.snapshot['revision'] != revision(basis, source_revision(db, business_time(row.start))):
+            continue
+        saved = db.get(DecisionAshSettlement, row.start)
+        if saved and (saved.generated_at > row.generated_at or saved.snapshot.get('revision') == row.snapshot['revision']):
+            continue
+        if saved:
+            saved.deadline, saved.generated_at, saved.snapshot = row.deadline, row.generated_at, row.snapshot
+        else:
+            db.add(row)
+
+
 def settle_due_hours(db, now):
-    db.add_all(prepare_due_hours(db, now))
+    save_prepared(db, prepare_due_hours(db, now))
     db.flush()
 
 
@@ -226,18 +290,19 @@ def settlement_tick(now, sessions):
     with sessions() as db:
         if db.bind.dialect.name == 'sqlite':
             db.execute(text('BEGIN IMMEDIATE'))
-        for row in prepared:
-            if not db.get(DecisionAshSettlement, row.start):
-                db.add(row)
+        save_prepared(db, prepared)
         db.commit()
 
 
 def get_settlement(db, start, now):
     if start+timedelta(hours=1)+DELAY > now:
-        raise ValueError('该小时尚未到结束后两小时的结算时间')
+        raise ValueError('该小时尚未到结束后一小时的采样归属时间')
     saved = db.get(DecisionAshSettlement, iso_time(start))
-    result = deepcopy(saved.snapshot) if saved else build_settlement(db, start)
-    result['item']['frozen'] = saved is not None
+    basis = manual_basis(db, start, start+timedelta(hours=1), now)
+    source = source_revision(db, start)
+    cached = saved and saved.snapshot.get('revision') == revision(basis, source)
+    result = deepcopy(saved.snapshot) if cached else build_settlement(db, start, now, basis, source)
+    result['item'].update(frozen=False, cached=bool(cached))
     return result
 
 
@@ -253,7 +318,7 @@ def report(items, start, end, now, hourly):
     valid_count = sum(i['value'] is not None for i in items)
     reference = any(i.get('legacy_reference') for i in items)
     summary = dict(value=value, aggregation='mixed' if mixed else MASS if mass else LEGACY, mass_t=mass,
-        legacy_reference=reference,
+        legacy_reference=reference, provisional=any(i.get('provisional') for i in items),
         sample_count=sum(i['sample_count'] for i in items), expected_count=int(duration/CADENCE),
         coverage=covered/duration, valid_seconds=covered, total_seconds=duration,
         valid_segments=valid_count, total_segments=len(items), valid_hours=valid_count, total_hours=len(items),
@@ -264,7 +329,7 @@ def report(items, start, end, now, hourly):
         timezone='Asia/Shanghai', unit='%', publication_delay_seconds=int(DELAY.total_seconds()),
         generated_at=iso_time(now), latest_end=iso_time(latest_end(now)),
         period=dict(start=iso_time(start), end=iso_time(end)), items=items, summary=summary,
-        method='小时结束后延迟2小时结算；按采样时段纳入截止前重介化验，其他组分保留原记录，按实际产煤量加权；缺失不补零。'+
+        method='重介10点采样归属8–9点（非整点按采样小时归属）；对应化验未补录时沿用最近前序值暂估，补录后更新。其他组分保留原记录，按实际产煤量加权；缺失不补零。'+
             ('含旧统计参考，旧值未纳入晚补化验。' if reference else ''))
 
 
@@ -292,7 +357,7 @@ def read_settled_interval(db, start=None, end=None, now=None):
     if end <= start or end-start > timedelta(days=31):
         raise ValueError('区间须为1分钟至31天')
     if end > latest:
-        raise ValueError('小时灰分延迟两小时结算，请选择已结算的时段')
+        raise ValueError('小时灰分在结束后一小时发布，请选择已发布的时段')
     cursor, items = start, []
     while cursor < end:
         hour = cursor.astimezone(LOCAL).replace(minute=0, second=0, microsecond=0)
@@ -302,8 +367,12 @@ def read_settled_interval(db, start=None, end=None, now=None):
             item = settled['item']
         else:
             item = contribution_item(settled['contributions'], cursor, stop)
-            item.update(frozen=settled['item']['frozen'], settlement_policy=POLICY, deadline=iso_time(hour+timedelta(hours=3)))
+            item.update(frozen=False, cached=settled['item']['cached'], settlement_policy=POLICY,
+                        deadline=settled['item']['deadline'], publication_at=settled['item']['publication_at'],
+                        provisional=settled['item']['provisional'])
             item['reason'] += '；按该小时结算明细截取分钟区间'
+            if item['provisional']:
+                item['reason'] += '；暂估：对应重介化验待补录，补录后更新'
             if settled['item'].get('legacy_reference'):
                 item['legacy_reference'] = True
                 item['reason'] += '；旧统计参考未纳入晚补化验，无明细的小时不能拆分分钟'

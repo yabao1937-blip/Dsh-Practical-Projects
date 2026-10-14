@@ -76,6 +76,11 @@ const ManualMeasurements = {
             this.offset = 0;
             this.el('filter').value = '';
             if (window.Operations) window.Operations.manualMeasurementSaved();
+            if (definition.key === 'heavy_clean_coal_ash') {
+                if (typeof DecisionRecentAsh !== 'undefined' && typeof DecisionOverviewPage !== 'undefined')
+                    void DecisionRecentAsh.measurementSaved(DecisionOverviewPage);
+                if (typeof DecisionAshHistory !== 'undefined') void DecisionAshHistory.measurementSaved();
+            }
             await this.loadHistory();
         } catch (error) {
             this.message(error.message || '未收到保存确认，已保留填写内容，请刷新记录核对后重试。','error');
