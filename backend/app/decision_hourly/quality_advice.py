@@ -116,11 +116,14 @@ def compatible_contexts(db, groups, current):
             if not row or not row.definition:
                 return False, '小时数据缺少来源与模型口径记录'
             definitions.append(row.definition)
-    expected = {k:v for k,v in current.items() if k != 'point_definitions'}
+    # Targets are objectives, not measurement/model definitions. Reuse the
+    # historical facts across target edits and recompute advice with today's goal.
+    ignored = {'point_definitions', 'target'}
+    expected = {k:v for k,v in current.items() if k not in ignored}
     known = {}
     for definition in definitions:
-        if {k:v for k,v in definition.items() if k != 'point_definitions'} != expected:
-            return False, '灰分小时、密度小时或当前的来源、模型、目标或调密参数发生变化'
+        if {k:v for k,v in definition.items() if k not in ignored} != expected:
+            return False, '灰分小时、密度小时或当前的来源、模型或调密参数发生变化'
         # A temporarily missing input can omit its definition. Only conflicting
         # known definitions prove a real configuration change.
         for identity, value in definition.get('point_definitions', {}).items():
@@ -151,6 +154,10 @@ def current_problem(cell, key, now):
 
 
 def apply_quality_advice(db, result, now, current, store, current_definition):
+    # read_hour gives us a private copy; stored snapshots keep their original goal.
+    result['statistical_target'] = deepcopy(result['target'])
+    result['target'] = deepcopy(current['target'])
+    result['advice_sources'] = deepcopy(current['sources'])
     start, end = business_time(result['period']['start']), business_time(result['period']['end'])
     ash_end = latest_end(now)
     ash_start = ash_end-timedelta(hours=1)

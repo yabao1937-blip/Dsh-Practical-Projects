@@ -107,8 +107,8 @@ const DecisionRealtime = {
                 const result=await Api.getDecisionCurrent();
                 if(typeof GptExpert9!=='undefined') GptExpert9.observe(result);
                 if(epoch!==DecisionSources.epoch) return;
+                if(!DecisionSources.apply(page,result.sources)) return;
                 this.result=result; this.previousResult=null; this.completedAt=Date.now(); this.error='';
-                DecisionSources.apply(page,result.sources);
             } catch(error) {
                 if(epoch!==DecisionSources.epoch) return;
                 this.result=null; this.previousResult=null; this.error=error.message;
@@ -144,7 +144,7 @@ const DecisionRealtime = {
             badge:pending?'更新中':available ? node.id==='coarse'?'预测':'建议' : Number.isFinite(value)?'沿用输入':/暂缓|已按|刚调整/.test(reason)?'暂缓':'待计算',
             source:pending ? result ? '上轮结果 · 等待本轮计算' : '等待本轮计算' : node.id==='coarse' ? `煤量 ${amount.value} · GPT${output?.status==='held'?'沿用输入预测':['expert9','expert8'].includes(result?.model?.method)?'专家基准预测':'实时预测'}` :
                 Number.isFinite(value) ? guide?.direction==='down'?'本步建议 · 下调':guide?.direction==='up'?'本步建议 · 上调':'密度保持' : '等待有效输入',
-            formula:node.id==='coarse'?`GPT / ${result?.model?.method?.toUpperCase() || '保存模型'} · ${result?.model?.id || '等待模型'}`:`总灰分 ${page.number(result?.target?.min ?? 8.5,1)}–${page.number(result?.target?.max ?? 9.0,1)}% 范围内保持，范围外向最近边界调整`,
+            formula:node.id==='coarse'?`GPT / ${result?.model?.method?.toUpperCase() || '保存模型'} · ${result?.model?.id || '等待模型'}`:`总灰分 ${page.number(result?.target?.min ?? 8.5,2)}–${page.number(result?.target?.max ?? 9.0,2)}% 范围内保持，范围外向最近边界调整`,
             reason,title:reason,sampleAt:result?.generated_at};
     },
 };

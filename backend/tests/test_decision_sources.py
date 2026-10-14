@@ -107,6 +107,31 @@ def test_revision_conflict_noop_and_effective_time(sessions, seeded, client, mon
         assert len(list(db.scalars(select(DecisionSourceRevision)))) == 2
 
 
+def test_target_patch_is_shared_atomic_and_preserves_historical_goal(sessions, seeded, client, monkeypatch):
+    before = client.get('/api/v1/decision/current').json()
+    later = HOUR+timedelta(seconds=1)
+    monkeypatch.setattr('app.routers.decision.utc_now',lambda:later)
+    monkeypatch.setattr('app.services.decision_sources.utc_now',lambda:later)
+    body = dict(revision=0,target_min=7.5,target_max=8)
+    response = client.patch('/api/v1/decision/sources',json=body)
+    assert response.status_code == 200
+    config = response.json()
+    after = client.get('/api/v1/decision/current').json()
+    assert after['target'] == dict(min=7.5,max=8)
+    assert after['sources']['resolved_choices'] == before['sources']['resolved_choices']
+    assert after['coarse_ash'] == before['coarse_ash']
+    assert after['total_ash'] == before['total_ash']
+    assert after['suggested_density']['value'] == 1.45
+    assert before['suggested_density']['value'] == 1.48
+    assert client.patch('/api/v1/decision/sources',json=body).status_code == 409
+    assert client.patch('/api/v1/decision/sources',json={**body,'revision':config['revision']}).json()['revision'] == config['revision']
+    for invalid in [dict(target_min=9,target_max=8),dict(target_min=-1),dict(target_max=101)]:
+        assert client.patch('/api/v1/decision/sources',json={'revision':config['revision'],**invalid}).status_code == 422
+    assert client.get('/api/v1/decision/sources').json() == config
+    with sessions() as db:
+        assert build_snapshot(db,HOUR)['target'] == before['target']
+
+
 @pytest.mark.parametrize('node,source,key', [
     ('system-switches','kepserver-main','point0'), ('desliming','kepserver-main','four_system_status'),
     ('raw-ash','kepserver-main','four_system_status'), ('density-current','kepserver-main','point0'),

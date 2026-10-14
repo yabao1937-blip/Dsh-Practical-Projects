@@ -6,8 +6,17 @@ const DecisionSources = {
         'system-switches':'systems','desliming':'desliming','float-press':'float_press','float-unmodeled':'reagent','coarse-slime':'raw_slime'},
     enabled(page) { return page.liveMode() && !!window.Api?.getDecisionCurrent && window.location.protocol.startsWith('http'); },
     apply(page, config) {
+        if(this.config && config.revision<this.config.revision) return false;
         this.config=config;
+        const live=typeof DecisionRealtime==='undefined'?null:DecisionRealtime.result;
+        if(live?.sources?.revision<config.revision &&
+            (live.target?.min!==config.target_min || live.target?.max!==config.target_max)) {
+            DecisionRealtime.result=this.invalidateAdvice(live);
+            DecisionRealtime.previousResult=null; DecisionRealtime.lastAttempt=0;
+        }
         if (page.liveMode()) page.pointChoices={...config.resolved_choices};
+        if(typeof DecisionTarget!=='undefined') DecisionTarget.sync(page);
+        return true;
     },
     async ensure(page) {
         if (this.config) return this.config;
@@ -49,6 +58,41 @@ const DecisionSources = {
             page.renderGraph(); page.renderContext(); page.renderInspector();
             DecisionRealtime.update(page);
         }
+    },
+    async changeTarget(page, revision, min, max) {
+        if(this.saving) throw Error('正在保存配置，请稍后重试');
+        this.saving=true; this.epoch++;
+        try {
+            let confirmed;
+            try {
+                confirmed=await Api.decisionSources({revision,target_min:min,target_max:max});
+            } catch(error) {
+                // A timed-out response may already have committed. Read it back;
+                // never retry a write with a newer revision and overwrite a peer.
+                try { confirmed=await Api.decisionSources(); this.apply(page,confirmed); } catch(_) { /* Preserve last confirmed state. */ }
+                if(confirmed?.target_min!==min || confirmed?.target_max!==max) throw error;
+            }
+            this.apply(page,confirmed); this.error='';
+        } finally {
+            this.saving=false; this.epoch++;
+            DecisionRealtime.lastAttempt=0;
+            // Keep the measurement cards stable while replacing only advice.
+            DecisionRealtime.result=this.invalidateAdvice(DecisionRealtime.result); DecisionRealtime.previousResult=null;
+            if(typeof DecisionHourly!=='undefined') {
+                DecisionHourly.result=this.invalidateAdvice(DecisionHourly.result);
+                DecisionHourly.resultEpoch=this.epoch; DecisionHourly.lastAttempt=0;
+                DecisionHourly.update(page,true);
+            }
+            page.renderGraph(); page.renderContext(); page.renderInspector();
+            DecisionRealtime.update(page);
+        }
+    },
+    invalidateAdvice(result) {
+        if(!result) return null;
+        const advice={value:null,status:'missing',reason:'正在按目标范围重新计算'};
+        return {...result,target:{min:this.config.target_min,max:this.config.target_max},guidance:{},
+            ...(result.advice_sources?{advice_sources:this.config,advice_pending:true}:{}),
+            suggested_density:advice,cells:{...result.cells,suggested_density:advice}};
     },
     display(page,node) {
         const key=this.nodes[node.id];

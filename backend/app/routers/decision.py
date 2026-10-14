@@ -96,7 +96,7 @@ def patch_sources(body: SourcesPatch, db: Session = Depends(get_db)):
         db.execute(text('BEGIN IMMEDIATE'))
     current = config_at(db)
     if current['revision'] != body.revision:
-        raise HTTPException(409, '数据来源已被其他页面修改，请刷新后重试')
+        raise HTTPException(409, '目标范围或数据来源已被其他页面修改，请刷新后重试')
     config = {k:deepcopy(current[k]) for k in ('choices','target_min','target_max')}
     for node, choice in body.choices.items():
         if choice:

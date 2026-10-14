@@ -1,5 +1,17 @@
 /* Read-only decision diagram; the paper visual skin below preserves graph geometry. */
 .decision-intro { margin-top: 6px; color: var(--text-muted); font-size: 13px; }
+.decision-target-editor { position:relative; }
+#page-decision .decision-masthead { z-index:5; }
+#page-decision .decision-masthead .page-header-actions { overflow:visible; flex-wrap:wrap; }
+.decision-target-form { position:absolute; right:0; top:calc(100% + 10px); z-index:60; width:min(340px,calc(100vw - 40px)); padding:20px; background:#f7f6f2; color:#273552; border:1px solid #ccd2e5; border-top:2px solid #3435ff; box-shadow:0 10px 30px #14214725; }
+.decision-target-form[hidden] { display:none; }
+.decision-target-form fieldset { border:0; padding:0; margin:16px 0 0; min-width:0; }
+.decision-target-inputs { display:flex; align-items:center; gap:12px; }
+.decision-target-inputs label { display:grid; gap:8px; flex:1; min-width:0; font-size:13px; }
+.decision-target-inputs input { width:100%; padding:10px; border:1px solid #ccd2e5; background:#fff; color:#273552; font-size:20px; font-variant-numeric:tabular-nums; }
+.decision-target-inputs input:focus { outline:2px solid #3435ff; outline-offset:2px; }
+.decision-target-buttons { display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
+.decision-target-form p { margin:14px 0 0; font-size:12px; line-height:1.6; color:#5f6c89; }
 #page-decision { width: 100%; max-width: 1760px; min-width: 0; margin-inline: auto; }
 .decision-workspace { --dm-bg: #101a2d; --dm-card: #18243a; --dm-text: #eef3fa; --dm-muted: #a1b0c5; --dm-border: #32415b; --dm-grid: #28354b; --dm-blue: #7bb3ff; --dm-orange: #ffc078; --dm-green: #7dd9b0; --dm-cyan: #75d5e8; background: var(--dm-bg); color: var(--dm-text); border: 1px solid var(--dm-border); border-radius: 16px; overflow: hidden; }
 .decision-workspace.is-light { --dm-bg: #f6f8fc; --dm-card: #fff; --dm-text: #17283f; --dm-muted: #53667f; --dm-border: #d2dce9; --dm-grid: #d9e2ee; --dm-blue: #2563bb; --dm-orange: #a95b0c; --dm-green: #19744f; --dm-cyan: #147589; }

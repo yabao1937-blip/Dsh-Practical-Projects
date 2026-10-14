@@ -133,9 +133,10 @@ def test_missing_latest_ash_does_not_borrow_older_hour(sessions, prepared):
         assert r['advice_blockers'] == ['ash']
 
 
-@pytest.mark.parametrize('change', ['source','model','target','parameter','definition','mid_hour'])
+@pytest.mark.parametrize('change', ['source','model','parameter','definition','mid_hour'])
 def test_real_configuration_changes_are_still_protected(sessions, prepared, change):
     current, _, base, _ = prepared
+    current['target'] = dict(min=9,max=9.5)  # Target exemption must not hide a real change.
     with sessions.begin() as db:
         if change == 'mid_hour':
             altered = deepcopy(db.get(DecisionCycleContext, base['context_key']).definition)
@@ -149,8 +150,6 @@ def test_real_configuration_changes_are_still_protected(sessions, prepared, chan
             current['sources']['resolved_choices']['density-current'] = '["other", "point"]'
         elif change == 'model':
             current['model']['version'] = 'different'
-        elif change == 'target':
-            current['target']['min'] = 8.6
         elif change == 'parameter':
             from app.models import Setting
             db.add(Setting(key='density_guide',value=dict(maxStep=.01)))
@@ -160,6 +159,52 @@ def test_real_configuration_changes_are_still_protected(sessions, prepared, chan
         r = read_hour(db, HOUR, current)
         assert r['suggested_density']['value'] is None
         assert '变化' in r['suggested_density']['reason']
+
+
+@pytest.mark.parametrize('target,expected', [(dict(min=9,max=9.5),1.48),
+    (dict(min=8,max=8.5),1.45),(dict(min=9.5,max=10),1.493)])
+def test_target_only_edit_reuses_facts_and_preserves_frozen_history(sessions, prepared, target, expected):
+    current, _, base, _ = prepared
+    current['target'] = target
+    with sessions() as db:
+        before = list(db.connection().connection.driver_connection.iterdump())
+        r = read_hour(db,HOUR,current)
+        assert r['suggested_density']['value'] == expected
+        assert r['target'] == target
+        assert r['statistical_target'] == base['target']
+        assert r['advice_inputs']['ash']['value'] == 9.3
+        assert r['advice_inputs']['density']['value'] == pytest.approx(1.48)
+        assert list(db.connection().connection.driver_connection.iterdump()) == before
+
+
+def test_mixed_target_revisions_within_both_hours_are_reusable(sessions, prepared):
+    current, _, base, _ = prepared
+    with sessions.begin() as db:
+        altered = deepcopy(db.get(DecisionCycleContext,base['context_key']).definition)
+        altered['target'] = dict(min=7,max=8)
+        key = digest(altered)
+        db.add(DecisionCycleContext(key=key,definition=altered))
+        for start in (ASH_START,START):
+            db.get(DecisionCycleHour,iso_time(start)).snapshot = {**base,
+                'evidence':dict(segments=[dict(state=dict(context_key=key)),dict(state=dict(context_key=base['context_key']))])}
+    with sessions() as db:
+        assert read_hour(db,HOUR,current)['suggested_density']['value'] == 1.46
+
+
+def test_new_target_cannot_unlock_adjustment_without_post_action_feedback(sessions, prepared):
+    from app.decision_hourly.models import DensityAction
+    current, _, _, _ = prepared
+    current['target'] = dict(min=7,max=8)
+    c = current['execution_basis']['components']['A304']
+    with sessions.begin() as db:
+        db.add(DensityAction(id='target-edit-action',channel='A304',detected_at=iso_time(HOUR-timedelta(seconds=10)),
+            evidence=dict(before=dict(pair=dict(setpoint=dict(value=1.51))),
+                after=dict(pair=dict(setpoint=dict(c,definition_id=c['sample']['definition_id']))))))
+    with sessions() as db:
+        r = read_hour(db,HOUR,current)
+        assert r['guidance']['execution_state'] == 'awaiting_feedback'
+        assert r['suggested_density']['value'] == 1.48
+        assert r['guidance']['deltaRho'] == 0
 
 
 def test_missing_definition_only_does_not_invent_configuration_change(sessions, prepared):

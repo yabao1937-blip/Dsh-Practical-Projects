@@ -358,6 +358,7 @@ const DecisionOverviewPage = {
     },
 
     init() {
+        if(typeof DecisionTarget!=='undefined') DecisionTarget.init(this);
         if (this.initialized) { this.refresh(); return; }
         this.initialized = true;
         this.loadPointChoices();
@@ -860,7 +861,10 @@ const DecisionOverviewPage = {
         const hourlyGaps=hourly?DecisionHourly.dataGaps(hourResult):new Map();
         const densityRoot=this.nodes.find(n=>n.id==='density');
         const hourSummary=typeof DecisionHourly!=='undefined'?DecisionHourly.summary(this,densityRoot):'';
-        const targetAshRange = `${this.number((hourly?hourResult?.target?.min:targetAsh?.min) ?? 8.5,1)}–${this.number((hourly?hourResult?.target?.max:targetAsh?.max) ?? 9.0,1)}%`;
+        const sharedTarget=this.sharedSources()?{min:DecisionSources.config?.target_min,max:DecisionSources.config?.target_max}:null;
+        const target = hourly ? (hourResult?.target || sharedTarget) : sharedTarget || targetAsh;
+        const formatTarget=value=>this.liveMode()?Number(value.toFixed(2)):this.number(value,1);
+        const targetAshRange = `${formatTarget(target?.min ?? 8.5)}–${formatTarget(target?.max ?? 9)}%`;
         const colors = {heavy:'var(--dm-blue)',float:'var(--dm-orange)',coarse:'var(--dm-green)'};
         if(hourSummary) colors.hourly='var(--dm-cyan)';
         const ancestorIds = new Set([this.selected]);

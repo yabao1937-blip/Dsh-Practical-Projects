@@ -16,6 +16,8 @@ const DecisionHourly = {
     },
     presentation() {
         const r=this.result;
+        if(r?.advice_sources && typeof DecisionSources!=='undefined' &&
+            DecisionSources.config?.revision>r.advice_sources.revision) return null;
         const serverNow=r ? Date.parse(r.checked_at)+(this.clock()-this.clockBaseAt) : NaN;
         // Another workstation may change the selected sources without changing
         // this browser's epoch. Wait for a new server check before showing advice.
@@ -27,7 +29,7 @@ const DecisionHourly = {
                 !(r.model?.method==='expert8' && key==='raw-ash') && current[key]!==previous[key])) return null;
         return r && this.resultEpoch===this.epoch() && serverNow<Date.parse(r.period.apply_end) ? r : null;
     },
-    pending() { return !this.presentation() && !!this.inFlight; },
+    pending() { return (!this.presentation() || this.result?.advice_pending) && !!this.inFlight; },
     coverageLow(ratio,coverage) {
         return Number.isFinite(ratio) && (coverage.required_ratio_exclusive
             ? ratio<=coverage.required_ratio : ratio<coverage.required_ratio);
@@ -174,6 +176,8 @@ const DecisionHourly = {
             try {
                 const result=await Api.getDecisionHourly();
                 if(epoch!==this.epoch()) return;
+                if(result?.advice_sources && typeof DecisionSources!=='undefined' &&
+                    !DecisionSources.apply(page,result.advice_sources)) return;
                 // Include request time conservatively, so a slow response cannot
                 // extend an old recommendation beyond its applicable hour.
                 this.result=result?.status==='pending'?null:result;

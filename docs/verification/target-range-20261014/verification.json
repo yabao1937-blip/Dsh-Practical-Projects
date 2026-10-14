@@ -1,0 +1,20 @@
+{
+  "feature": "决策总览可调目标灰分范围",
+  "date": "2026-10-14",
+  "scope": "GPT shared decision chain only; DS and model parameters unchanged",
+  "behavior": [
+    "Draft lower/upper values are saved together only on Apply using optimistic revision checks.",
+    "Hourly read-time advice uses the current target with existing ash and mean-density facts; target-only context differences do not block advice.",
+    "Stored cycle/hour snapshots retain original targets; the derived response separates statistical_target and current target/advice_sources.",
+    "Source/model/point definition/control-parameter guards, coverage strictly greater than 80%, setpoint step limits and post-action feedback protection remain active.",
+    "Late responses cannot restore an older revision; shared target changes synchronize in instant and hourly modes. Drafts survive polling."
+  ],
+  "verification": {
+    "pytest": "85 tests passed in test_hourly_quality_advice.py, test_decision_sources.py, test_gpt_setpoint_execution.py and test_training.py; one subsequently added post-action target-edit protection test passed separately (86 unique tests total).",
+    "node": ["verify_decision_target.js", "verify_decision_sources.js", "verify_decision_hourly.js"],
+    "browser": "Live 127.0.0.1:8000: edit popup, invalid bounds blocked, Apply existing bounds, both advice cards recovered, hourly mode shows same target, no console errors.",
+    "live_settings": "No test target substituted in production. Shared revision remains 4 and target remains 8.5–9.0%.",
+    "deployment": "Service restarted successfully; listening PID 58232, venv parent 55824.",
+    "ds_train_js_sha256": "AA09B7A4574EC19BE5F840B68F3611394B0584F2EC435B0ABD062416F8566BBD"
+  }
+}
