@@ -130,20 +130,21 @@ def test_policy_refresh_requires_more_than_90_and_valid_frozen_basis():
     assert result['suggested_density']['value'] is None
 
 
-def test_frozen_policy_upgrade_keeps_storage_and_live_guards(sessions,seeded):
+def test_new_policy_does_not_resurrect_old_offsets_without_its_two_inputs(sessions,seeded):
     with sessions.begin() as db:
         current=shared_snapshot(db)
         summary=legacy_hour()
+        summary.update(sources=current['sources'],target=current['target'])
         summary['context_key']=digest(context_definition(current,load_store(db)))
         db.add(DecisionCycleHour(start=iso_time(START),end=iso_time(HOUR),generated_at=iso_time(HOUR),snapshot=summary))
     with sessions() as db:
-        assert read_hour(db,HOUR,live=current)['suggested_density']['value']==1.52
+        response=read_hour(db,HOUR,live=current)
+        assert response['suggested_density']['value'] is None
+        assert response['advice_policy']=='gpt-hourly-quality-density-v1'
+        assert 'ash' in response['advice_blockers']
         stopped=deepcopy(current)
-        stopped['suggested_density']=dict(value=None,status='missing',reason='设备停机')
+        stopped['inputs']['is_stoppage']=dict(value=1,status='calculated')
         assert '设备停机' in read_hour(db,HOUR,live=stopped)['suggested_density']['reason']
-        changed=deepcopy(current)
-        changed['cells']['belt501']['sample']['definition_id']='changed'
-        assert '变化' in read_hour(db,HOUR,live=changed)['suggested_density']['reason']
         assert db.get(DecisionCycleHour,iso_time(START)).snapshot==summary
 
 
@@ -232,7 +233,10 @@ def test_archived_results_mean_dedup_state_and_freeze(sessions,seeded,monkeypatc
     tick(HOUR+timedelta(seconds=1),sessions)
     with sessions() as db:
         assert db.get(DecisionCycleHour,iso_time(START)).snapshot==saved
-        assert read_hour(db,HOUR)['cells']==saved['cells']
+        response=read_hour(db,HOUR)
+        assert {k:v for k,v in response['cells'].items() if k not in ('density','suggested_density')} == {
+            k:v for k,v in saved['cells'].items() if k not in ('density','suggested_density')}
+        assert response['cells']['density']['value']==pytest.approx(saved['cells']['density']['value'])
 
 
 def test_hourly_endpoint_is_read_only(sessions,seeded,client,monkeypatch):
@@ -273,11 +277,13 @@ def test_definition_changes_invalidate_context_and_current_guard(sessions,seeded
         summary['suggested_density']=dict(value=1.5,status='calculated',reason='test')
         summary['cells']['suggested_density']=summary['suggested_density']
         db.add(DecisionCycleHour(start=iso_time(START),end=iso_time(HOUR),generated_at=iso_time(HOUR),snapshot=summary))
+        db.add(DecisionCycleHour(start=iso_time(START-timedelta(hours=1)),end=iso_time(START),
+                                 generated_at=iso_time(START),snapshot=deepcopy(summary)))
     with sessions() as db:
-        assert read_hour(db,HOUR,live=current)['suggested_density']['value']==1.5
-        assert read_hour(db,HOUR,live=changed)['suggested_density']['value'] is None
+        assert read_hour(db,HOUR,live=current)['suggested_density']['value'] is None  # No new ash coverage.
+        assert '变化' in read_hour(db,HOUR,live=changed)['suggested_density']['reason']
         stopped=deepcopy(current)
-        stopped['suggested_density']=dict(value=None,status='missing',reason='设备停机')
+        stopped['inputs']['is_stoppage']=dict(value=1,status='calculated')
         assert '设备停机' in read_hour(db,HOUR,live=stopped)['suggested_density']['reason']
         assert db.get(DecisionCycleHour,iso_time(START)).snapshot['suggested_density']['value']==1.5
 

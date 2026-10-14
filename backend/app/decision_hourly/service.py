@@ -12,7 +12,7 @@ from ..services.decision_live import gpt_group
 from ..services.state import load_store
 from ..telemetry.domain import iso_time, utc_now
 from .models import DecisionCycleContext, DecisionCycleSample, DecisionCycleHour
-from .statistics import CADENCE, digest, hour_advice, refresh_coverage_policy
+from .statistics import CADENCE, digest, hour_advice
 from .history import historical_cells
 from .evidence import POLICY, PROVISIONAL, SEGMENT_POLICY, summarize
 from .tracking import density_channels, observe
@@ -205,22 +205,9 @@ def read_hour(db, now=None, live=None, defer_missing=False):
                     reason='上一小时统计正在生成，请稍候',
                     period=dict(start=iso_time(start),end=iso_time(end)))
     result = deepcopy(saved.snapshot) if saved else build_hour(db,start,end,now)
-    refresh_coverage_policy(result)
     result['frozen'] = bool(saved)
     result['checked_at'] = iso_time(now)
-    result['guidance'].update(validation='awaiting_experiment', empirical_note=PROVISIONAL,
-                             feasible_interval=None, interval_width_limit=None)
-    # A frozen historical offset must not bypass a current stop, disconnect, new source or protection hold.
-    if result['suggested_density']['value'] is not None:
-        current = live if live is not None else shared_snapshot(db)
-        definition = context_definition(current,load_store(db))
-        reason = None
-        if digest(definition) != result['context_key']:
-            reason = '当前来源、模型或调密参数已变化，等待新口径完整小时'
-        elif current['suggested_density']['value'] is None or (current.get('guidance') or {}).get('hold'):
-            reason = '当前状态暂缓调密：'+current['suggested_density'].get('reason','输入或保护条件不满足')
-        if reason:
-            result['suggested_density'] = dict(result['suggested_density'],value=None,status='missing',reason=reason)
-            result['cells']['suggested_density'] = result['suggested_density']
-            result['guidance'].update(rhoNew=None,reason=reason)
-    return result
+    from .quality_advice import apply_quality_advice
+    current = live if live is not None else shared_snapshot(db)
+    store = load_store(db)
+    return apply_quality_advice(db, result, now, current, store, context_definition(current, store))

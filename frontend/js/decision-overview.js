@@ -872,7 +872,7 @@ const DecisionOverviewPage = {
         const paths = this.routeConnections().map(({node,parent,path},index) => {
             const highlight = ancestorIds.has(node.id) && ancestorIds.has(parent.id);
             const summaryLink = this.summaryChildren.get(parent.id)?.includes(node.id);
-            const displayReference = this.liveMode() ? ['float-press','float-unmodeled','coarse-slime'].includes(node.id) : !summaryLink && (node.reference || (node.id !== 'density' && displayOnly(node)) || (parent.id !== 'density' && displayOnly(parent)));
+            const displayReference = (hourly && hourResult?.advice_policy==='gpt-hourly-quality-density-v1' && parent.id==='density' && node.id!=='density-current') || (this.liveMode() ? ['float-press','float-unmodeled','coarse-slime'].includes(node.id) : !summaryLink && (node.reference || (node.id !== 'density' && displayOnly(node)) || (parent.id !== 'density' && displayOnly(parent))));
             const flowReady=d=>this.displayAvailable(d) || (d.pending && Number.isFinite(d.numericValue));
             const flows = !displayReference && (this.liveMode() ? flowReady(displays.get(node.id)) && flowReady(displays.get(parent.id)) : summaryLink ? this.displayAvailable(displays.get(node.id)) : node.value !== '—' && parent.value !== '—');
             if (flows) { flowingIds.add(node.id); flowingIds.add(parent.id); }
@@ -890,7 +890,7 @@ const DecisionOverviewPage = {
             const gap=hourlyGaps.get(node.id);
             const preview = node.id === 'coarse' && !this.liveMode() ? `<span>查看${this.view === 'gpt' ? ' GPT' : '生产'}预测 ${this.number(s.prediction,2,'%')}${!s.model ? ' · 未训练' : s.previewOnly ? ' · 对照' : ' · 未平滑'}</span>` : '';
             const unit = node.id === 'density' ? '<span class="decision-root-unit">g/cm³</span>' : '';
-            const sub = node.id === 'density' ? `<span>${hourly?'小时末':'当前'} ${this.number(hourly?hourResult?.guidance?.rhoCur:this.liveMode()?displays.get('density-current').numericValue:s.guide.rhoCur,3)}${this.liveMode()?' · '+this.escape(this.densityLabel()):''}</span><span>目标灰分范围${hourSummary?`<span class="decision-density-target">${targetAshRange}</span>`:' '+targetAshRange}</span>` : '';
+            const sub = node.id === 'density' ? `<span>${hourly?(hourResult?.advice_policy==='gpt-hourly-quality-density-v1'?'小时均值':'小时末'):'当前'} ${this.number(hourly?hourResult?.guidance?.rhoCur:this.liveMode()?displays.get('density-current').numericValue:s.guide.rhoCur,3)}${this.liveMode()?' · '+this.escape(this.densityLabel()):''}</span><span>目标灰分范围${hourSummary?`<span class="decision-density-target">${targetAshRange}</span>`:' '+targetAshRange}</span>` : '';
             const phase = -((now+index*.41)%5).toFixed(3);
             const badge = compact ? `<span class="decision-badge">${this.sourceBadge(node,display)}</span>` : gap ? `<span class="decision-badge">${this.escape(gap.label)}</span>` : display.aggregate || display.calculated || display.shared ? `<span class="decision-badge">${display.badge}</span>` : display.bound && !root ? `<span class="decision-badge">${display.manual ? (display.held ? '待刷新' : display.available ? '补录' : '无补录') : display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
             const compare = display.bound && root ? `<span class="decision-live-comparison">采集对照 ${this.escape(display.value)}${display.available ? '' : '（不可用）'}</span>` : '';

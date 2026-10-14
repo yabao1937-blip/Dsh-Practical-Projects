@@ -27,6 +27,35 @@ const segment=(offset,count,state,seconds=count*5)=>({
     last_slot:Date.parse(response().period.start)/5000+offset+count-1,duration_seconds:seconds,state});
 const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
 (async()=>{
+    const quality={...completeHour(),advice_policy:'gpt-hourly-quality-density-v1',
+        advice_inputs:{ash:{value:9.3,label:'10-09 09:00–10:00',coverage:.98,provisional:true},
+            density:{value:1.48,label:'10-09 10:00–11:00',coverage:.96}},
+        guidance:{rhoCur:1.48,deltaRho:-.02,maxStep:.03},
+        suggested_density:{value:1.46,reason:'小时灰分 09:00–10:00（暂估）；平均密度 10:00–11:00'},
+        coverage:{ash_ratio:.98,density_ratio:.96,required_ratio:.9,required_ratio_exclusive:true},advice_blockers:[]};
+    quality.density_basis.observed_at='2026-10-09T02:54:00Z';
+    assert(!h.dataGaps(quality).has('density-current'),'Prior-hour mean remains valid without a final-30s reading');
+    quality.suggested_density.value=null;quality.advice_blockers=['ash'];
+    assert.equal(h.dataGaps(quality).get('density').severity,'error');
+    assert(!h.dataGaps(quality).has('density-current'),'Missing older ash does not blame the valid density mean');
+    quality.cells.level={value:null,status:'missing'};
+    assert.equal(h.dataGaps(quality).get('tail-level').severity,'warning','Current-hour statistics are not the older ash inputs');
+    quality.advice_blockers=['density'];
+    assert.equal(h.dataGaps(quality).get('density-current').severity,'error');
+    const elements={};context.document={getElementById:id=>(elements[id]??={})};
+    const rendered={};page.renderHTML=(id,html)=>rendered[id]=html;page.queueInspectorPosition=()=>{};
+    const originalPresentation=h.presentation;
+    h.presentation=()=>quality;
+    h.context(page);h.inspector(page,{id:'density',title:'本小时建议密度'});
+    assert(rendered['decision-context'].includes('09:00–10:00（暂估）'));
+    assert(rendered['decision-inspector'].includes('密度平均时段') && rendered['decision-inspector'].includes('10:00–11:00'));
+    assert(!rendered['decision-inspector'].includes('小时末有效密度'));
+    quality.suggested_density.value=1.46;quality.advice_blockers=[];
+    quality.cells.suggested_density={...quality.suggested_density};
+    assert.equal(h.display(page,{id:'density'}).numericValue,1.46);
+    page.hourMode=()=>false;
+    assert(h.summary(page,{x:0,y:300,w:220}).includes('1.460'),'Instant summary and cumulative advice share the new value');
+    page.hourMode=()=>true;h.presentation=originalPresentation;
     assert.equal(h.dataGaps(null).size,0,'Loading or failed queries are not known data gaps');
     let hour=completeHour();
     assert.equal(h.dataGaps(hour).size,0,'Valid carry, zero flow, stopped switches and reference-only gaps are not blockers');

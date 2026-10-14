@@ -1,0 +1,225 @@
+"""GPT hourly targets from revisable ash and authoritative prior-hour density.
+
+This read-time view never rewrites the original cycle/hour decisions. Ash and
+density intentionally describe different hours; both bases travel with the advice.
+"""
+from copy import deepcopy
+from datetime import timedelta
+from math import fsum
+import json
+
+from sqlalchemy import select
+
+from ..hourly_brief.inputs import LOCAL, business_time, numeric
+from ..services.density import expert_adjust
+from ..services.guidance import density_guard_state
+from ..telemetry.domain import iso_time
+from ..telemetry.density_effective import DENSITY_ITEMS
+from ..telemetry.models import TelemetryPoint, TelemetryReading
+from ..telemetry.retained import density_rows, raw_sample, usable_at_receipt
+from .ash_settlement import get_settlement, latest_end
+from .evidence import PROVISIONAL
+from .models import DecisionCycleContext, DecisionCycleHour, DecisionCycleSample
+from .statistics import CADENCE, MIN_COVERAGE, valid
+
+POLICY = 'gpt-hourly-quality-density-v1'
+
+
+def period(start, end):
+    return dict(start=iso_time(start), end=iso_time(end),
+                label=f'{start.astimezone(LOCAL):%m-%d %H:%M}–{end.astimezone(LOCAL):%H:%M}')
+
+
+def density_mean(db, start, end, sources):
+    """Mean retained events once; coverage is the union of at-most-5s intervals."""
+    choice = (sources.get('resolved_choices') or {}).get('density-current')
+    points = []
+    if choice:
+        source, key = json.loads(choice)
+        points = density_rows(db, source) if key == 'a303_a304_density_average' else [db.get(TelemetryPoint, (source, key))]
+    events, observed, definitions, reason = {}, set(), {}, ''
+    if not points or not all(p and p.enabled for p in points):
+        reason = '所选分选密度点不可用'
+    else:
+        parts = []
+        for p in points:
+            items = {}
+            query = select(TelemetryReading).where(TelemetryReading.source_id == p.source_id,
+                TelemetryReading.point_key == p.key, TelemetryReading.received_at >= iso_time(start),
+                TelemetryReading.received_at < iso_time(end)).order_by(TelemetryReading.received_at, TelemetryReading.id)
+            definitions[p.key] = set()
+            for row in db.scalars(query):
+                observed.add(row.received_at)
+                s = raw_sample(row.sample) or {}
+                if s.get('definition_id'):
+                    definitions[p.key].add(s['definition_id'])
+                cell = dict(value=s.get('value'), status='good' if usable_at_receipt(s, p.config) else 'missing')
+                if valid(cell, 'density'):
+                    items[(row.received_at, row.batch_id)] = cell['value']
+            parts.append(items)
+        if any(len(ids) > 1 for ids in definitions.values()):
+            reason = '小时内密度采集点定义变化，暂不混合均值'
+        for (stamp, batch), value in parts[0].items():
+            if len(parts) == 1:
+                events[stamp] = value
+            elif batch and (stamp, batch) in parts[1]:
+                events[stamp] = (value+parts[1][(stamp, batch)])/2
+    covered, cursor = 0., start.timestamp()
+    stamps = sorted(observed)
+    for i, stamp in enumerate(stamps):
+        if stamp not in events:
+            continue
+        left = business_time(stamp).timestamp()
+        right = min(end.timestamp(), left+CADENCE,
+                    business_time(stamps[i+1]).timestamp() if i+1 < len(stamps) else end.timestamp())
+        covered += max(0., right-max(left, cursor))
+        cursor = max(cursor, right)
+    value = fsum(events.values())/len(events) if events and not reason else None
+    return dict(**period(start, end), value=value, status='average' if value is not None else 'missing',
+        unit='g/cm³', source=sources.get('density_label'), choice=choice,
+        sample_count=len(events), excluded_count=len(observed)-len(events),
+        valid_seconds=covered, coverage=covered/(end-start).total_seconds(),
+        observed_at=max(events) if events else None,
+        reason=reason or ('上一完整小时有效实测密度的算术平均' if events else '上一完整小时没有有效实测密度'))
+
+
+def context_keys(db, start, end, snapshot=None):
+    if snapshot is None:
+        saved = db.get(DecisionCycleHour, iso_time(start))
+        snapshot = saved.snapshot if saved else {}
+    keys = {s.get('state', {}).get('context_key') for s in (snapshot.get('evidence') or {}).get('segments', [])}
+    keys.discard(None)
+    if not keys:
+        # Legacy summaries may predate segmented evidence; use original keys,
+        # not the last key alone (a mid-hour change could have been reverted).
+        keys = set(db.scalars(select(DecisionCycleSample.context_key).where(
+            DecisionCycleSample.sampled_at >= iso_time(start), DecisionCycleSample.sampled_at < iso_time(end)).distinct()))
+    if not keys and snapshot.get('context_key'):
+        keys.add(snapshot['context_key'])
+    return keys
+
+
+def compatible_contexts(db, groups, current):
+    definitions = [current]
+    for keys in groups:
+        if not keys:
+            return False, '小时数据缺少来源与模型口径记录'
+        for key in keys:
+            row = db.get(DecisionCycleContext, key)
+            if not row or not row.definition:
+                return False, '小时数据缺少来源与模型口径记录'
+            definitions.append(row.definition)
+    expected = {k:v for k,v in current.items() if k != 'point_definitions'}
+    known = {}
+    for definition in definitions:
+        if {k:v for k,v in definition.items() if k != 'point_definitions'} != expected:
+            return False, '灰分小时、密度小时或当前的来源、模型、目标或调密参数发生变化'
+        # A temporarily missing input can omit its definition. Only conflicting
+        # known definitions prove a real configuration change.
+        for identity, value in definition.get('point_definitions', {}).items():
+            if identity in known and known[identity] != value:
+                return False, '灰分小时、密度小时或当前的采集点定义发生变化'
+            known[identity] = value
+    return True, ''
+
+
+def recommendation(ash, density, target, step=.03):
+    """Reuse the unchanged expert response law, anchored at the hourly mean."""
+    boundary = min(target['max'], max(target['min'], ash))
+    deviation = round(ash-boundary, 3)
+    limit = min(.03, step) if numeric(step) and step > 0 else .03
+    amount = min(expert_adjust(abs(deviation)), limit)
+    delta = round(-amount if deviation > 0 else amount if deviation < 0 else 0., 4)
+    return dict(rhoCur=density, rhoNew=round(density+delta, 3), deltaRho=delta, deltaA=deviation,
+        target=boundary, maxStep=limit, direction='down' if delta < 0 else 'up' if delta > 0 else 'stable')
+
+
+def current_problem(cell, key, now):
+    if not valid(cell, key):
+        return '不可用'
+    if cell.get('status') == 'good':
+        try:
+            age = (now-business_time(cell['observed_at'])).total_seconds()
+        except (KeyError, TypeError, ValueError):
+            return '采集时间缺失或无效'
+        if not -5 <= age <= 30:
+            return '采集数据已过期或时钟异常'
+    expected = 'g/cm³' if key == 'density' else ''
+    if cell.get('unit', '') != expected:
+        return '单位不正确'
+    if key == 'density' and cell.get('item_id') not in (*DENSITY_ITEMS, 'a303_a304_density_average'):
+        return '须选择实际密度采集点'
+    if key == 'is_stoppage' and cell['value'] not in (0, 1):
+        return '状态超出有效范围'
+    return None
+
+
+def apply_quality_advice(db, result, now, current, store, current_definition):
+    start, end = business_time(result['period']['start']), business_time(result['period']['end'])
+    ash_end = latest_end(now)
+    ash_start = ash_end-timedelta(hours=1)
+    settlement = get_settlement(db, ash_start, now)
+    item = settlement['item']
+    ash = {**period(ash_start, ash_end), **{k:deepcopy(item.get(k)) for k in
+        ('value', 'coverage', 'valid_seconds', 'sample_count', 'provisional', 'aggregation', 'reason')},
+        'revision':settlement['revision'], 'unit':'%'}
+    density = density_mean(db, start, end, result['sources'])
+    reasons = []
+    blockers = []
+    for key, basis, title in [('ash', ash, '小时灰分'), ('density', density, '平均密度')]:
+        if not numeric(basis['value']):
+            reasons.append(f'{title} {basis["label"]} 不可用：{basis["reason"]}')
+            blockers.append(key)
+        elif (basis.get('coverage') or 0) <= MIN_COVERAGE:
+            reasons.append(f'{title} {basis["label"]} 有效覆盖 {basis["coverage"]:.1%}，需超过 90%')
+            blockers.append(key)
+    ok, config_reason = compatible_contexts(db,
+        [context_keys(db, ash_start, ash_end), context_keys(db, start, end, result)], current_definition)
+    if not ok:
+        reasons.append(config_reason)
+    cells = current.get('inputs') or current.get('cells') or {}
+    if error := current_problem(cells.get('density', {}), 'density', now):
+        reasons.append('当前分选密度'+error+'，暂缓调密')
+    stop = cells.get('is_stoppage', {})
+    if current.get('model', {}).get('method') in ('expert8', 'expert9') and (error := current_problem(stop, 'is_stoppage', now)):
+        reasons.append('当前开停机状态'+error+'，暂缓调密')
+    elif stop.get('value') == 1:
+        reasons.append('当前设备停机或低负荷，暂缓调密')
+    guide = dict(rhoCur=density['value'], rhoNew=None, deltaRho=None, direction='unavailable',
+        maxStep=.03, advice_frozen=False, validation='awaiting_experiment', empirical_note=PROVISIONAL,
+        feasible_interval=None, interval_width_limit=None)
+    if numeric(ash['value']) and numeric(density['value']):
+        guide.update(recommendation(ash['value'], density['value'], result['target'],
+            (store.get('densityGuide') or {}).get('maxStep', .03)))
+        # Respect actual action protection even if the instantaneous prediction is
+        # unavailable. The hourly inputs/revision are independent of live offsets.
+        guard_store = deepcopy(store)
+        heavy = settlement.get('heavy_ash') or {}
+        entered = max((r['created_at'] for r in heavy.get('records', [])), default=None)
+        guard_store.update(totalAshManualOn=False, heavyAshManualOn=bool(entered),
+            heavyAshInput=dict(manual=heavy.get('value'), manualAt=business_time(entered).timestamp()*1000) if entered else {},
+            floatAshInput={}, coarseAshInput={}, coarseCoal=[{'timestamp':iso_time(ash_end)}])
+        guard = density_guard_state(guard_store, ash['value'], heavy.get('value'), 'total', now.timestamp()*1000)
+        if guard['hold'] or (current.get('guidance') or {}).get('hold'):
+            reasons.append(guard['holdReason'] or current['guidance'].get('reason') or '调密动作保护生效')
+    basis_text = (f'小时灰分 {ash["label"]}'+('（暂估）' if ash.get('provisional') else '')+
+                  f'；平均密度 {density["label"]}；以小时均值为基准，最大修正 ±{guide["maxStep"]:.3f}')
+    if reasons:
+        guide['rhoNew'] = None
+        explanation = '；'.join(reasons)
+    else:
+        explanation = '目标灰分范围内或死区内，保持小时平均密度' if guide['deltaRho'] == 0 else '按小时灰分偏差调整小时平均密度'
+    reason = explanation+'；'+basis_text+'；'+PROVISIONAL
+    guide.update(reason=reason, hold=bool(reasons), ash_basis=ash, density_basis=density)
+    advice = dict(value=guide['rhoNew'], status='calculated' if guide['rhoNew'] is not None else 'missing',
+                  unit='g/cm³', source='小时灰分与平均分选密度', reason=reason)
+    result.update(advice_policy=POLICY, advice_frozen=False, advice_inputs=dict(ash=ash, density=density),
+        advice_blockers=blockers, guidance=guide, density_basis=density, suggested_density=advice,
+        coverage=dict(policy=POLICY, ratio=min(ash.get('coverage') or 0, density['coverage']),
+            ash_ratio=ash.get('coverage') or 0, density_ratio=density['coverage'], required_ratio=MIN_COVERAGE,
+            required_ratio_exclusive=True, max_gap_seconds=None))
+    result['cells']['suggested_density'] = advice
+    result['cells']['density'] = deepcopy(density)
+    result['notes'] = [n for n in result.get('notes', []) if '单次执行' not in n]
+    result['notes'].append('小时建议以最新发布小时灰分和上一完整小时平均密度计算；相对平均密度限 ±0.03，补录修订后更新。')
+    return result

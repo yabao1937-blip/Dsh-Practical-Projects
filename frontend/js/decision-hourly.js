@@ -34,6 +34,7 @@ const DecisionHourly = {
     dataGaps(result=this.presentation()) {
         const gaps=new Map(), advice=result?.suggested_density;
         if(!advice) return gaps;
+        if(result.advice_policy==='gpt-hourly-quality-density-v1') return this.qualityDataGaps(result);
         const blocked=!Number.isFinite(advice.value), coverage=result.coverage || {};
         const coverageLow=this.coverageLow(coverage.ratio,coverage);
         const gapLong=Number.isFinite(coverage.max_gap_seconds) && Number.isFinite(coverage.longest_gap_seconds) && coverage.longest_gap_seconds>coverage.max_gap_seconds;
@@ -125,6 +126,22 @@ const DecisionHourly = {
         }
         return gaps;
     },
+    qualityDataGaps(r) {
+        const gaps=new Map(), blocked=!Number.isFinite(r.suggested_density.value);
+        // These cards describe the density hour. The advice's ash can be from
+        // an older hour; do not blame unrelated current-hour input statistics.
+        for(const [id,key] of Object.entries(this.keys)) {
+            if(id==='density' || ['float-unmodeled','coarse-slime'].includes(id)) continue;
+            const c=r.cells?.[key];
+            const missing=c?.components ? Object.values(c.components).some(p=>!Number.isFinite(p.value)) : !Number.isFinite(c?.value);
+            if(missing) gaps.set(id,{severity:'warning',label:'统计缺数',message:c?.reason || '该统计小时数据不完整',reason:c?.reason || '该统计小时数据不完整'});
+        }
+        if(blocked && r.advice_blockers?.includes('density')) gaps.set('density-current',{
+            severity:'error',label:'数据不足',message:'平均密度缺失或有效覆盖未超过 90%',reason:r.suggested_density.reason});
+        if(blocked && r.advice_blockers?.length) gaps.set('density',{
+            severity:'error',label:'建议不足',message:'小时灰分和平均密度均需有效覆盖超过 90%',reason:r.suggested_density.reason});
+        return gaps;
+    },
     gapClass(gap) { return gap ? gap.severity==='error'?' is-hourly-gap':' is-hourly-warning' : ''; },
     ashSummary(page) {
         if(!this.enabled(page) || page.hourMode()) return '';
@@ -194,6 +211,13 @@ const DecisionHourly = {
     },
     context(page) {
         const r=this.presentation(),coverage=r?.coverage;
+        if(r?.advice_policy==='gpt-hourly-quality-density-v1') {
+            const {ash,density}=r.advice_inputs;
+            document.getElementById('decision-mode-label').textContent='小时累加 · 人工执行';
+            document.getElementById('decision-mode-note').textContent='卡片展示上一完整小时工况；建议采用最新发布的小时总灰分与上一完整小时平均密度。灰分补录后更新建议，相对小时平均密度最大修正 ±0.03。专家经验建议 · 非实验验证的达标区间。';
+            page.renderHTML('decision-context',`<span>统计时段 <strong>${page.escape(r.period.label)}</strong></span><span>建议灰分 <strong>${page.escape(ash.label)}${ash.provisional?'（暂估）':''} · ${page.number(ash.value,2,'%')}</strong></span><span>平均密度 <strong>${page.escape(density.label)} · ${page.number(density.value,3)}</strong></span><span>有效覆盖 <strong>灰分 ${(coverage.ash_ratio*100).toFixed(1)}% · 密度 ${(coverage.density_ratio*100).toFixed(1)}%</strong></span><span>建议用于 <strong>${page.escape(r.period.apply_label)}</strong></span>`);
+            return;
+        }
         document.getElementById('decision-mode-label').textContent='小时累加 · 人工执行';
         document.getElementById('decision-mode-note').textContent=(r?.policy==='decision-hourly-v2'?'总灰分按 501+502 实际产煤量加权；工况按系统组合、开停机和明显变化分段。':'该小时为旧口径样本均值。')+' 手工无新增沿用并注明时间。过渡期仍取平均建议偏移加到小时末密度上；专家经验建议 · 非实验验证的达标区间，单次执行限 ±0.03。';
         page.renderHTML('decision-context',r ? `<span>统计时段 <strong>${page.escape(r.period.label)}（北京时间）</strong></span><span>建议用于 <strong>${page.escape(r.period.apply_label)}</strong></span><span>密度来源 <strong>${page.escape(r.density_label)}</strong></span><span>有效建议覆盖 <strong>${(coverage.ratio*100).toFixed(1)}% · ${coverage.valid_count}/${coverage.expected_count}</strong></span><span class="decision-hour-status" role="status">${Number.isFinite(r.suggested_density.value)?`上调 ${coverage.up} · 下调 ${coverage.down} · 保持 ${coverage.stable}`:'数据不足或保护生效 · 暂缓调密'}</span>` : `<span role="status">${page.escape(this.error || '正在读取上一完整小时…')}</span>`);
@@ -209,7 +233,16 @@ const DecisionHourly = {
             if(c.item_id) pairs.push(['采集点',c.item_id]);
             if(c.observed_at) pairs.push([c.carried?'沿用值采样时间':'末条有效采样',page.time(c.observed_at)]);
         }
-        if(node.id==='density' && r) pairs.push(['小时末有效密度',page.number(r.guidance.rhoCur,3,'g/cm³')],
+        if(node.id==='density' && r?.advice_policy==='gpt-hourly-quality-density-v1') {
+            const {ash,density}=r.advice_inputs;
+            pairs.push(['建议灰分时段',ash.label+(ash.provisional?'（暂估，补录后更新）':'')],
+                ['小时总灰分',page.number(ash.value,2,'%')],['灰分有效覆盖',`${(ash.coverage*100).toFixed(1)}%`],
+                ['密度平均时段',density.label],['小时平均密度',page.number(density.value,3,'g/cm³')],
+                ['密度有效覆盖',`${(density.coverage*100).toFixed(1)}%`],
+                ['相对均值修正',page.number(r.guidance.deltaRho,4,'g/cm³')],
+                ['均值修正上限',`±${page.number(r.guidance.maxStep,3)}`],['建议使用时段',r.period.apply_label],
+                ['更新规则','化验补录修订小时灰分后，重新计算小时目标'],['验证状态','专家经验建议 · 非实验验证的达标区间']);
+        } else if(node.id==='density' && r) pairs.push(['小时末有效密度',page.number(r.guidance.rhoCur,3,'g/cm³')],
             ['基准采样时间',page.time(r.guidance.basis_at)],['平均建议偏移',page.number(r.guidance.mean_delta,5,'g/cm³')],
             ['单次执行步幅',`±${page.number(r.guidance.maxStep,3)}`],['验证状态','专家经验建议 · 非实验验证的达标区间'],
             ['达标区间','等待响应实验；不把执行步幅当成区间宽度'],['建议使用时段',r.period.apply_label],
