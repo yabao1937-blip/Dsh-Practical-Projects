@@ -127,7 +127,7 @@ def remember_point(db, point, sample):
         hour = parse_time(sample["received_at"]).replace(minute=0, second=0, microsecond=0)
         if parse_time(point.latest["received_at"]) < hour:
             # The scheduler can run just after the first new-hour poll. Keep its
-            # old held input even if history retention removes that old reading.
+            # old held input even if a legacy database already lacks that reading.
             memory["density_before_hour"] = {"hour": hour.isoformat(), "sample": memory.get("last_density")}
     if point.config.get("value_type", "number") == "number" and usable_at_receipt(sample, point.config):
         memory["last_valid"] = newest(memory["last_valid"], raw_sample(sample))

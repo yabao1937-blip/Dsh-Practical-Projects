@@ -339,9 +339,6 @@ def _plan_vector(p: dict) -> dict:
     return vec
 
 
-BACKUP_KEEP = 20
-
-
 def backup_database(tag: str = "force") -> str | None:
     """整库覆盖前先做一份一致快照，返回备份文件路径（失败返回 None）。
 
@@ -381,10 +378,8 @@ def backup_database(tag: str = "force") -> str | None:
                 bck.close()
         finally:
             con.close()
-        # 只保留最近 N 份，避免无限增长
-        olds = sorted(backup_dir.glob(f"{Path(src).stem}-*.db"))
-        for f in olds[:-BACKUP_KEEP]:
-            f.unlink(missing_ok=True)
+        # Permanent retention also covers recovery snapshots: a new backup must
+        # never evict an older recovery point.
         return str(dest)
     except Exception as e:
         print(f"[migrate] 备份失败，取消 force 写入: {type(e).__name__}")

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class PointConfig(BaseModel):
@@ -43,7 +43,9 @@ class CollectorConfig(BaseModel):
     retry_min_seconds: float = Field(default=1, ge=0.1, le=30)
     retry_max_seconds: float = Field(default=30, ge=0.1, le=120)
     history_interval_seconds: float = Field(default=5, ge=1, le=3600)
-    retention_days: int = Field(default=7, ge=1, le=90)
+    # Compatibility with deployed config files; positive legacy values no longer
+    # enable deletion. All raw history is retained permanently (0 = no expiry).
+    retention_days: int = Field(default=0, ge=0, le=90, description="永久保留；旧保留天数自动转换为 0")
     security: Literal["Basic256Sha256", "None"] = "Basic256Sha256"
     allow_insecure: bool = False
     application_uri: str = "urn:dmcs:collector"
@@ -53,6 +55,11 @@ class CollectorConfig(BaseModel):
     username_env: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
     password_env: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
     points: list[PointConfig] = Field(default_factory=list, max_length=500)
+
+    @field_validator("retention_days")
+    @classmethod
+    def permanent_history(cls, _value):
+        return 0
 
     @model_validator(mode="after")
     def validate_connection(self):

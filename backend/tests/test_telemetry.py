@@ -186,13 +186,30 @@ def test_spool_capacity_and_corruption_never_silently_discard(cfg, tmp_path):
     assert broken.exists()
 
 
-def test_retention_prunes_history_without_deleting_latest(cfg, repo):
+@pytest.mark.parametrize("legacy_days", [0, 1, 7, 90])
+def test_legacy_retention_config_is_permanent(cfg, legacy_days, tmp_path):
+    from app.telemetry.config import load_config
+    assert CollectorConfig().retention_days == 0
+    path = tmp_path / "collector.json"
+    path.write_text(cfg.model_copy(update={"retention_days": legacy_days}).model_dump_json(), encoding="utf-8")
+    loaded = load_config(path)
+    assert loaded.retention_days == loaded.model_dump()["retention_days"] == 0
+
+
+def test_permanent_history_survives_legacy_cleanup_and_restart(cfg, repo):
     repo.acquire(cfg, "owner")
-    repo.persist(cfg, "owner", batch(cfg, when=utc_now() - timedelta(days=10)))
+    old = batch(cfg, when=utc_now() - timedelta(days=400))
+    repo.persist(cfg, "owner", old)
+    repo.persist(cfg, "owner", batch(cfg, status=0x80000000, when=utc_now() - timedelta(days=300)))
     repo.persist(cfg, "owner", batch(cfg))
-    repo.prune(cfg)
-    assert count(repo) == 1
+    # Even an unvalidated legacy config cannot re-enable the removed cleanup.
+    restarted = TelemetryRepository(repo.sessions)
+    restarted.prune(cfg.model_copy(update={"retention_days": 7}))
+    assert count(restarted) == 3
     with repo.sessions() as db:
+        history = list(db.scalars(select(TelemetryReading).order_by(TelemetryReading.received_at)))
+        assert history[0].sample == old["samples"][0]
+        assert history[1].sample["quality"] == "bad"
         assert db.get(TelemetryPoint, (cfg.source_id, "density")).latest
 
 
@@ -231,7 +248,10 @@ def test_readonly_api_pagination_and_snapshot_isolation(cfg, repo, monkeypatch):
         app.dependency_overrides.pop(get_db, None)
 
 
-def test_worker_retries_network_failure_and_releases_lease(cfg, repo, tmp_path):
+def test_worker_retries_network_failure_and_releases_lease(cfg, repo, tmp_path, monkeypatch):
+    def unexpected_cleanup(_cfg):
+        pytest.fail("Collector must not schedule history deletion")
+    monkeypatch.setattr(repo, "prune", unexpected_cleanup)
     async def scenario():
         stop = asyncio.Event()
         calls = 0

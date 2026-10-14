@@ -1,7 +1,7 @@
 """采集存储：短事务、单来源租约、幂等批次、当前快照和限频历史。"""
 from datetime import timedelta
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import select, text
 
 from ..database import SessionLocal
 from .config import CollectorConfig
@@ -126,17 +126,10 @@ class TelemetryRepository:
             db.commit()
 
     def prune(self, cfg):
-        from ..decision_hourly.models import DecisionTelemetryPin
-        cutoff = iso_time(utc_now() - timedelta(days=cfg.retention_days))
-        with self.sessions() as db:
-            self._lock(db)
-            ids = select(TelemetryReading.id).where(TelemetryReading.source_id == cfg.source_id,
-                TelemetryReading.received_at < cutoff,
-                ~select(DecisionTelemetryPin.reading_id).where(
-                    DecisionTelemetryPin.reading_id == TelemetryReading.id).exists()
-            ).order_by(TelemetryReading.received_at).limit(5000)
-            db.execute(delete(TelemetryReading).where(TelemetryReading.id.in_(ids)))
-            db.commit()
+        """Legacy maintenance entry point: history never expires, even if called
+        with an old config. Keep this harmless for existing maintenance callers.
+        """
+        return None
 
 
 def latest_view(db, source_id=None, now=None):

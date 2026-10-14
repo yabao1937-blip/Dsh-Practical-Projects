@@ -1,0 +1,20 @@
+{
+  "captured_at": "2026-10-14T08:23:21.139890+00:00",
+  "backup": "D:\\dense-medium-density-control-system\\backend\\data\\backups\\before-permanent-retention-20261014-162310.db",
+  "telemetry": [
+    707380,
+    42555,
+    749934,
+    "2026-10-07T08:22:40.531+00:00",
+    "2026-10-14T08:22:35.457+00:00"
+  ],
+  "counts": {
+    "decision_cycle_samples": 24685,
+    "decision_cycle_hours": 40,
+    "gpt_decision_evidence_archives": 0,
+    "manual_measurements": 7,
+    "coarse_models": 2,
+    "gpt_coarse_model_revisions": 2
+  },
+  "ds_sha256": "aa09b7a4574ec19be5f840b68f3611394b0584f2ec435b0abd062416f8566bbd"
+}

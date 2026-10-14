@@ -1,0 +1,29 @@
+{
+  "verified_at": "2026-10-14T08:26:57.672129+00:00",
+  "policy": "permanent",
+  "retention_days": 0,
+  "collector_started_at": "2026-10-14T08:23:22.315+00:00",
+  "collector_uptime_seconds": 215.357129,
+  "baseline_telemetry": 707380,
+  "missing_or_changed_telemetry": 0,
+  "current_telemetry": 708640,
+  "older_than_seven_days_unpinned_preserved": 249,
+  "unchanged_baseline_rows": {
+    "decision_cycle_samples": 24685,
+    "decision_cycle_hours": 40,
+    "gpt_decision_evidence_archives": 0,
+    "manual_measurements": 7,
+    "coarse_models": 2,
+    "gpt_coarse_model_revisions": 2
+  },
+  "complete_new_batches": 42,
+  "points_per_batch": 30,
+  "health": 200,
+  "telemetry_summary": {
+    "points": 30,
+    "available": 30
+  },
+  "tests": "107 passed; isolated SQLite; includes DS golden, 400-day history, legacy config, archive references and 25 distinct backups",
+  "ds_sha256": "aa09b7a4574ec19be5f840b68f3611394b0584f2ec435b0abd062416f8566bbd",
+  "backup": "D:\\dense-medium-density-control-system\\backend\\data\\backups\\before-permanent-retention-20261014-162310.db"
+}

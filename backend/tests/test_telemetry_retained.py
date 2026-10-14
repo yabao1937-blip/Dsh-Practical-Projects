@@ -1,15 +1,15 @@
-"""Last usable display values survive zeros, outages, pruning and collector restarts."""
+"""Display values survive zeros, outages, legacy history gaps and restarts."""
 import copy
 import uuid
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, delete, event, select
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.telemetry.config import CollectorConfig, PointConfig
-from app.telemetry.domain import normalize, utc_now
+from app.telemetry.domain import iso_time, normalize, utc_now
 from app.telemetry.derived import DENSITY_AVERAGE_MEMBERS
 from app.telemetry.models import TelemetryPoint, TelemetryReading
 from app.telemetry.repository import TelemetryRepository, latest_view
@@ -42,6 +42,13 @@ def send(repo, cfg, values, when, statuses=None):
 def view(repo, cfg, now):
     with repo.sessions() as db:
         return latest_view(db, cfg.source_id, now)
+
+
+def legacy_history_gap(repo):
+    # Reproduce history already lost before permanent retention was introduced.
+    with repo.sessions.begin() as db:
+        db.execute(delete(TelemetryReading).where(
+            TelemetryReading.received_at < iso_time(utc_now() - timedelta(days=7))))
 
 
 def test_nonzero_memory_keeps_exact_last_poll_not_throttled_history(repo):
@@ -99,12 +106,12 @@ def test_bootstrap_legacy_history_and_definition_isolation(repo):
     assert view(repo, cfg, utc_now())["items"][0]["last_nonzero_sample"] is None
 
 
-def test_pruning_keeps_last_value_and_fresh_one_is_valid(repo):
+def test_legacy_history_gap_keeps_last_value_and_fresh_one_is_valid(repo):
     cfg, start = config(), utc_now() - timedelta(days=10)
     repo.acquire(cfg, "owner")
     send(repo, cfg, [1.47], start)
     send(repo, cfg, [None], utc_now(), [0x80000000])
-    repo.prune(cfg)
+    legacy_history_gap(repo)
     assert view(repo, cfg, utc_now())["items"][0]["last_valid_sample"]["value"] == 1.47
     send(repo, cfg, [1.0], utc_now())
     assert view(repo, cfg, utc_now())["items"][0]["last_valid_sample"]["value"] == 1.0
@@ -191,12 +198,12 @@ def test_no_history_never_borrows_the_other_channel_or_uses_one(repo):
 
 
 @pytest.mark.parametrize("invalid,quality", [(1,0), (None,0x80000000), (0,0), (-1,0), (1.9,0x80000000)])
-def test_channel_hold_survives_bad_samples_pruning_restart_and_definition_change(repo, invalid, quality):
+def test_channel_hold_survives_bad_samples_legacy_gap_restart_and_definition_change(repo, invalid, quality):
     cfg, start = density_config(), utc_now() - timedelta(days=10)
     repo.acquire(cfg, "owner")
     send(repo, cfg, [1.47, 1.57], start)
     send(repo, cfg, [invalid, 1.6], utc_now(), [quality, 0])
-    repo.prune(cfg)
+    legacy_history_gap(repo)
     repo.state(cfg, "owner", "stopped")
     repo.acquire(cfg, "owner")
     send(repo, cfg, [1, 1.62], utc_now())

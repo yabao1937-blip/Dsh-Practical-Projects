@@ -71,16 +71,25 @@ def test_normal_write_does_not_backup():
     assert j.get("backup") is None
 
 
-def test_backup_keeps_only_recent_copies(monkeypatch):
-    """备份数量有上限，避免无限增长。"""
-    from app.config import DATABASE_URL
+def test_backups_keep_all_recovery_points_beyond_old_limit(monkeypatch, tmp_path):
+    """超过原来的 20 份上限，旧备份仍存在且内容未被新备份覆盖。"""
+    from app import config
     from app.services import migrate
 
-    src = Path(DATABASE_URL.split("sqlite:///", 1)[-1])
-    monkeypatch.setattr(migrate, "BACKUP_KEEP", 2)
-    for _ in range(4):
-        assert migrate.backup_database("keeptest")
-    kept = sorted((src.parent / "backups").glob(f"{src.stem}-keeptest-*.db"))
-    assert len(kept) <= 2, f"应只保留最近 2 份，实际 {len(kept)}"
-    for f in kept:
-        f.unlink(missing_ok=True)
+    src = tmp_path / "retention.db"
+    monkeypatch.setattr(config, "DATABASE_URL", f"sqlite:///{src.as_posix()}")
+    backups = []
+    with sqlite3.connect(src) as db:
+        db.execute("CREATE TABLE evidence (value INTEGER)")
+        db.execute("INSERT INTO evidence VALUES (0)")
+        for value in range(25):
+            db.execute("UPDATE evidence SET value=?", (value,))
+            db.commit()
+            path = migrate.backup_database("keeptest")
+            assert path
+            backups.append(path)
+    assert len(set(backups)) == 25
+    for value, path in enumerate(backups):
+        assert Path(path).is_file()
+        with sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True) as db:
+            assert db.execute("SELECT value FROM evidence").fetchone()[0] == value

@@ -38,8 +38,8 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
     except CollectorBusy:
         log.error("collector_already_running source=%s", cfg.source_id)
         return 2
-    log.info("collector_started source=%s points=%d read_only=True", cfg.source_id, len(cfg.points))
-    attempt, last_prune = 0, 0
+    log.info("collector_started source=%s points=%d read_only=True history_retention=permanent", cfg.source_id, len(cfg.points))
+    attempt = 0
     exit_code = 0
     last_error = None
 
@@ -72,9 +72,6 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
                             log.info("collector_connected source=%s points=%d", cfg.source_id, len(samples))
                             first_read = False
                         attempt = 0
-                        if time.monotonic() - last_prune >= 60:
-                            await asyncio.to_thread(repository.prune, cfg)
-                            last_prune = time.monotonic()
                         if once:
                             return 0
                         try:

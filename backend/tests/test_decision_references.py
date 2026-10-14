@@ -45,7 +45,7 @@ def test_roundtrip_keeps_outputs_and_types_without_raw_copies(sessions,seeded):
         assert db.get(DecisionCycleSample,slot).snapshot==stored
 
 
-def test_pruning_preserves_references_even_after_compressed_archive(sessions,seeded,monkeypatch):
+def test_permanent_history_preserves_all_readings_after_compressed_archive(sessions,seeded,monkeypatch):
     cfg,repo,_=seeded
     with sessions.begin() as db:
         record(db,HOUR)
@@ -65,7 +65,7 @@ def test_pruning_preserves_references_even_after_compressed_archive(sessions,see
     monkeypatch.setattr('app.telemetry.repository.utc_now',lambda:HOUR+timedelta(days=30))
     repo.prune(cfg)
     with sessions() as db:
-        assert db.get(TelemetryReading,unreferenced) is None
+        assert db.get(TelemetryReading,unreferenced) is not None
         assert db.scalar(select(func.count()).select_from(DecisionTelemetryPin))>0
         actual=read_sample(db,slot)
         assert actual['snapshot']==expected['snapshot']

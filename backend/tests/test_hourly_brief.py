@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
@@ -131,7 +131,7 @@ def test_density_one_uses_own_history_and_excludes_future(sessions, monkeypatch)
         assert held["value"] == 1.9 and held["status"] == "held"
 
 
-def test_hour_boundary_keeps_old_held_density_after_history_pruning(sessions, monkeypatch):
+def test_hour_boundary_keeps_old_held_density_with_legacy_history_gap(sessions, monkeypatch):
     setup_clock(monkeypatch, HOUR + timedelta(seconds=3))
     cfg = config([item for _, item in DENSITY_AVERAGE_MEMBERS])
     repo = TelemetryRepository(sessions)
@@ -139,7 +139,10 @@ def test_hour_boundary_keeps_old_held_density_after_history_pruning(sessions, mo
     send(repo, cfg, HOUR - timedelta(days=10), [1.44, 1.64])
     send(repo, cfg, HOUR - timedelta(seconds=2), [1, 1])
     send(repo, cfg, HOUR + timedelta(seconds=3), [1.9, 1.9])
-    repo.prune(cfg)
+    # Simulate data removed by the former policy, not the current collector.
+    with sessions.begin() as db:
+        db.execute(delete(TelemetryReading).where(
+            TelemetryReading.received_at < iso_time(HOUR - timedelta(days=7))))
     with sessions() as db:
         result = Inputs(db, HOUR).density()
         assert result["value"] == pytest.approx(1.54)
