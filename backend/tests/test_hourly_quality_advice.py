@@ -191,7 +191,7 @@ def test_mixed_target_revisions_within_both_hours_are_reusable(sessions, prepare
         assert read_hour(db,HOUR,current)['suggested_density']['value'] == 1.46
 
 
-def test_new_target_cannot_unlock_adjustment_without_post_action_feedback(sessions, prepared):
+def test_new_target_adjusts_without_waiting_for_post_action_feedback(sessions, prepared):
     from app.decision_hourly.models import DensityAction
     current, _, _, _ = prepared
     current['target'] = dict(min=7,max=8)
@@ -202,9 +202,10 @@ def test_new_target_cannot_unlock_adjustment_without_post_action_feedback(sessio
                 after=dict(pair=dict(setpoint=dict(c,definition_id=c['sample']['definition_id']))))))
     with sessions() as db:
         r = read_hour(db,HOUR,current)
-        assert r['guidance']['execution_state'] == 'awaiting_feedback'
-        assert r['suggested_density']['value'] == 1.48
-        assert r['guidance']['deltaRho'] == 0
+        assert r['guidance']['execution_state'] == 'adjust'
+        assert r['suggested_density']['value'] == 1.45
+        assert r['guidance']['deltaRho'] == -.03
+        assert r['guidance']['actions']
 
 
 def test_missing_definition_only_does_not_invent_configuration_change(sessions, prepared):
@@ -214,21 +215,34 @@ def test_missing_definition_only_does_not_invent_configuration_change(sessions, 
         assert read_hour(db,HOUR,current)['suggested_density']['value'] == 1.46
 
 
-@pytest.mark.parametrize('cause', ['stop','density','hold','stale','unit'])
+@pytest.mark.parametrize('cause', ['stop','density','stale','unit'])
 def test_current_protections_do_not_depend_on_instant_suggestion(sessions, prepared, cause):
     current, _, _, _ = prepared
     if cause == 'stop':
         current['inputs']['is_stoppage'] = dict(value=1,status='calculated')
     elif cause == 'density':
         current['inputs']['density'] = dict(value=1.48,status='held')
-    elif cause == 'hold':
-        current['guidance'] = dict(hold=True,reason='等待动作反馈')
     elif cause == 'stale':
         current['inputs']['density']['observed_at'] = iso_time(HOUR-timedelta(seconds=60))
     else:
         current['inputs']['density']['unit'] = 'wrong'
     with sessions() as db:
         assert read_hour(db,HOUR,current)['suggested_density']['value'] is None
+
+
+def test_legacy_action_holds_do_not_block_hourly_advice(sessions, prepared):
+    from app.models import AutoState
+    current, _, _, _ = prepared
+    current['guidance'] = dict(hold=True,reason='等待动作反馈')
+    with sessions.begin() as db:
+        db.add(AutoState(key='densityLastMoveAt',value=(HOUR-timedelta(minutes=5)).timestamp()*1000))
+        db.add(AutoState(key='densityActionLatch',value=dict(key='old-action')))
+    with sessions() as db:
+        before = list(db.connection().connection.driver_connection.iterdump())
+        r = read_hour(db,HOUR,current)
+        assert r['suggested_density']['value'] == 1.46
+        assert r['guidance']['execution_state'] == 'adjust'
+        assert list(db.connection().connection.driver_connection.iterdump()) == before
 
 
 def test_burst_samples_and_invalid_density_cannot_manufacture_coverage(sessions, prepared):

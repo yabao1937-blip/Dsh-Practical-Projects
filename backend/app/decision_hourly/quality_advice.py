@@ -11,7 +11,6 @@ import json
 from sqlalchemy import select
 
 from ..hourly_brief.inputs import LOCAL, business_time, numeric
-from ..services.guidance import density_guard_state
 from ..telemetry.domain import iso_time
 from ..telemetry.density_effective import DENSITY_ITEMS
 from ..telemetry.models import TelemetryPoint, TelemetryReading
@@ -196,8 +195,7 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
     if numeric(ash['value']) and numeric(density['value']):
         heavy = settlement.get('heavy_ash') or {}
         records = heavy.get('records') or []
-        # All assays in the average must describe post-action production before
-        # they can release the action guard. Carried assays keep their old period.
+        # Retain assay/action provenance without using it as an execution gate.
         ends = [feedback_start(dict(status='manual', observed_at=r['observed_at'])) for r in records]
         evidence_end = min(ends) if ends and all(ends) else ash_start
         guide.update(advise(db, now, basis, ash['value'], result['target'], density['value'],
@@ -205,17 +203,6 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
         if guide['rhoNew'] is None:
             reasons.append(guide['reason'])
             blockers.append('setpoint')
-        # Respect actual action protection even if the instantaneous prediction is
-        # unavailable. The hourly inputs/revision are independent of live offsets.
-        guard_store = deepcopy(store)
-        heavy = settlement.get('heavy_ash') or {}
-        entered = max((r['created_at'] for r in heavy.get('records', [])), default=None)
-        guard_store.update(totalAshManualOn=False, heavyAshManualOn=bool(entered),
-            heavyAshInput=dict(manual=heavy.get('value'), manualAt=business_time(entered).timestamp()*1000) if entered else {},
-            floatAshInput={}, coarseAshInput={}, coarseCoal=[{'timestamp':iso_time(ash_end)}])
-        guard = density_guard_state(guard_store, ash['value'], heavy.get('value'), 'total', now.timestamp()*1000)
-        if guard['hold'] or (current.get('guidance') or {}).get('hold'):
-            reasons.append(guard['holdReason'] or current['guidance'].get('reason') or '调密动作保护生效')
     basis_text = (f'小时灰分 {ash["label"]}'+('（暂估）' if ash.get('provisional') else '')+
                   f'；工况平均密度 {density["label"]}；单次执行以当前设定为基准，最大 ±{guide["maxStep"]:.3f}')
     if reasons:

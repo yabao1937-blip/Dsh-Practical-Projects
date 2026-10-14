@@ -198,6 +198,19 @@ def test_saved_hour_unchanged_after_binding_and_manual_change(sessions, seeded, 
         assert shared_snapshot(db)['cells']['heavy_ash']['value'] == 99
 
 
+@pytest.mark.parametrize('key,value', [('densityLastMoveAt',HOUR.timestamp()*1000),
+    ('densityActionLatch',dict(key='old-action')),('densityDecisionLog',[])])
+def test_newer_action_state_does_not_erase_historical_advice(sessions, seeded, key, value):
+    with sessions() as db:
+        before = build_snapshot(db,HOUR)
+    with sessions.begin() as db:
+        db.add(AutoState(key=key,value=value,
+            updated_at=(HOUR+timedelta(seconds=1)).astimezone(LOCAL).replace(tzinfo=None)))
+    with sessions() as db:
+        assert build_snapshot(db,HOUR)['cells']['suggested_density'] == before['cells']['suggested_density']
+        assert before['cells']['suggested_density']['value'] is not None
+
+
 def test_newer_protection_settings_cannot_unlock_historical_advice(sessions, seeded):
     with sessions.begin() as db:
         db.add(Setting(key='density_guide', value={'maxStep':.02},

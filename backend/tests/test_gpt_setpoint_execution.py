@@ -36,7 +36,7 @@ def test_live_uses_setpoint_and_does_not_follow_actual_density(sessions, seeded)
         assert list(db.connection().connection.driver_connection.iterdump()) == before
 
 
-def test_raw_change_protects_before_observer_and_keeps_original_reference(sessions, seeded):
+def test_raw_change_reanchors_to_current_setpoint_without_waiting(sessions, seeded):
     cfg, repo, values = seeded
     with sessions() as db:
         old = basis_at(db)
@@ -45,18 +45,20 @@ def test_raw_change_protects_before_observer_and_keeps_original_reference(sessio
         assert g['rhoNew'] == 1.45
     values[-1] = 1.45
     send(repo,cfg,HOUR-timedelta(seconds=1),values)
-    # No observe() call: a different client/restart must still see the same guard.
+    # No observe() call: advice remains repeatable and does not write action history.
     for _ in range(2):
         with sessions() as db:
+            before = list(db.connection().connection.driver_connection.iterdump())
             basis = basis_at(db)
             g = advise(db,HOUR,basis,9.6,TARGET,basis['value'],HOUR-timedelta(hours=2),anchor_to_setpoint=True)
-            assert g['execution_state'] == 'awaiting_feedback'
-            assert g['rhoNew'] == 1.45 and g['deltaRho'] == 0
-            assert g['rhoTargetFull'] == pytest.approx(1.44)
+            assert g['execution_state'] == 'adjust'
+            assert g['rhoNew'] == 1.42 and g['deltaRho'] == -.03
+            assert g['rhoTargetFull'] == pytest.approx(1.41)
             assert g['actions'][0]['evidence'] == 'raw-setpoint-history'
+            assert list(db.connection().connection.driver_connection.iterdump()) == before
 
 
-def test_new_post_action_feedback_releases_and_future_actions_do_not_leak(sessions, seeded):
+def test_future_actions_do_not_leak_into_advice(sessions, seeded):
     cfg, repo, values = seeded
     values[-1] = 1.45
     send(repo,cfg,HOUR-timedelta(seconds=1),values)
@@ -73,13 +75,13 @@ def test_new_post_action_feedback_releases_and_future_actions_do_not_leak(sessio
         assert past['value']==1.48
 
 
-def test_mixed_hour_assay_and_late_entry_do_not_unlock_move():
+def test_assay_production_time_is_retained_for_audit():
     # 10:20 sample represents 08–09. A move at 08:30 is inside that window.
     assert feedback_start(dict(status='manual',observed_at=iso_time(HOUR+timedelta(minutes=20)),
         entered_at=iso_time(HOUR+timedelta(hours=5)))) == HOUR-timedelta(hours=2)
 
 
-def test_recorded_change_then_return_is_still_guarded(sessions, seeded):
+def test_recorded_change_then_return_is_traceable_without_blocking(sessions, seeded):
     with sessions.begin() as db:
         basis=basis_at(db)
         c=basis['components']['A304']
@@ -88,7 +90,24 @@ def test_recorded_change_then_return_is_still_guarded(sessions, seeded):
                 after=dict(pair=dict(setpoint=dict(c,value=1.45,definition_id=c['sample']['definition_id']))))))
     with sessions() as db:
         g=advise(db,HOUR,basis_at(db),9.6,TARGET,1.48,HOUR-timedelta(hours=2))
-        assert g['execution_state']=='awaiting_feedback' and g['rhoNew']==1.48
+        assert g['execution_state']=='adjust' and g['rhoNew']==1.45
+        assert g['actions']
+
+
+@pytest.mark.parametrize('prior', [1.47, 1.49])
+def test_low_ash_uses_current_setpoint_even_without_a_new_assay(sessions, seeded, prior):
+    with sessions.begin() as db:
+        basis = basis_at(db)
+        c = basis['components']['A304']
+        db.add(DensityAction(id='previous-move',channel='A304',detected_at=iso_time(HOUR-timedelta(seconds=10)),
+            evidence=dict(before=dict(pair=dict(setpoint=dict(value=prior))),
+                after=dict(pair=dict(setpoint=dict(c,definition_id=c['sample']['definition_id']))))))
+    with sessions() as db:
+        for evidence in (HOUR-timedelta(hours=2), None):
+            g = advise(db,HOUR,basis_at(db),8.383560141099501,TARGET,prior,evidence,anchor_to_setpoint=True)
+            assert g['rhoNew'] == 1.488
+            assert g['execution_state'] == 'adjust' and g['direction'] == 'up'
+            assert g['rhoCur'] == 1.48 and g['deltaRho'] == .008
 
 
 @pytest.mark.parametrize('ash,current', [(20,1.4904),(1,1.4906),(20,1.3504),(1,1.5996)])

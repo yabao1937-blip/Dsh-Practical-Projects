@@ -115,19 +115,21 @@ def test_held_values_keep_observation_labels_through_total(inputs):
     assert r['suggested_density']['value'] is None
 
 
-def test_guard_uses_actual_driver_and_only_selected_manuals(inputs):
+def test_legacy_latch_and_recent_move_do_not_block_gpt_advice(inputs):
     cells,store=inputs
     cells['heavy_ash']['value']=11
     first=calculate(cells,store,now=NOW)
     store['densityActionLatch']={'key':first['guidance']['driveKey']}
     cells['density']['observed_at']=(NOW+timedelta(seconds=5)).isoformat()
-    held=calculate(cells,store,now=NOW+timedelta(seconds=10))
-    assert held['guidance']['hold']
-    assert held['suggested_density']['value'] is None
+    before=deepcopy(store)
+    result=calculate(cells,store,now=NOW+timedelta(seconds=10))
+    assert not result['guidance']['hold']
+    assert result['suggested_density']['value'] == first['suggested_density']['value']
+    assert store == before
     store.pop('densityActionLatch')
     store['densityLastMoveAt']=(NOW-timedelta(minutes=5)).timestamp()*1000
     store['floatAshInput']={'manual':9,'manualAt':(NOW-timedelta(minutes=1)).timestamp()*1000}
-    assert calculate(cells,store,now=NOW)['guidance']['hold']  # Unselected old source cannot unlock.
+    assert not calculate(cells,store,now=NOW)['guidance']['hold']
     cells['float_ash'].update(status='manual',entered_at=(NOW-timedelta(minutes=1)).isoformat())
     assert not calculate(cells,store,now=NOW)['guidance']['hold']
 

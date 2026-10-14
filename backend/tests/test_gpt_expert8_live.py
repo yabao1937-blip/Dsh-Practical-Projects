@@ -91,7 +91,7 @@ def test_level_outside_expert_anchors_still_allows_density_advice(inputs,artifac
         assert any('按边界估算参与决策' in text for text in result['warnings'])
 
 
-def test_raw_refresh_cannot_release_existing_action_latch(inputs, artifact8):
+def test_old_action_latch_does_not_block_expert8_advice(inputs, artifact8):
     cells, store = inputs
     use8(store, artifact8)
     cells['heavy_ash']['value'] = 11
@@ -99,8 +99,9 @@ def test_raw_refresh_cannot_release_existing_action_latch(inputs, artifact8):
     store['densityActionLatch'] = dict(key=first['guidance']['driveKey'])
     cells['raw_ash'].update(value=50,observed_at=(NOW+timedelta(seconds=5)).isoformat())
     after = calculate(cells, store, now=NOW+timedelta(seconds=5))
-    assert after['suggested_density']['value'] is None
-    assert after['guidance']['hold']
+    assert after['suggested_density']['value'] == first['suggested_density']['value']
+    assert after['suggested_density']['value'] is not None
+    assert not after['guidance']['hold']
     assert after['guidance']['driveKey'] == first['guidance']['driveKey']
 
 

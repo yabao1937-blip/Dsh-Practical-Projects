@@ -222,7 +222,7 @@ const DecisionHourly = {
         if(this.qualityPolicy(r)) {
             const {ash,density}=r.advice_inputs;
             document.getElementById('decision-mode-label').textContent='小时累加 · 人工执行';
-            document.getElementById('decision-mode-note').textContent=`卡片展示上一完整小时工况；小时灰分与实测均值用于估计工况目标，本次执行相对当前设定密度每路最多调整 ±0.03。已调密但尚无调后化验时保持设定。生产覆盖超过 ${(coverage.required_ratio*100).toFixed(0)}% 才发布正式建议，确认停产无产出的时段除外。专家经验参考，等待实验验证。`;
+            document.getElementById('decision-mode-note').textContent=`卡片展示上一完整小时工况；小时灰分与实测均值用于估计工况目标，本次执行相对当前设定密度每路最多调整 ±0.03。采用最新可用灰分持续计算建议。生产覆盖超过 ${(coverage.required_ratio*100).toFixed(0)}% 才发布正式建议，确认停产无产出的时段除外。专家经验参考，等待实验验证。`;
             page.renderHTML('decision-context',`<span>统计时段 <strong>${page.escape(r.period.label)}</strong></span><span>建议灰分 <strong>${page.escape(ash.label)}${ash.provisional?'（暂估）':''} · ${page.number(ash.value,2,'%')}</strong></span><span>平均密度 <strong>${page.escape(density.label)} · ${page.number(density.value,3)}</strong></span><span>有效覆盖 <strong>灰分 ${(coverage.ash_ratio*100).toFixed(1)}% · 密度 ${(coverage.density_ratio*100).toFixed(1)}%</strong></span><span>建议用于 <strong>${page.escape(r.period.apply_label)}</strong></span>`);
             return;
         }
@@ -253,7 +253,7 @@ const DecisionHourly = {
                 ['每路执行上限',`±${page.number(r.guidance.maxStep,3)}`],['建议使用时段',r.period.apply_label],
                 ['灰分统计时长',`${Math.round(ash.expected_production_seconds??3600)} 秒（已排除确认停产 ${Math.round(ash.stopped_seconds||0)} 秒）`],
                 ['密度统计时长',`${Math.round(density.expected_production_seconds??3600)} 秒（已排除确认停产 ${Math.round(density.stopped_seconds||0)} 秒）`],
-                ['更新规则','参考目标随工况修订；设定已调整时，旧时段化验不触发再次调节'],['验证状态','专家经验参考 · 等待响应实验']);
+                ['更新规则','采用最新可用灰分持续计算；单次执行相对当前设定密度限幅'],['验证状态','专家经验参考 · 等待响应实验']);
             for(const [label,channel] of Object.entries(r.guidance.channels || {})) pairs.push([
                 label+' 设定建议',`${page.number(channel.current,3)} → ${page.number(channel.suggested,3)} g/cm³`]);
         } else if(node.id==='density' && r) pairs.push(['小时末有效密度',page.number(r.guidance.rhoCur,3,'g/cm³')],

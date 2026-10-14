@@ -1,0 +1,92 @@
+{
+  "verified_at": "2026-10-14T07:28:53.478088+00:00",
+  "checks": {
+    "current": {
+      "target": {
+        "min": 8.5,
+        "max": 9.0
+      },
+      "total_ash": {
+        "value": null,
+        "status": "missing",
+        "reason": "重介精煤量不可用：煤量不平衡：扣减量超过 501、502 合计"
+      },
+      "suggested_density": {
+        "value": null,
+        "status": "missing",
+        "reason": "重介精煤量不可用：煤量不平衡：扣减量超过 501、502 合计；输入沿用或设备停机，暂缓调密：入洗原煤量、粗精煤泥量、当前分选密度、停机状态；入洗原煤停机或低负荷，暂缓调密"
+      },
+      "advice_blockers": null,
+      "guidance": {
+        "policy": null,
+        "execution_state": null,
+        "rhoCur": null,
+        "rhoNew": null,
+        "deltaRho": null,
+        "reason": null
+      },
+      "action_count": 0
+    },
+    "hourly": {
+      "target": {
+        "min": 8.5,
+        "max": 9.0
+      },
+      "total_ash": {
+        "value": 8.653440505315796,
+        "status": "average",
+        "unit": "%",
+        "aggregation": "output-mass-v1",
+        "sample_count": 704,
+        "excluded_count": 11,
+        "excluded_reasons": {
+          "跨小时旧皮带批次": 1,
+          "重复皮带批次": 10
+        },
+        "mass_t": 364.15508756249324,
+        "ash_mass_t": 31.511943849300998,
+        "observed_mass_t": 364.15508756249324,
+        "valid_seconds": 3507.465,
+        "flow_seconds": 3507.465,
+        "observed_at": "2026-10-14T06:59:55.118+00:00",
+        "reason": "按实际产煤量加权，灰分配对产量 364.155 t；501+502 流量 × 有效秒数 / 3600",
+        "source": "逐次三组分质量平衡 × 501+502 实际产煤量"
+      },
+      "suggested_density": {
+        "value": null,
+        "status": "missing",
+        "unit": "g/cm³",
+        "source": "小时工况目标与当前设定密度",
+        "reason": "当前分选密度不可用，暂缓调密；当前开停机状态不可用，暂缓调密；小时灰分 10-14 13:00–14:00（暂估）；工况平均密度 10-14 14:00–15:00；单次执行以当前设定为基准，最大 ±0.030；专家经验建议 · 非实验验证的达标区间"
+      },
+      "advice_blockers": [],
+      "guidance": {
+        "policy": "gpt-setpoint-execution-v2",
+        "execution_state": "unavailable",
+        "rhoCur": 1.4800000190734863,
+        "rhoNew": null,
+        "deltaRho": null,
+        "reason": "当前分选密度不可用，暂缓调密；当前开停机状态不可用，暂缓调密；小时灰分 10-14 13:00–14:00（暂估）；工况平均密度 10-14 14:00–15:00；单次执行以当前设定为基准，最大 ±0.030；专家经验建议 · 非实验验证的达标区间"
+      },
+      "action_count": 1
+    }
+  },
+  "regression": {
+    "type": "read-only screenshot ash replay with current setpoint",
+    "setpoint": 1.4800000190734863,
+    "ash": 8.383560141099501,
+    "target": [
+      8.5,
+      9.0
+    ],
+    "suggestion": 1.488,
+    "state": "adjust",
+    "historical_actions": 1
+  },
+  "validation": [
+    "GPT current/hourly and legacy hold regressions passed",
+    "EXPERT8, shared guidance and DS training golden checks passed",
+    "verify_decision_hourly.js passed"
+  ],
+  "ds_train_js_sha256": "AA09B7A4574EC19BE5F840B68F3611394B0584F2EC435B0ABD062416F8566BBD"
+}

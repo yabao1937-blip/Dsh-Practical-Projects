@@ -183,6 +183,10 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
     total = result['total_ash']['value']
     target = min(target_max,max(target_min,total))
     guard_store = deepcopy(store)
+    # GPT advice continues from the latest available ash after a setpoint move.
+    # Keep the shared legacy/DS guard implementation and saved action history intact.
+    guard_store.pop('densityActionLatch', None)
+    guard_store.pop('densityLastMoveAt', None)
     times = []
     for key,c in cells.items():
         if key == 'density' or (method == 'expert8' and key == 'raw_ash'):

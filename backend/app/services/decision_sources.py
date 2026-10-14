@@ -4,7 +4,7 @@ from copy import deepcopy
 
 from sqlalchemy import select
 
-from ..models import DecisionSourceRevision, CoalRecord, CoarseModel, AutoState, Setting
+from ..models import DecisionSourceRevision, CoalRecord, CoarseModel, Setting
 from ..hourly_brief.columns import cell
 from ..hourly_brief.inputs import Inputs, RAW_ASH, COAL_AMOUNT, LEVEL, LOCAL, business_time, numeric
 from ..telemetry.derived import STATUS_GROUPS, DENSITY_AVERAGE_MEMBERS
@@ -194,10 +194,9 @@ def shared_snapshot(db, when=None):
     result = calculate(captured, store, config['target_min'], config['target_max'], now=when, shared_sources=True)
     from ..gpt_density.execution import apply_live
     apply_live(db, inputs, result, cells, store)
-    unavailable_guard = any(r.key in ('density_guide',) and business_time(r.updated_at) > when for r in db.scalars(select(Setting))) or any(
-        r.key in ('densityLastMoveAt','densityActionLatch','densityDecisionLog') and business_time(r.updated_at) > when for r in db.scalars(select(AutoState)))
+    unavailable_guard = any(r.key == 'density_guide' and business_time(r.updated_at) > when for r in db.scalars(select(Setting)))
     if unavailable_guard:
-        result['suggested_density'] = dict(value=None, status='missing', reason='整点后调整了密度参数或动作保护，无法还原当时配置，暂缓建议')
+        result['suggested_density'] = dict(value=None, status='missing', reason='整点后调整了密度参数，无法还原当时配置，暂缓建议')
     for key in ('coarse_ash','heavy_amount','total_ash','suggested_density'):
         cells[key] = dict(result[key], observed_at=iso_time(when), source='决策总览共享 GPT 计算',
                           unit='g/cm³' if key == 'suggested_density' else 't/h' if key == 'heavy_amount' else '%')

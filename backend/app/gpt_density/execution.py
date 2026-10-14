@@ -1,7 +1,7 @@
 """Separate an empirical process target from an operator's next setpoint.
 
 Read-only and time bounded, including when called by historical hourly briefs.
-Raw setpoint history also closes the race before the action observer has run.
+Raw setpoint history preserves action provenance before the observer has run.
 """
 from copy import deepcopy
 from datetime import timedelta
@@ -16,7 +16,7 @@ from ..telemetry.models import TelemetryReading
 from ..telemetry.retained import usable_at_receipt
 from ..decision_hourly.models import DensityAction
 
-POLICY = 'gpt-setpoint-execution-v1'
+POLICY = 'gpt-setpoint-execution-v2'
 EPSILON = .0005
 
 
@@ -59,14 +59,14 @@ def assay_end(cell):
 
 
 def feedback_start(cell):
-    """An hourly mixed sample must wholly follow a move to unlock a new move."""
+    """Start of the assay's production window, retained for action provenance."""
     end = assay_end(cell)
     return end-timedelta(hours=1) if end and cell.get('status') in ('manual', 'historical', 'default', 'carried') else end
 
 
 def changes_since(db, basis, since, now):
     if since is None:
-        return [], '灰分缺少可归属的生产时间，暂缓新的调密'
+        return []
     changes = []
     for channel, c in basis['components'].items():
         sample = c.get('sample') or {}
@@ -91,7 +91,7 @@ def changes_since(db, basis, since, now):
             changes.append(found)
             continue
         # No writes on a GET. Inspect retained raw values so a setpoint change is
-        # protected even before observe(), after a restart, or with another browser.
+        # traceable even before observe(), after a restart, or with another browser.
         point = inputs_point(db, c)
         query = select(TelemetryReading).where(TelemetryReading.source_id == c.get('source_id'),
             TelemetryReading.point_key == c.get('point_key'),
@@ -105,7 +105,7 @@ def changes_since(db, basis, since, now):
                 changes.append(dict(channel=channel, before=row.sample['value'], after=c['value'],
                     before_at=row.received_at, detected_at=sample['received_at'], evidence='raw-setpoint-history'))
                 break
-    return changes, ''
+    return changes
 
 
 def inputs_point(db, cell):
@@ -142,21 +142,18 @@ def advise(db, now, basis, ash, target, base, evidence_end, settings=None, ancho
             return dict(g, reason=label+' 当前设定密度过期或不可用')
     if not numeric(ash) or not numeric(base):
         return dict(g, reason='灰分或工况参考密度不可用')
-    changes, problem = changes_since(db, basis, evidence_end, now)
-    if anchor_to_setpoint and changes:
-        anchors = {label:c['value'] for label,c in basis['components'].items()}
-        anchors.update({a['channel']:a['before'] for a in changes if numeric(a.get('before'))})
-        base = fsum(anchors.values())/len(anchors)
+    # Recorded moves remain traceable, but no longer block advice while awaiting
+    # a later assay. Instant advice always starts from the current setpoint.
+    changes = changes_since(db, basis, evidence_end, now)
+    if anchor_to_setpoint:
+        base = basis['value']
     estimate = empirical_target(ash, base, target)
     # In range/deadband means KEEP the operator's actual setpoint, not a past mean.
     full = estimate['value'] if estimate['correction'] else basis['value']
     g.update(reference_target={**estimate, 'value':full}, rhoTargetFull=full,
              deltaA=estimate['deviation'], target=estimate['boundary'])
     g['actions'] = changes
-    if problem:
-        return dict(g, reason=problem)
-    awaiting = bool(changes and estimate['correction'])
-    adjustment = 0. if awaiting else max(-step, min(step, full-basis['value']))
+    adjustment = max(-step, min(step, full-basis['value']))
     channels, precision_held = {}, []
     for label, cell in basis['components'].items():
         current = cell['value']
@@ -170,21 +167,20 @@ def advise(db, now, basis, ash, target, base, evidence_end, settings=None, ancho
         channels[label] = dict(current=current, suggested=value, delta=round(value-current, 6))
     result = fsum(v['suggested'] for v in channels.values())/len(channels)
     delta = round(result-basis['value'], 6)
-    reason = ('设定密度已调整，现有灰分仍反映调整前时段；保持当前设定，等待能反映调后工况的新化验'
-        if awaiting else '灰分在目标范围或死区内，保持当前设定密度' if not estimate['correction']
+    reason = ('灰分在目标范围或死区内，保持当前设定密度' if not estimate['correction']
         else '按工况参考目标调整设定密度；每路单次执行相对当前设定不超过 ±'+f'{step:.3f}')
     if precision_held:
         reason += '；'+ '/'.join(precision_held)+' 在三位小数精度下无同方向且不超限的调整，保持当前设定'
     return dict(g, rhoNew=result, deltaRho=delta, channels=channels,
         direction='stable' if abs(delta) < EPSILON else 'down' if delta < 0 else 'up',
-        execution_state='awaiting_feedback' if awaiting else 'keep' if abs(delta) < EPSILON else 'adjust', reason=reason)
+        execution_state='keep' if abs(delta) < EPSILON else 'adjust', reason=reason)
 
 
 def apply_live(db, inputs, result, cells, store):
     basis = setpoints(inputs, cells['density'])
     result['execution_basis'] = basis
     if result['suggested_density'].get('value') is None:
-        return  # Existing missing-input, stoppage and explicit action guards remain.
+        return  # Missing-input and stoppage checks remain authoritative.
     guide = advise(db, inputs.hour, basis, result['total_ash']['value'], result['target'],
         basis['value'], feedback_start(cells['heavy_ash']), store.get('densityGuide'), anchor_to_setpoint=True)
     result['guidance'] = guide
