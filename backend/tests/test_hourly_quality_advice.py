@@ -100,9 +100,9 @@ def test_late_assay_revision_changes_advice_without_replaying_hour(sessions, pre
         assert not r['advice_inputs']['ash']['provisional']
 
 
-@pytest.mark.parametrize('which,ratio,allowed', [('ash',.9,False),('ash',.901,True),
-    ('density',.9,False),('density',649/720,True)])
-def test_each_input_requires_more_than_90_percent(sessions, prepared, which, ratio, allowed):
+@pytest.mark.parametrize('which,ratio,allowed', [('ash',.8,False),('ash',.801,True),('ash',.862,True),
+    ('density',.8,False),('density',577/720,True)])
+def test_each_input_requires_more_than_80_percent(sessions, prepared, which, ratio, allowed):
     current, settlement, _, _ = prepared
     if which == 'ash':
         settlement['item']['coverage'] = ratio
@@ -113,11 +113,13 @@ def test_each_input_requires_more_than_90_percent(sessions, prepared, which, rat
     with sessions() as db:
         r = read_hour(db, HOUR, current)
         assert (r['suggested_density']['value'] is not None) == allowed
+        assert r['coverage']['required_ratio'] == .8
         assert (which in r['advice_blockers']) == (not allowed)
         if not allowed:
             assert r['guidance']['channels'] == {}
             assert r['guidance']['deltaRho'] is None
             assert r['guidance']['execution_state'] == 'unavailable'
+            assert '需超过 80%' in r['suggested_density']['reason']
         # A missing final five minutes does not create the old 30s/latest gate.
         assert '小时末' not in r['suggested_density']['reason']
 

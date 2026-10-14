@@ -168,7 +168,7 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
             reasons.append(f'{title} {basis["label"]} 不可用：{basis["reason"]}')
             blockers.append(key)
         elif (basis.get('coverage') or 0) <= MIN_COVERAGE:
-            reasons.append(f'{title} {basis["label"]} 有效覆盖 {basis["coverage"]:.1%}，需超过 90%')
+            reasons.append(f'{title} {basis["label"]} 有效覆盖 {basis["coverage"]:.1%}，需超过 {MIN_COVERAGE:.0%}')
             blockers.append(key)
     ok, config_reason = compatible_contexts(db,
         [context_keys(db, ash_start, ash_end), context_keys(db, start, end, result)], current_definition)

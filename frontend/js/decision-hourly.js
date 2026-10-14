@@ -129,6 +129,7 @@ const DecisionHourly = {
     },
     qualityDataGaps(r) {
         const gaps=new Map(), blocked=!Number.isFinite(r.suggested_density.value);
+        const required=(r.coverage.required_ratio*100).toFixed(0)+'%';
         // These cards describe the density hour. The advice's ash can be from
         // an older hour; do not blame unrelated current-hour input statistics.
         for(const [id,key] of Object.entries(this.keys)) {
@@ -138,11 +139,11 @@ const DecisionHourly = {
             if(missing) gaps.set(id,{severity:'warning',label:'统计缺数',message:c?.reason || '该统计小时数据不完整',reason:c?.reason || '该统计小时数据不完整'});
         }
         if(blocked && r.advice_blockers?.includes('density')) gaps.set('density-current',{
-            severity:'error',label:'数据不足',message:'平均密度缺失或有效覆盖未超过 90%',reason:r.suggested_density.reason});
+            severity:'error',label:'数据不足',message:`平均密度缺失或有效覆盖未超过 ${required}`,reason:r.suggested_density.reason});
         if(blocked && r.advice_blockers?.includes('setpoint')) gaps.set('density-current',{
             severity:'error',label:'设定值缺失',message:'执行所需设定密度不可用',reason:r.suggested_density.reason});
         if(blocked && r.advice_blockers?.length) gaps.set('density',{
-            severity:'error',label:'建议不足',message:'小时灰分和平均密度均需有效覆盖超过 90%',reason:r.suggested_density.reason});
+            severity:'error',label:'建议不足',message:`小时灰分和平均密度均需有效覆盖超过 ${required}`,reason:r.suggested_density.reason});
         return gaps;
     },
     gapClass(gap) { return gap ? gap.severity==='error'?' is-hourly-gap':' is-hourly-warning' : ''; },
@@ -217,7 +218,7 @@ const DecisionHourly = {
         if(this.qualityPolicy(r)) {
             const {ash,density}=r.advice_inputs;
             document.getElementById('decision-mode-label').textContent='小时累加 · 人工执行';
-            document.getElementById('decision-mode-note').textContent='卡片展示上一完整小时工况；小时灰分与实测均值用于估计工况目标，本次执行相对当前设定密度每路最多调整 ±0.03。已调密但尚无调后化验时保持设定。生产覆盖超过 90% 才发布正式建议，确认停产无产出的时段除外。专家经验参考，等待实验验证。';
+            document.getElementById('decision-mode-note').textContent=`卡片展示上一完整小时工况；小时灰分与实测均值用于估计工况目标，本次执行相对当前设定密度每路最多调整 ±0.03。已调密但尚无调后化验时保持设定。生产覆盖超过 ${(coverage.required_ratio*100).toFixed(0)}% 才发布正式建议，确认停产无产出的时段除外。专家经验参考，等待实验验证。`;
             page.renderHTML('decision-context',`<span>统计时段 <strong>${page.escape(r.period.label)}</strong></span><span>建议灰分 <strong>${page.escape(ash.label)}${ash.provisional?'（暂估）':''} · ${page.number(ash.value,2,'%')}</strong></span><span>平均密度 <strong>${page.escape(density.label)} · ${page.number(density.value,3)}</strong></span><span>有效覆盖 <strong>灰分 ${(coverage.ash_ratio*100).toFixed(1)}% · 密度 ${(coverage.density_ratio*100).toFixed(1)}%</strong></span><span>建议用于 <strong>${page.escape(r.period.apply_label)}</strong></span>`);
             return;
         }

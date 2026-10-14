@@ -8,8 +8,8 @@ from ..hourly_brief.inputs import business_time, numeric
 
 CADENCE = 5
 EXPECTED = 3600 // CADENCE
-MIN_COVERAGE = .9
-COVERAGE_POLICY = 'coverage-over-90-v1'
+MIN_COVERAGE = .8
+COVERAGE_POLICY = 'coverage-over-80-v1'
 VALID = {'good', 'manual', 'historical', 'default', 'predicted', 'calculated'}
 COMPUTED = {'coarse_ash', 'heavy_amount', 'total_ash'}
 
@@ -81,7 +81,7 @@ def hour_advice(rows, start, end, density, max_step=.03):
         stable=sum(abs(v) <= 1e-9 for v in deltas))
     reasons = []
     if count/EXPECTED <= MIN_COVERAGE:
-        reasons.append(f'有效建议覆盖 {count}/{EXPECTED}（{count/EXPECTED:.1%}）；需超过 90%')
+        reasons.append(f'有效建议覆盖 {count}/{EXPECTED}（{count/EXPECTED:.1%}）；需超过 {MIN_COVERAGE:.0%}')
     if len({r.context_key for r in rows}) > 1:
         reasons.append('小时内数据来源、模型或调密参数发生变化，暂不合并建议')
     at = business_time(density.get('observed_at')) if density.get('observed_at') else None
@@ -111,16 +111,21 @@ def refresh_coverage_policy(result):
     ratio = count/expected
     old_reason = (f'有效建议覆盖 {count}/{expected}（{ratio:.1%}），连续缺口 '
         f'{coverage["longest_gap_seconds"]} 秒；需覆盖至少 90% 且缺口不超过 60 秒')
+    old_reasons = [old_reason, f'有效建议覆盖 {count}/{expected}（{ratio:.1%}）；需超过 90%']
     coverage.update(ratio=ratio, required_ratio=MIN_COVERAGE, required_ratio_exclusive=True,
                     max_gap_seconds=None, policy=COVERAGE_POLICY)
     advice, guide = result['suggested_density'], result['guidance']
     reason = guide.get('reason', '')
-    legacy_blocked = old_reason in reason
+    legacy_blocked = any(text in reason for text in old_reasons)
     if not legacy_blocked and ratio > MIN_COVERAGE:
         return  # No changed gate: preserve existing advice or other blockers.
-    remaining = reason.replace(old_reason, '').strip('；') if legacy_blocked else (reason if advice['value'] is None else '')
+    remaining = reason if legacy_blocked or advice['value'] is None else ''
+    if legacy_blocked:
+        for text in old_reasons:
+            remaining = remaining.replace(text, '')
+        remaining = remaining.strip('；')
     if ratio <= MIN_COVERAGE:
-        required = f'有效建议覆盖 {count}/{expected}（{ratio:.1%}）；需超过 90%'
+        required = f'有效建议覆盖 {count}/{expected}（{ratio:.1%}）；需超过 {MIN_COVERAGE:.0%}'
         remaining = required+('；'+remaining if remaining else '')
     value = None
     if not remaining:

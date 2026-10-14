@@ -33,7 +33,7 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
         execution_basis:{value:1.50},
         guidance:{rhoCur:1.50,deltaRho:-.03,maxStep:.03,reference_target:{value:1.46},channels:{A304:{current:1.50,suggested:1.47}}},
         suggested_density:{value:1.46,reason:'小时灰分 09:00–10:00（暂估）；平均密度 10:00–11:00'},
-        coverage:{ash_ratio:.98,density_ratio:.96,required_ratio:.9,required_ratio_exclusive:true},advice_blockers:[]};
+        coverage:{ash_ratio:.98,density_ratio:.96,required_ratio:.8,required_ratio_exclusive:true},advice_blockers:[]};
     quality.density_basis.observed_at='2026-10-09T02:54:00Z';
     assert(!h.dataGaps(quality).has('density-current'),'Prior-hour mean remains valid without a final-30s reading');
     quality.suggested_density.value=null;quality.advice_blockers=['ash'];
@@ -43,6 +43,7 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
     assert.equal(h.dataGaps(quality).get('tail-level').severity,'warning','Current-hour statistics are not the older ash inputs');
     quality.advice_blockers=['density'];
     assert.equal(h.dataGaps(quality).get('density-current').severity,'error');
+    assert(h.dataGaps(quality).get('density-current').message.includes('80%'));
     const elements={};context.document={getElementById:id=>(elements[id]??={})};
     const rendered={};page.renderHTML=(id,html)=>rendered[id]=html;page.queueInspectorPosition=()=>{};
     const originalPresentation=h.presentation;
@@ -54,6 +55,7 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
     assert(rendered['decision-inspector'].includes('当前设定密度') && rendered['decision-inspector'].includes('工况参考目标'));
     assert(rendered['decision-inspector'].includes('1.500 → 1.470'));
     assert(elements['decision-mode-note'].textContent.includes('相对当前设定密度'));
+    assert(elements['decision-mode-note'].textContent.includes('超过 80%'));
     quality.suggested_density.value=1.46;quality.advice_blockers=[];
     quality.cells.suggested_density={...quality.suggested_density};
     assert.equal(h.display(page,{id:'density'}).numericValue,1.46);
@@ -128,22 +130,22 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
     assert.equal(h.gapClass({severity:'warning'}),' is-hourly-warning');
     assert.equal(h.gapClass({severity:'error'}),' is-hourly-gap');
     assert.equal(h.gapClass(null),'');
-    // New policy: continuous gaps are descriptive; strictly more than 90% is required.
+    // Current policy: continuous gaps are descriptive; strictly more than 80% is required.
     hour=completeHour();
-    Object.assign(hour.coverage,{ratio:649/720,valid_count:649,longest_gap_seconds:355,
-        max_gap_seconds:null,required_ratio_exclusive:true,policy:'coverage-over-90-v1'});
+    Object.assign(hour.coverage,{ratio:577/720,valid_count:577,longest_gap_seconds:715,
+        max_gap_seconds:null,required_ratio:.8,required_ratio_exclusive:true,policy:'coverage-over-80-v1'});
     hour.suggested_density.value=1.48;
-    hour.evidence={segments:[segment(100,71,badSwitches)]};
+    hour.evidence={segments:[segment(100,143,badSwitches)]};
     gaps=h.dataGaps(hour);
     assert(!gaps.has('density') && gaps.get('system-switches').severity==='warning',
-        '649 valid slots pass even with a continuous 355s gap');
+        '577 valid slots pass even with a continuous 715s gap');
     hour.suggested_density.value=null;
     assert(!h.dataGaps(hour).has('density'),'Another protection must not turn a long gap into a data blocker');
-    hour.coverage.ratio=648/720;
-    hour.evidence.segments=[segment(100,72,badSwitches)];
+    hour.coverage.ratio=576/720;
+    hour.evidence.segments=[segment(100,144,badSwitches)];
     gaps=h.dataGaps(hour);
-    assert(gaps.get('density').message.includes('>90%'));
-    assert.equal(gaps.get('system-switches').severity,'error','Exactly 90% is insufficient');
+    assert(gaps.get('density').message.includes('>80%'));
+    assert.equal(gaps.get('system-switches').severity,'error','Exactly 80% is insufficient');
     assert(!gaps.get('system-switches').message.includes('秒门槛'));
     let pending=h.update(page,true); resolve(response()); await pending;
     assert(h.presentation(),'Server time, not the local calendar, determines the valid hour');

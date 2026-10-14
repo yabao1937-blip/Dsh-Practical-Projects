@@ -60,10 +60,10 @@ def test_signed_mean_is_not_sum_or_absolute_recommendation():
     assert advice(fake_rows([.02,-.02]))[0]['value'] == 1.5
 
 
-@pytest.mark.parametrize('omitted,allowed', [(range(0,720,10),False), (list(range(0,720,10))+[1],False),
+@pytest.mark.parametrize('omitted,allowed', [(range(0,720,5),False), (list(range(0,720,5))+[1],False),
     (range(12),True),(range(13),True),(range(708,720),True),(range(707,720),True),
-    (range(71),True),(range(72),False),(range(73),False),(range(360),False)])
-def test_coverage_requires_over_90_percent_without_continuous_gap_limit(omitted,allowed):
+    (range(71),True),(range(143),True),(range(144),False),(range(145),False),(range(360),False)])
+def test_coverage_requires_over_80_percent_without_continuous_gap_limit(omitted,allowed):
     output,coverage,_ = advice(fake_rows(omit=omitted))
     assert (output['value'] is not None) == allowed
     assert coverage['max_gap_seconds'] is None
@@ -117,17 +117,32 @@ def test_policy_refresh_cannot_remove_other_blockers(reason):
     assert reason in result['suggested_density']['reason']
 
 
-def test_policy_refresh_requires_more_than_90_and_valid_frozen_basis():
-    result=legacy_hour(omit=72)
+def test_policy_refresh_requires_more_than_80_and_valid_frozen_basis():
+    result=legacy_hour(omit=144)
     result['suggested_density'].update(value=1.52,status='calculated',reason='previously valid')
     result['guidance'].update(reason='previously valid',rhoNew=1.52)
     refresh_coverage_policy(result)
     assert result['suggested_density']['value'] is None
-    assert '需超过 90%' in result['suggested_density']['reason']
+    assert '需超过 80%' in result['suggested_density']['reason']
     result=legacy_hour()
     result['density_basis']['value']=1
     refresh_coverage_policy(result)
     assert result['suggested_density']['value'] is None
+
+
+def test_previous_90_percent_gate_is_rechecked_without_removing_other_protections():
+    for protection in ('', '真实配置变化'):
+        result=legacy_hour(omit=100)
+        result['coverage']['policy']='coverage-over-90-v1'
+        reason=f'有效建议覆盖 620/720（{620/720:.1%}）；需超过 90%'
+        result['guidance']['reason']=reason+('；'+protection if protection else '')
+        result['suggested_density']['reason']=result['guidance']['reason']
+        refresh_coverage_policy(result)
+        assert (result['suggested_density']['value'] is not None) == (not protection)
+        assert '需超过 90%' not in result['suggested_density']['reason']
+        assert result['coverage']['required_ratio']==.8
+        if protection:
+            assert protection in result['suggested_density']['reason']
 
 
 def test_new_policy_does_not_resurrect_old_offsets_without_its_two_inputs(sessions,seeded):
@@ -155,9 +170,9 @@ def test_context_change_bad_last_density_and_missing_suggestions_withhold():
     assert advice(fake_rows(),dict(value=1,status='good',observed_at=iso_time(HOUR-timedelta(seconds=2))))[0]['value'] is None
     assert advice(fake_rows(),dict(value=1.5,status='good',observed_at=iso_time(HOUR-timedelta(seconds=31))))[0]['value'] is None
     rows = fake_rows()
-    for row in rows[:73]:
+    for row in rows[:145]:
         row.snapshot['suggested_density']['value'] = None
-    assert advice(rows)[1]['valid_count']==647
+    assert advice(rows)[1]['valid_count']==575
     assert advice(rows)[0]['value'] is None
 
 
