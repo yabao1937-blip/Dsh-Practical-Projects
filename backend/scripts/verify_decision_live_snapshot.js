@@ -2,7 +2,7 @@
 // Does not write business data, train, switch models or touch a PLC.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
 const {App,ctx}=require('./app_vm')();
-for(const file of ['decision-overview.js','decision-realtime.js']) vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../../frontend/js/'+file),'utf8'),ctx);
+for(const file of ['decision-overview.js','decision-density-display.js','decision-realtime.js']) vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../../frontend/js/'+file),'utf8'),ctx);
 const page=vm.runInContext('DecisionOverviewPage',ctx),live=vm.runInContext('DecisionRealtime',ctx);
 async function main() {
     const base='http://127.0.0.1:8000/api/v1';

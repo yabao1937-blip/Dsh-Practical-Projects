@@ -1,7 +1,7 @@
 // Controller integration with isolated server state; never writes production.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {App,ctx,elements}=require('./app_vm')();
-for(const file of ['decision-realtime.js','decision-sources.js','decision-hourly.js','decision-target.js'])
+for(const file of ['decision-density-display.js','decision-realtime.js','decision-sources.js','decision-hourly.js','decision-target.js'])
     vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../../frontend/js/'+file),'utf8'),ctx);
 const [live,sources,hourly,editor]=vm.runInContext('[DecisionRealtime,DecisionSources,DecisionHourly,DecisionTarget]',ctx);
 const copy=x=>JSON.parse(JSON.stringify(x));

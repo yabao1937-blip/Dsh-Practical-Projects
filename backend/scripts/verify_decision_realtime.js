@@ -18,7 +18,7 @@ if(process.argv.includes('--parity-json')) {
     });
     process.stdout.write(JSON.stringify(values)); process.exit(0);
 }
-for(const file of ['decision-overview.js','decision-realtime.js']) vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../../frontend/js/'+file),'utf8'),ctx);
+for(const file of ['decision-overview.js','decision-density-display.js','decision-realtime.js']) vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../../frontend/js/'+file),'utf8'),ctx);
 const page=vm.runInContext('DecisionOverviewPage',ctx), live=vm.runInContext('DecisionRealtime',ctx);
 const initial=JSON.stringify(App.store);
 const node=id=>page.nodes.find(n=>n.id===id);

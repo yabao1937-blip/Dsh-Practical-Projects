@@ -273,6 +273,8 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .is-instant-layout .decision-node:not(.decision-root,.decision-hourly-summary,.is-state-group,[data-decision-node="system-switches"],[data-decision-node="desliming"],[data-decision-node="float-press"]) > .decision-node-value { font-size:27px; }
 .is-instant-layout .decision-root > .decision-node-value { font-size:46px; }
 .is-instant-layout .decision-hourly-summary > .decision-node-value { font-size:38px; }
+.decision-root .decision-node-value.decision-value-empty,
+.decision-hourly-summary .decision-node-value.decision-value-empty { font-size:22px; }
 /* Use the existing card height to balance the title and reading vertically. */
 .is-instant-layout .decision-node:not(.decision-root,.decision-hourly-summary) { justify-content:space-between; }
 /* Center switch readings between the heading and the card's bottom edge. */

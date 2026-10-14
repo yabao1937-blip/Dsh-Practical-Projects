@@ -1,0 +1,23 @@
+{
+  "scope": "GPT 即时建议密度和本小时建议密度卡片的显示保留",
+  "storage": "浏览器 localStorage；每个服务地址独立保存，按来源及目标范围区分",
+  "behavior": [
+    "有效建议到达后分别保存两种数值和原时间",
+    "缺数、请求失败、跨小时、页面刷新时沿用最后有效显示",
+    "新有效建议立即替换；悬停说明保留值原时间与当前不可用原因",
+    "当前响应、available、numericValue、红色缺数提示及计算归档语义保持不变",
+    "首次未收到过有效值或当前配置没有有效缓存时显示暂无有效值",
+    "模型或策略变化时清理对应旧缓存，后续断网和刷新不复活旧模型建议"
+  ],
+  "checks_passed": [
+    "node backend/scripts/verify_density_display_memory.js",
+    "node backend/scripts/verify_decision_hourly.js",
+    "node backend/scripts/verify_decision_realtime.js",
+    "node backend/scripts/verify_decision_sources.js",
+    "node backend/scripts/verify_decision_target.js",
+    "node backend/scripts/verify_decision_heartbeat.js",
+    "pytest tests/test_training.py: 9 passed"
+  ],
+  "browser": "真实页面已载入新增脚本，查看两张卡片并核对空状态排版。现场停机，首次打开该浏览器尚无有效缓存，显示暂无有效值；有效到缺数的数值保留由隔离控制器测试覆盖，未向生产浏览器灌入模拟值。",
+  "ds_train_js_sha256": "AA09B7A4574EC19BE5F840B68F3611394B0584F2EC435B0ABD062416F8566BBD"
+}

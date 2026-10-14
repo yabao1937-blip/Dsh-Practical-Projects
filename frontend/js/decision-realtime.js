@@ -84,6 +84,7 @@ const DecisionRealtime = {
                 if(typeof GptExpert9!=='undefined') GptExpert9.observe(result);
                 if (this.currentKey!==key) return;
                 this.result=result;this.resultKey=key;this.previousResult=null;this.completedAt=Date.now();
+                DecisionDensityDisplay.remember('instant',page,result);
             } catch(error) {
                 if (this.currentKey!==key) return;
                 this.result=null;this.previousResult=null;this.resultKey=null;this.error=error.message || '后台计算暂不可用';
@@ -109,6 +110,7 @@ const DecisionRealtime = {
                 if(epoch!==DecisionSources.epoch) return;
                 if(!DecisionSources.apply(page,result.sources)) return;
                 this.result=result; this.previousResult=null; this.completedAt=Date.now(); this.error='';
+                DecisionDensityDisplay.remember('instant',page,result);
             } catch(error) {
                 if(epoch!==DecisionSources.epoch) return;
                 this.result=null; this.previousResult=null; this.error=error.message;
@@ -139,12 +141,13 @@ const DecisionRealtime = {
             {node:{title:'重介精煤量'},display:{value:page.number(result?.heavy_amount?.value,3,'t/h'),source:'501 + 502 − 浮精量 − 粗精煤泥量'}});
         const amount=page.pointDisplay(page.nodes.find(n=>n.id==='coarse-amount'));
         const guide=result?.guidance;
-        return {live:true,calculated:true,pending,bound:false,numericValue:Number.isFinite(value)?value:null,available,held:output?.status==='held',inputs,
-            value:page.number(value,node.id==='coarse'?2:3,node.id==='coarse'?'%':''),
+        const shown=node.id==='density'?DecisionDensityDisplay.present('instant',page,result,available,reason):null;
+        return {live:true,calculated:true,pending,bound:false,numericValue:Number.isFinite(value)?value:null,available,held:shown?.retained || output?.status==='held',inputs,
+            value:shown ? Number.isFinite(shown.value)?page.number(shown.value,3):'暂无有效值' : page.number(value,2,'%'),
             badge:pending?'更新中':available ? node.id==='coarse'?'预测':'建议' : Number.isFinite(value)?'沿用输入':/暂缓|已按|刚调整/.test(reason)?'暂缓':'待计算',
             source:pending ? result ? '上轮结果 · 等待本轮计算' : '等待本轮计算' : node.id==='coarse' ? `煤量 ${amount.value} · GPT${output?.status==='held'?'沿用输入预测':['expert9','expert8'].includes(result?.model?.method)?'专家基准预测':'实时预测'}` :
                 Number.isFinite(value) ? guide?.direction==='down'?'本步建议 · 下调':guide?.direction==='up'?'本步建议 · 上调':'密度保持' : '等待有效输入',
             formula:node.id==='coarse'?`GPT / ${result?.model?.method?.toUpperCase() || '保存模型'} · ${result?.model?.id || '等待模型'}`:`总灰分 ${page.number(result?.target?.min ?? 8.5,2)}–${page.number(result?.target?.max ?? 9.0,2)}% 范围内保持，范围外向最近边界调整`,
-            reason,title:reason,sampleAt:result?.generated_at};
+            reason:shown?.reason || reason,title:shown?.reason || reason,sampleAt:shown?.at || result?.generated_at};
     },
 };

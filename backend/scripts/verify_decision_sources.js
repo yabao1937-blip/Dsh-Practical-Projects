@@ -1,7 +1,7 @@
 // Isolated browser-state races: no network, storage writes or real database.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {App,ctx,elements}=require('./app_vm')();
-for(const file of ['decision-overview.js','decision-realtime.js','decision-sources.js'])
+for(const file of ['decision-overview.js','decision-density-display.js','decision-realtime.js','decision-sources.js'])
     vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../../frontend/js/'+file),'utf8'),ctx);
 const page=vm.runInContext('DecisionOverviewPage',ctx),sources=vm.runInContext('DecisionSources',ctx),live=vm.runInContext('DecisionRealtime',ctx);
 const copy=x=>JSON.parse(JSON.stringify(x)),choice='["kep","float_amount"]';

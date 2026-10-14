@@ -1,7 +1,7 @@
 // Pure display checks: no network, training, SQLite or persisted state writes.
 const assert=require('node:assert/strict'), fs=require('node:fs'), path=require('node:path'), vm=require('node:vm');
 const {App,ctx}=require('./app_vm')();
-for(const file of ['decision-overview.js','decision-realtime.js','decision-sources.js','decision-hourly.js'])
+for(const file of ['decision-overview.js','decision-density-display.js','decision-realtime.js','decision-sources.js','decision-hourly.js'])
     vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../../frontend/js/'+file),'utf8'),ctx);
 const page=vm.runInContext('DecisionOverviewPage',ctx), live=vm.runInContext('DecisionRealtime',ctx);
 const before=JSON.stringify(App.store);

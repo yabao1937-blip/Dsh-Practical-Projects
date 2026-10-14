@@ -158,14 +158,16 @@ const DecisionHourly = {
     },
     summary(page,root) {
         if(!this.enabled(page) || page.hourMode() || !root) return '';
-        const r=this.presentation(), value=r?.suggested_density?.value, available=Number.isFinite(value);
+        const r=this.presentation(), available=Number.isFinite(r?.suggested_density?.value);
+        const shown=DecisionDensityDisplay.present('hourly',page,r,available,r?.suggested_density?.reason || this.error || '正在读取上一小时建议');
+        const value=shown.value;
         const gap=r?this.dataGaps(r).get('density'):null;
-        const updatedAt=new Date(r?.period?.apply_start || r?.period?.end || '');
+        const updatedAt=new Date(shown.applyStart || '');
         const updatedTime=Number.isFinite(updatedAt.getTime())?updatedAt.toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}):'—';
         const statusClass=this.gapClass(gap) || (r && !available?' is-hourly-warning':'');
-        const title=r?.suggested_density?.reason || this.error || '正在读取上一小时建议';
+        const title=shown.reason;
           const height=root.summaryHeight??201, spacing=root.summaryGap??24;
-          return `<section class="decision-node decision-hourly-summary${statusClass}" data-decision-key="hourly-summary" aria-label="本小时建议密度" title="${page.escape(title)}" aria-busy="${this.pending()}" style="left:${root.x}px;top:${root.y-height-spacing}px;width:${root.w}px;height:${height}px"><span class="decision-node-heading">本小时建议密度</span><span class="decision-node-value">${page.number(value,3)} <span class="decision-root-unit">g/cm³</span></span><span class="decision-node-source">更新于 ${page.escape(updatedTime)}</span></section>`;
+          return `<section class="decision-node decision-hourly-summary${statusClass}" data-decision-key="hourly-summary" aria-label="本小时建议密度" title="${page.escape(title)}" aria-busy="${this.pending()}" style="left:${root.x}px;top:${root.y-height-spacing}px;width:${root.w}px;height:${height}px"><span class="decision-node-heading">本小时建议密度</span><span class="decision-node-value${Number.isFinite(value)?'':' decision-value-empty'}">${Number.isFinite(value)?page.number(value,3):'暂无有效值'} <span class="decision-root-unit">g/cm³</span></span><span class="decision-node-source">更新于 ${page.escape(updatedTime)}</span></section>`;
     },
     async update(page,force=false) {
         if(!this.enabled(page) || this.inFlight || (typeof DecisionSources!=='undefined' && DecisionSources.saving) ||
@@ -181,6 +183,7 @@ const DecisionHourly = {
                 // Include request time conservatively, so a slow response cannot
                 // extend an old recommendation beyond its applicable hour.
                 this.result=result?.status==='pending'?null:result;
+                if(this.result) DecisionDensityDisplay.remember('hourly',page,this.result);
                 this.error=result?.status==='pending'?(result.reason || '上一小时统计正在生成'):'';
                 this.clockBaseAt=requestedAt; this.resultEpoch=epoch; this.sourceKeyAtRequest=sourceKey;
             } catch(error) { if(epoch===this.epoch()) {this.result=null; this.error=error.message || '小时统计读取失败';} }
@@ -208,12 +211,13 @@ const DecisionHourly = {
         const available=Number.isFinite(c?.value), isAdvice=node.id==='density';
         const components=c?.components && !Array.isArray(c.components) ? Object.entries(c.components).map(([label,part])=>({
             label,value:part.value,available:Number.isFinite(part.value),fraction:true})) : null;
-        const reason=c?.reason || this.error || '正在读取上一小时统计';
+        const shown=isAdvice?DecisionDensityDisplay.present('hourly',page,result,available,c?.reason || this.error || '正在读取上一小时统计'):null;
+        const reason=shown?.reason || c?.reason || this.error || '正在读取上一小时统计';
         const source=isAdvice ? available ? `用于 ${result.period.apply_label} · ${result.guidance.direction==='down'?'整体下调':result.guidance.direction==='up'?'整体上调':'保持'}` : '覆盖不足或当前状态暂缓' :
             c?.carried ? `沿用 · ${page.time(c.observed_at)}` : c?.sample_count ? `${c.sample_count} 条有效样本 · 小时平均` : components ? '有效样本中的运行占比' : reason;
         return {hourly:true,shared:true,calculated:true,inputs:[],available:available || !!components?.some(c=>c.available),
-            numericValue:available?c.value:null,unit:c?.unit || '',sampleAt:c?.observed_at,components,
-            value:components ? components.map(c=>`${c.label} ${c.available?page.number(c.value*100,0,'%'):'未知'}`).join(' · ') : page.number(c?.value,isAdvice || key==='density'?3:key?.endsWith('_amount')?1:2,isAdvice?'':c?.unit),
+            numericValue:available?c.value:null,unit:c?.unit || '',sampleAt:shown?.at || c?.observed_at,components,held:!!shown?.retained,
+            value:shown ? Number.isFinite(shown.value)?page.number(shown.value,3):'暂无有效值' : components ? components.map(c=>`${c.label} ${c.available?page.number(c.value*100,0,'%'):'未知'}`).join(' · ') : page.number(c?.value,key==='density'?3:key?.endsWith('_amount')?1:2,c?.unit),
             source,title:reason,reason,pending:this.pending(),
             badge:isAdvice ? available?'小时建议':'暂缓' : c?.carried?'沿用':available || components?'小时均值':'无数据'};
     },
