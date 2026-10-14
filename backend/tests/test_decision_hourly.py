@@ -140,7 +140,7 @@ def test_new_policy_does_not_resurrect_old_offsets_without_its_two_inputs(sessio
     with sessions() as db:
         response=read_hour(db,HOUR,live=current)
         assert response['suggested_density']['value'] is None
-        assert response['advice_policy']=='gpt-hourly-quality-density-v1'
+        assert response['advice_policy']=='gpt-hourly-setpoint-v2'
         assert 'ash' in response['advice_blockers']
         stopped=deepcopy(current)
         stopped['inputs']['is_stoppage']=dict(value=1,status='calculated')

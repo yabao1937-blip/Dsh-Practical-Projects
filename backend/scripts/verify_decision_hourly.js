@@ -27,10 +27,11 @@ const segment=(offset,count,state,seconds=count*5)=>({
     last_slot:Date.parse(response().period.start)/5000+offset+count-1,duration_seconds:seconds,state});
 const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
 (async()=>{
-    const quality={...completeHour(),advice_policy:'gpt-hourly-quality-density-v1',
+    const quality={...completeHour(),advice_policy:'gpt-hourly-setpoint-v2',
         advice_inputs:{ash:{value:9.3,label:'10-09 09:00–10:00',coverage:.98,provisional:true},
             density:{value:1.48,label:'10-09 10:00–11:00',coverage:.96}},
-        guidance:{rhoCur:1.48,deltaRho:-.02,maxStep:.03},
+        execution_basis:{value:1.50},
+        guidance:{rhoCur:1.50,deltaRho:-.03,maxStep:.03,reference_target:{value:1.46},channels:{A304:{current:1.50,suggested:1.47}}},
         suggested_density:{value:1.46,reason:'小时灰分 09:00–10:00（暂估）；平均密度 10:00–11:00'},
         coverage:{ash_ratio:.98,density_ratio:.96,required_ratio:.9,required_ratio_exclusive:true},advice_blockers:[]};
     quality.density_basis.observed_at='2026-10-09T02:54:00Z';
@@ -50,6 +51,9 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
     assert(rendered['decision-context'].includes('09:00–10:00（暂估）'));
     assert(rendered['decision-inspector'].includes('密度平均时段') && rendered['decision-inspector'].includes('10:00–11:00'));
     assert(!rendered['decision-inspector'].includes('小时末有效密度'));
+    assert(rendered['decision-inspector'].includes('当前设定密度') && rendered['decision-inspector'].includes('工况参考目标'));
+    assert(rendered['decision-inspector'].includes('1.500 → 1.470'));
+    assert(elements['decision-mode-note'].textContent.includes('相对当前设定密度'));
     quality.suggested_density.value=1.46;quality.advice_blockers=[];
     quality.cells.suggested_density={...quality.suggested_density};
     assert.equal(h.display(page,{id:'density'}).numericValue,1.46);

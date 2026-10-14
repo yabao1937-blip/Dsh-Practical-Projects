@@ -27,14 +27,15 @@ def seeded(sessions, monkeypatch):
     monkeypatch.setattr('app.routers.decision.utc_now', lambda: HOUR)
     states = [item for _, item in (*FOUR_SYSTEM_MEMBERS, *DESLIMING_MEMBERS)]
     items = [RAW_ASH, COAL_AMOUNT, LEVEL, *(item for _, item in DENSITY_AVERAGE_MEMBERS),
-             'TIA_3_4.TIA_3_4.501/COAL_CAP', 'TIA_3_4.TIA_3_4.502/COAL_CAP', *states]
+             'TIA_3_4.TIA_3_4.501/COAL_CAP', 'TIA_3_4.TIA_3_4.502/COAL_CAP', *states,
+             *(item+'_SET' for _, item in DENSITY_AVERAGE_MEMBERS)]
     cfg = config(items)
     for p in cfg.points:
         if p.item_id in states:
             p.value_type = 'boolean'
     repo = TelemetryRepository(sessions)
     repo.acquire(cfg, 'owner')
-    values = [40, 600, 50, 1.42, 1.48, 260, 240, True, True, True, False, True, False]
+    values = [40, 600, 50, 1.42, 1.48, 260, 240, True, True, True, False, True, False, 1.42, 1.48]
     send(repo, cfg, HOUR-timedelta(seconds=92), values)
     send(repo, cfg, HOUR-timedelta(seconds=2), values)
     before = (HOUR-timedelta(minutes=1)).astimezone(LOCAL).replace(tzinfo=None)

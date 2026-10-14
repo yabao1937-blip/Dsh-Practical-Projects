@@ -61,6 +61,8 @@ def context_definition(result, store):
     for key,c in result['cells'].items():
         if method != 'expert8' or key != 'raw_ash':
             collect(c)
+    if result.get('execution_basis'):
+        collect(result['execution_basis'])
     sources = deepcopy(result['sources']['resolved_choices'])
     if method == 'expert8':
         sources.pop('raw-ash', None)  # Display-only source changes cannot invalidate advice.
@@ -93,6 +95,7 @@ def record(db, now, result=None, store=None):
                   for k,c in result['inputs'].items() if result['model'].get('method') != 'expert8' or k != 'raw_ash'}
     snapshot = {k:deepcopy(result[k]) for k in ('sources','density_label','model','target',
         'coarse_ash','heavy_amount','total_ash','suggested_density','guidance','warnings')}
+    snapshot['execution_basis'] = deepcopy(result.get('execution_basis'))
     snapshot['cells'] = cells
     snapshot['input_timing'] = deepcopy(result.get('input_timing'))
     snapshot['input_derivations'] = deepcopy(result.get('input_derivations'))

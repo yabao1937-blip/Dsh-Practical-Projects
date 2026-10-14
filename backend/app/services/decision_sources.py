@@ -192,6 +192,8 @@ def shared_snapshot(db, when=None):
         if key not in inputs.settings:
             store.pop(store_key, None)
     result = calculate(captured, store, config['target_min'], config['target_max'], now=when, shared_sources=True)
+    from ..gpt_density.execution import apply_live
+    apply_live(db, inputs, result, cells, store)
     unavailable_guard = any(r.key in ('density_guide',) and business_time(r.updated_at) > when for r in db.scalars(select(Setting))) or any(
         r.key in ('densityLastMoveAt','densityActionLatch','densityDecisionLog') and business_time(r.updated_at) > when for r in db.scalars(select(AutoState)))
     if unavailable_guard:

@@ -11,7 +11,6 @@ import json
 from sqlalchemy import select
 
 from ..hourly_brief.inputs import LOCAL, business_time, numeric
-from ..services.density import expert_adjust
 from ..services.guidance import density_guard_state
 from ..telemetry.domain import iso_time
 from ..telemetry.density_effective import DENSITY_ITEMS
@@ -21,8 +20,11 @@ from .ash_settlement import get_settlement, latest_end
 from .evidence import PROVISIONAL
 from .models import DecisionCycleContext, DecisionCycleHour, DecisionCycleSample
 from .statistics import CADENCE, MIN_COVERAGE, valid
+from .production_coverage import stopped_intervals, overlap, fields as coverage_fields
+from ..gpt_density.execution import advise, setpoints, feedback_start
+from ..hourly_brief.inputs import Inputs
 
-POLICY = 'gpt-hourly-quality-density-v1'
+POLICY = 'gpt-hourly-setpoint-v2'
 
 
 def period(start, end):
@@ -64,7 +66,9 @@ def density_mean(db, start, end, sources):
                 events[stamp] = value
             elif batch and (stamp, batch) in parts[1]:
                 events[stamp] = (value+parts[1][(stamp, batch)])/2
+    stopped = stopped_intervals(db, start, end, sources)
     covered, cursor = 0., start.timestamp()
+    active = {}
     stamps = sorted(observed)
     for i, stamp in enumerate(stamps):
         if stamp not in events:
@@ -72,14 +76,17 @@ def density_mean(db, start, end, sources):
         left = business_time(stamp).timestamp()
         right = min(end.timestamp(), left+CADENCE,
                     business_time(stamps[i+1]).timestamp() if i+1 < len(stamps) else end.timestamp())
-        covered += max(0., right-max(left, cursor))
+        active_seconds = max(0., right-max(left, cursor)-overlap(max(left, cursor), right, stopped))
+        covered += active_seconds
+        if active_seconds:
+            active[stamp] = events[stamp]
         cursor = max(cursor, right)
-    value = fsum(events.values())/len(events) if events and not reason else None
+    value = fsum(active.values())/len(active) if active and not reason else None
     return dict(**period(start, end), value=value, status='average' if value is not None else 'missing',
         unit='g/cm³', source=sources.get('density_label'), choice=choice,
-        sample_count=len(events), excluded_count=len(observed)-len(events),
-        valid_seconds=covered, coverage=covered/(end-start).total_seconds(),
-        observed_at=max(events) if events else None,
+        sample_count=len(active), excluded_count=len(observed)-len(active),
+        **coverage_fields(start, end, stopped, covered),
+        observed_at=max(active) if active else None,
         reason=reason or ('上一完整小时有效实测密度的算术平均' if events else '上一完整小时没有有效实测密度'))
 
 
@@ -123,17 +130,6 @@ def compatible_contexts(db, groups, current):
     return True, ''
 
 
-def recommendation(ash, density, target, step=.03):
-    """Reuse the unchanged expert response law, anchored at the hourly mean."""
-    boundary = min(target['max'], max(target['min'], ash))
-    deviation = round(ash-boundary, 3)
-    limit = min(.03, step) if numeric(step) and step > 0 else .03
-    amount = min(expert_adjust(abs(deviation)), limit)
-    delta = round(-amount if deviation > 0 else amount if deviation < 0 else 0., 4)
-    return dict(rhoCur=density, rhoNew=round(density+delta, 3), deltaRho=delta, deltaA=deviation,
-        target=boundary, maxStep=limit, direction='down' if delta < 0 else 'up' if delta > 0 else 'stable')
-
-
 def current_problem(cell, key, now):
     if not valid(cell, key):
         return '不可用'
@@ -161,7 +157,8 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
     settlement = get_settlement(db, ash_start, now)
     item = settlement['item']
     ash = {**period(ash_start, ash_end), **{k:deepcopy(item.get(k)) for k in
-        ('value', 'coverage', 'valid_seconds', 'sample_count', 'provisional', 'aggregation', 'reason')},
+        ('value', 'coverage', 'valid_seconds', 'sample_count', 'provisional', 'aggregation', 'reason',
+         'coverage_policy', 'stopped_seconds', 'expected_production_seconds', 'wall_coverage')},
         'revision':settlement['revision'], 'unit':'%'}
     density = density_mean(db, start, end, result['sources'])
     reasons = []
@@ -185,12 +182,22 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
         reasons.append('当前开停机状态'+error+'，暂缓调密')
     elif stop.get('value') == 1:
         reasons.append('当前设备停机或低负荷，暂缓调密')
-    guide = dict(rhoCur=density['value'], rhoNew=None, deltaRho=None, direction='unavailable',
+    basis = current.get('execution_basis') or setpoints(Inputs(db, now, authoritative=True), cells.get('density', {}))
+    guide = dict(rhoCur=basis['value'], rhoNew=None, deltaRho=None, direction='unavailable',
         maxStep=.03, advice_frozen=False, validation='awaiting_experiment', empirical_note=PROVISIONAL,
         feasible_interval=None, interval_width_limit=None)
     if numeric(ash['value']) and numeric(density['value']):
-        guide.update(recommendation(ash['value'], density['value'], result['target'],
-            (store.get('densityGuide') or {}).get('maxStep', .03)))
+        heavy = settlement.get('heavy_ash') or {}
+        records = heavy.get('records') or []
+        # All assays in the average must describe post-action production before
+        # they can release the action guard. Carried assays keep their old period.
+        ends = [feedback_start(dict(status='manual', observed_at=r['observed_at'])) for r in records]
+        evidence_end = min(ends) if ends and all(ends) else ash_start
+        guide.update(advise(db, now, basis, ash['value'], result['target'], density['value'],
+            evidence_end, store.get('densityGuide')))
+        if guide['rhoNew'] is None:
+            reasons.append(guide['reason'])
+            blockers.append('setpoint')
         # Respect actual action protection even if the instantaneous prediction is
         # unavailable. The hourly inputs/revision are independent of live offsets.
         guard_store = deepcopy(store)
@@ -203,23 +210,24 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
         if guard['hold'] or (current.get('guidance') or {}).get('hold'):
             reasons.append(guard['holdReason'] or current['guidance'].get('reason') or '调密动作保护生效')
     basis_text = (f'小时灰分 {ash["label"]}'+('（暂估）' if ash.get('provisional') else '')+
-                  f'；平均密度 {density["label"]}；以小时均值为基准，最大修正 ±{guide["maxStep"]:.3f}')
+                  f'；工况平均密度 {density["label"]}；单次执行以当前设定为基准，最大 ±{guide["maxStep"]:.3f}')
     if reasons:
-        guide['rhoNew'] = None
+        guide.update(rhoNew=None, deltaRho=None, direction='unavailable',
+                     execution_state='unavailable', channels={})
         explanation = '；'.join(reasons)
     else:
-        explanation = '目标灰分范围内或死区内，保持小时平均密度' if guide['deltaRho'] == 0 else '按小时灰分偏差调整小时平均密度'
+        explanation = guide['reason']
     reason = explanation+'；'+basis_text+'；'+PROVISIONAL
     guide.update(reason=reason, hold=bool(reasons), ash_basis=ash, density_basis=density)
     advice = dict(value=guide['rhoNew'], status='calculated' if guide['rhoNew'] is not None else 'missing',
-                  unit='g/cm³', source='小时灰分与平均分选密度', reason=reason)
+                  unit='g/cm³', source='小时工况目标与当前设定密度', reason=reason)
     result.update(advice_policy=POLICY, advice_frozen=False, advice_inputs=dict(ash=ash, density=density),
-        advice_blockers=blockers, guidance=guide, density_basis=density, suggested_density=advice,
+        advice_blockers=blockers, guidance=guide, density_basis=density, execution_basis=basis, suggested_density=advice,
         coverage=dict(policy=POLICY, ratio=min(ash.get('coverage') or 0, density['coverage']),
             ash_ratio=ash.get('coverage') or 0, density_ratio=density['coverage'], required_ratio=MIN_COVERAGE,
             required_ratio_exclusive=True, max_gap_seconds=None))
     result['cells']['suggested_density'] = advice
     result['cells']['density'] = deepcopy(density)
     result['notes'] = [n for n in result.get('notes', []) if '单次执行' not in n]
-    result['notes'].append('小时建议以最新发布小时灰分和上一完整小时平均密度计算；相对平均密度限 ±0.03，补录修订后更新。')
+    result['notes'].append('小时工况目标采用最新发布灰分与上一完整小时实测均值；正式执行相对当前设定每路限 ±0.03。确认停产无产出的时段不计入生产覆盖分母，未知时段仍算缺口。')
     return result

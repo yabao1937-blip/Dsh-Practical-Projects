@@ -872,7 +872,7 @@ const DecisionOverviewPage = {
         const paths = this.routeConnections().map(({node,parent,path},index) => {
             const highlight = ancestorIds.has(node.id) && ancestorIds.has(parent.id);
             const summaryLink = this.summaryChildren.get(parent.id)?.includes(node.id);
-            const displayReference = (hourly && hourResult?.advice_policy==='gpt-hourly-quality-density-v1' && parent.id==='density' && node.id!=='density-current') || (this.liveMode() ? ['float-press','float-unmodeled','coarse-slime'].includes(node.id) : !summaryLink && (node.reference || (node.id !== 'density' && displayOnly(node)) || (parent.id !== 'density' && displayOnly(parent))));
+            const displayReference = (hourly && DecisionHourly.qualityPolicy(hourResult) && parent.id==='density' && node.id!=='density-current') || (this.liveMode() ? ['float-press','float-unmodeled','coarse-slime'].includes(node.id) : !summaryLink && (node.reference || (node.id !== 'density' && displayOnly(node)) || (parent.id !== 'density' && displayOnly(parent))));
             const flowReady=d=>this.displayAvailable(d) || (d.pending && Number.isFinite(d.numericValue));
             const flows = !displayReference && (this.liveMode() ? flowReady(displays.get(node.id)) && flowReady(displays.get(parent.id)) : summaryLink ? this.displayAvailable(displays.get(node.id)) : node.value !== '—' && parent.value !== '—');
             if (flows) { flowingIds.add(node.id); flowingIds.add(parent.id); }
@@ -890,7 +890,7 @@ const DecisionOverviewPage = {
             const gap=hourlyGaps.get(node.id);
             const preview = node.id === 'coarse' && !this.liveMode() ? `<span>查看${this.view === 'gpt' ? ' GPT' : '生产'}预测 ${this.number(s.prediction,2,'%')}${!s.model ? ' · 未训练' : s.previewOnly ? ' · 对照' : ' · 未平滑'}</span>` : '';
             const unit = node.id === 'density' ? '<span class="decision-root-unit">g/cm³</span>' : '';
-            const sub = node.id === 'density' ? `<span>${hourly?(hourResult?.advice_policy==='gpt-hourly-quality-density-v1'?'小时均值':'小时末'):'当前'} ${this.number(hourly?hourResult?.guidance?.rhoCur:this.liveMode()?displays.get('density-current').numericValue:s.guide.rhoCur,3)}${this.liveMode()?' · '+this.escape(this.densityLabel()):''}</span><span>目标灰分范围${hourSummary?`<span class="decision-density-target">${targetAshRange}</span>`:' '+targetAshRange}</span>` : '';
+            const sub = node.id === 'density' ? `<span>${hourly?(hourResult?.advice_policy==='gpt-hourly-setpoint-v2'?'当前设定':DecisionHourly.qualityPolicy(hourResult)?'小时均值':'小时末'):'当前'} ${this.number(hourly?hourResult?.guidance?.rhoCur:this.liveMode()?displays.get('density-current').numericValue:s.guide.rhoCur,3)}${this.liveMode()?' · '+this.escape(this.densityLabel()):''}</span><span>目标灰分范围${hourSummary?`<span class="decision-density-target">${targetAshRange}</span>`:' '+targetAshRange}</span>` : '';
             const phase = -((now+index*.41)%5).toFixed(3);
             const badge = compact ? `<span class="decision-badge">${this.sourceBadge(node,display)}</span>` : gap ? `<span class="decision-badge">${this.escape(gap.label)}</span>` : display.aggregate || display.calculated || display.shared ? `<span class="decision-badge">${display.badge}</span>` : display.bound && !root ? `<span class="decision-badge">${display.manual ? (display.held ? '待刷新' : display.available ? '补录' : '无补录') : display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
             const compare = display.bound && root ? `<span class="decision-live-comparison">采集对照 ${this.escape(display.value)}${display.available ? '' : '（不可用）'}</span>` : '';
@@ -940,8 +940,14 @@ const DecisionOverviewPage = {
                 if (d.valueSourceAt) pairs.push(['原始数据时间',this.time(d.valueSourceAt)]);
                 return `<div class="decision-detail"><h4>${this.escape(part.node?.title)}</h4><dl class="decision-facts">${pairs.map(([key,value]) => `<dt>${this.escape(key)}</dt><dd>${this.escape(value)}</dd>`).join('')}</dl></div>`;
             }).join('');
-            const calculation = display.calculated ? `<dl class="decision-facts"><dt>计算公式</dt><dd>${this.escape(display.formula)}</dd><dt>计算结果</dt><dd>${this.escape(display.value)}</dd></dl>${display.reason ? `<p class="decision-unavailable">${this.escape(display.reason)}</p>` : ''}` : '';
-            const description=display.live ? node.id==='coarse' ? '使用当前各输入卡片的同一份数据调用 GPT 保存模型，输出粗精煤泥灰分。' : '以所选实际密度为基准，使用本次预测总灰分给出建议，由人工执行。' : node.description;
+            let calculation = display.calculated ? `<dl class="decision-facts"><dt>计算公式</dt><dd>${this.escape(display.formula)}</dd><dt>计算结果</dt><dd>${this.escape(display.value)}</dd></dl>${display.reason ? `<p class="decision-unavailable">${this.escape(display.reason)}</p>` : ''}` : '';
+            const description=display.live ? node.id==='coarse' ? '使用当前各输入卡片的同一份数据调用 GPT 保存模型，输出粗精煤泥灰分。' : '本次执行相对同路当前设定密度限幅；实测密度用于工况观察。调密后旧时段灰分不触发重复调整。' : node.description;
+            if(display.live && node.id==='density') {
+                const guide=DecisionRealtime.presentation()?.guidance, basis=DecisionRealtime.presentation()?.execution_basis;
+                const pairs=[['当前设定密度',this.number(basis?.value,3,'g/cm³')],['工况参考目标',this.number(guide?.reference_target?.value,3,'g/cm³')],['每路执行上限',`±${this.number(guide?.maxStep,3)}`]];
+                for(const [label,c] of Object.entries(guide?.channels || {})) pairs.push([label+' 设定建议',`${this.number(c.current,3)} → ${this.number(c.suggested,3)} g/cm³`]);
+                calculation+=`<dl class="decision-facts">${pairs.map(([k,v])=>`<dt>${this.escape(k)}</dt><dd>${this.escape(v)}</dd>`).join('')}</dl>`;
+            }
             const warnings=display.live && DecisionRealtime.result?.warnings?.length ? `<p>${this.escape('输入提示：'+DecisionRealtime.result.warnings.join('；'))}</p>` : '';
             this.renderHTML('decision-inspector',`<div class="decision-inspector-header"><span>汇总与来源详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><div class="decision-detail-heading"><h3>${this.escape(node.title)}</h3><span class="decision-badge">${display.badge}</span></div><p>${this.escape(description)}</p>${calculation}${warnings}</div>${details}`);
             document.getElementById('decision-inspector').scrollTop = scrollTop;

@@ -287,7 +287,7 @@ def test_old_policy_cache_is_replaced_and_pending_source_data_is_not_frozen(sess
         settle_due_hours(db,NOW)
         result=get_settlement(db,START,NOW)
         assert result['item']['value']==pytest.approx(8.8) and result['item']['cached']
-        assert result['policy']=='gpt-ash-settlement-v2'
+        assert result['policy']=='gpt-ash-settlement-v3'
 
 
 def test_assay_entered_during_replay_cannot_commit_stale_estimate(sessions):

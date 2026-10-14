@@ -6,7 +6,8 @@ import pytest
 from sqlalchemy import delete, select
 
 from app.decision_hourly.models import DecisionCycleContext, DecisionCycleHour
-from app.decision_hourly.quality_advice import density_mean, recommendation
+from app.decision_hourly.quality_advice import density_mean
+from app.gpt_density.execution import advise
 from app.decision_hourly.service import context_definition, read_hour
 from app.decision_hourly.statistics import digest
 from app.services.decision_sources import shared_snapshot
@@ -58,8 +59,9 @@ def prepared(sessions, seeded, monkeypatch):
 
 @pytest.mark.parametrize('ash,expected', [(8.8,1.48),(8.5,1.48),(9,1.48),(9.05,1.48),
     (8.45,1.48),(9.3,1.46),(8.2,1.5),(20,1.45),(2,1.51)])
-def test_range_deadband_direction_and_cap(ash, expected):
-    g = recommendation(ash, 1.48, dict(min=8.5,max=9))
+def test_range_deadband_direction_and_cap(sessions, prepared, ash, expected):
+    with sessions() as db:
+        g = advise(db, HOUR, prepared[0]['execution_basis'], ash, dict(min=8.5,max=9), 1.48, HOUR)
     assert g['rhoNew'] == expected
     assert abs(g['deltaRho']) <= .03
 
@@ -90,6 +92,8 @@ def test_late_assay_revision_changes_advice_without_replaying_hour(sessions, pre
         settlement['item'].update(value=8.7, provisional=False)
         settlement['revision'] = 'corrected'
         current['inputs']['density']['observed_at'] = iso_time(HOUR+timedelta(minutes=20))
+        for c in current['execution_basis']['components'].values():
+            c['observed_at'] = iso_time(HOUR+timedelta(minutes=20))
         r = read_hour(db, HOUR+timedelta(minutes=20), current)
         assert r['suggested_density']['value'] == 1.48
         assert r['advice_inputs']['ash']['revision'] == 'corrected'
@@ -110,6 +114,10 @@ def test_each_input_requires_more_than_90_percent(sessions, prepared, which, rat
         r = read_hour(db, HOUR, current)
         assert (r['suggested_density']['value'] is not None) == allowed
         assert (which in r['advice_blockers']) == (not allowed)
+        if not allowed:
+            assert r['guidance']['channels'] == {}
+            assert r['guidance']['deltaRho'] is None
+            assert r['guidance']['execution_state'] == 'unavailable'
         # A missing final five minutes does not create the old 30s/latest gate.
         assert '小时末' not in r['suggested_density']['reason']
 
@@ -246,6 +254,6 @@ def test_hourly_api_returns_new_policy_and_two_bases(sessions, prepared, client,
     monkeypatch.setattr('app.decision_hourly.service.utc_now',lambda:HOUR)
     r = client.get('/api/v1/decision/hourly')
     assert r.status_code == 200
-    assert r.json()['advice_policy'] == 'gpt-hourly-quality-density-v1'
+    assert r.json()['advice_policy'] == 'gpt-hourly-setpoint-v2'
     assert r.json()['advice_inputs']['ash']['end'] == iso_time(START)
     assert r.json()['advice_inputs']['density']['end'] == iso_time(HOUR)

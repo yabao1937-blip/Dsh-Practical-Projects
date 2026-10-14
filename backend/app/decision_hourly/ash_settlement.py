@@ -23,8 +23,9 @@ from .evidence import MASS, POLICY as EVIDENCE_POLICY, at, weights
 from .models import DecisionAshSettlement, DecisionCycleHour, DecisionCycleSample, DecisionEvidenceArchive
 from .references import resolve_snapshots
 from .statistics import CADENCE, valid
+from .production_coverage import stopped_intervals, fields as coverage_fields, overlap
 
-POLICY = 'gpt-ash-settlement-v2'
+POLICY = 'gpt-ash-settlement-v3'
 # A sample at 10:00–10:59 describes 08:00–09:00. Publish that hour from 10:00.
 DELAY = timedelta(hours=1)
 LEGACY = 'legacy-sample-mean'
@@ -132,31 +133,37 @@ def replaced_total(row, heavy_ash):
     return (result, None) if numeric(result) and 0 <= result <= 100 else (None, '结算总灰分无效')
 
 
-def contribution_item(contributions, start, end):
+def contribution_item(contributions, start, end, stopped=()):
     mass, ash_mass, legacy, seconds, count = [], [], [], [], 0
+    stopped_overlap = []
     for c in contributions:
         when = business_time(c['sampled_at'])
-        overlap = max(0., (min(end, when+timedelta(seconds=c['seconds']))-max(start, when)).total_seconds())
+        duration_overlap = max(0., (min(end, when+timedelta(seconds=c['seconds']))-max(start, when)).total_seconds())
         if c['aggregation'] == LEGACY:
             if start <= when < end:
                 legacy.append(c['value'])
-                seconds.append(overlap)
+                seconds.append(duration_overlap)
+                stopped_overlap.append(overlap(max(start, when).timestamp(), min(end, when+timedelta(seconds=c['seconds'])).timestamp(), stopped))
                 count += 1
-        elif overlap:
-            fraction = overlap/c['seconds']
+        elif duration_overlap:
+            fraction = duration_overlap/c['seconds']
             mass.append(c['mass_t']*fraction)
             ash_mass.append(c['ash_mass_t']*fraction)
-            seconds.append(overlap)
+            seconds.append(duration_overlap)
+            stopped_overlap.append(overlap(max(start, when).timestamp(), min(end, when+timedelta(seconds=c['seconds'])).timestamp(), stopped))
             count += 1
     tonnes, ashes = fsum(mass), fsum(ash_mass)
     mixed = bool(tonnes and legacy)
     duration, covered = (end-start).total_seconds(), fsum(seconds)
     value = None if mixed else 100*ashes/tonnes if tonnes else fsum(legacy)/len(legacy) if legacy else None
+    # Only the time denominator changes; never alter historical production mass.
+    covered -= fsum(stopped_overlap)
+    coverage = coverage_fields(start, end, stopped, max(0., covered))
     return dict(start=iso_time(start), end=iso_time(end), value=value, sample_count=count,
-        expected_count=int(duration/CADENCE), coverage=min(1., covered/duration), valid_seconds=covered,
+        expected_count=int(duration/CADENCE), **coverage,
         mass_t=tonnes, ash_mass_t=ashes, legacy_sum=fsum(legacy), legacy_count=len(legacy),
         aggregation='mixed' if mixed else MASS if tonnes or not legacy else LEGACY,
-        status='missing' if value is None else 'complete' if covered >= duration-1e-6 else 'partial',
+        status='missing' if value is None else 'complete' if covered >= coverage['expected_production_seconds']-1e-6 else 'partial',
         reason='新旧口径不能合并' if mixed else '按原时段实际产煤量加权' if tonnes else
                '旧口径样本均值' if legacy else '原时段无有效灰分与实际产量配对记录')
 
@@ -194,7 +201,16 @@ def build_settlement(db, start, now=None, basis=None, source=None):
         contributions.append(dict(slot=row.slot, sampled_at=row.sampled_at, seconds=weight['seconds'],
             aggregation=MASS, mass_t=weight['mass_t'], ash_mass_t=value/100*weight['mass_t'],
             manual_applied=use_manual))
-    item = contribution_item(contributions, start, end)
+    choices = {json.dumps(r.snapshot.get('sources', {}).get('resolved_choices', {}), sort_keys=True) for r in rows}
+    sources = rows[0].snapshot.get('sources') if rows else None
+    saved = db.get(DecisionAshSettlement, iso_time(start))
+    prior = saved.snapshot if saved else {}
+    # Late assays change chemistry, not the original hour's production evidence.
+    if prior.get('policy') == POLICY and prior.get('production_source_revision') == source:
+        stopped = deepcopy(prior.get('stopped_intervals', []))
+    else:
+        stopped = stopped_intervals(db, start, end, sources) if len(choices) <= 1 else []
+    item = contribution_item(contributions, start, end, stopped)
     item['legacy_reference'] = any(c.get('legacy_reference') for c in contributions)
     # A frozen mean with no details remains a reference, never a reconstructed result.
     if not rows:
@@ -206,6 +222,8 @@ def build_settlement(db, start, now=None, basis=None, source=None):
             item['reason'] = '仅有原冻结小时统计，缺少逐次明细，不能纳入晚补化验或拆分分钟'
     if item.get('legacy_reference'):
         item['reason'] += '；含旧统计参考，旧值未纳入晚补化验'
+    if item.get('stopped_seconds'):
+        item['reason'] += f'；确认入洗及501/502均为零的 {item["stopped_seconds"]:.0f} 秒不计入生产覆盖分母'
     provisional = basis['carried'] and any(permits_manual(r.snapshot) for r in rows)
     item.update(settlement_policy=POLICY, publication_at=iso_time(end+DELAY),
                 deadline=iso_time(end+DELAY), manual_count=len(basis['records']),
@@ -220,7 +238,8 @@ def build_settlement(db, start, now=None, basis=None, source=None):
     if not rows and basis['value'] is not None:
         item['reason'] += '；缺少原时段逐次明细，不能回算'
     return dict(policy=POLICY, revision=revision(basis, source), item=item, heavy_ash=basis, contributions=contributions,
-                excluded_reasons=dict(excluded), original_sample_count=len(rows))
+                excluded_reasons=dict(excluded), original_sample_count=len(rows), stopped_intervals=stopped,
+                production_source_revision=source)
 
 
 def prepare_due_hours(db, now):
@@ -313,14 +332,17 @@ def report(items, start, end, now, hourly):
     legacy_sum = fsum(i.get('legacy_sum', 0) for i in items)
     mixed = bool(mass and legacy_count)
     value = None if mixed else 100*ashes/mass if mass else legacy_sum/legacy_count if legacy_count else None
-    covered = fsum(i['coverage']*(business_time(i['end'])-business_time(i['start'])).total_seconds() for i in items)
+    covered = fsum(i['valid_seconds'] if numeric(i.get('valid_seconds')) else
+        i['coverage']*(business_time(i['end'])-business_time(i['start'])).total_seconds() for i in items)
+    stopped = fsum(i.get('stopped_seconds', 0.) for i in items)
     duration = (end-start).total_seconds()
     valid_count = sum(i['value'] is not None for i in items)
     reference = any(i.get('legacy_reference') for i in items)
     summary = dict(value=value, aggregation='mixed' if mixed else MASS if mass else LEGACY, mass_t=mass,
         legacy_reference=reference, provisional=any(i.get('provisional') for i in items),
         sample_count=sum(i['sample_count'] for i in items), expected_count=int(duration/CADENCE),
-        coverage=covered/duration, valid_seconds=covered, total_seconds=duration,
+        coverage=covered/(duration-stopped) if duration > stopped else 0., valid_seconds=covered, total_seconds=duration,
+        stopped_seconds=stopped, expected_production_seconds=duration-stopped, coverage_policy='confirmed-zero-production-v1',
         valid_segments=valid_count, total_segments=len(items), valid_hours=valid_count, total_hours=len(items),
         missing_hours=len(items)-valid_count, partial_hours=sum(i['status'] == 'partial' for i in items),
         groups=dict(output_mass=dict(value=100*ashes/mass if mass else None, mass_t=mass),
@@ -366,7 +388,7 @@ def read_settled_interval(db, start=None, end=None, now=None):
         if cursor == hour and stop == hour+timedelta(hours=1):
             item = settled['item']
         else:
-            item = contribution_item(settled['contributions'], cursor, stop)
+            item = contribution_item(settled['contributions'], cursor, stop, settled.get('stopped_intervals', []))
             item.update(frozen=False, cached=settled['item']['cached'], settlement_policy=POLICY,
                         deadline=settled['item']['deadline'], publication_at=settled['item']['publication_at'],
                         provisional=settled['item']['provisional'])
