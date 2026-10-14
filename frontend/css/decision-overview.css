@@ -130,7 +130,7 @@ body:has(#page-decision.active .decision-workspace.is-light) { background: #1c0a
 body:has(#page-decision.active) .main-content { background: #151394 url('../assets/decision-field.svg') center / cover fixed; }
 body:has(#page-decision.active .decision-workspace.is-light) .main-content { background-color: #1c0aeb; }
 body:has(#page-decision.active) .main-content::-webkit-scrollbar-track { background: transparent; }
-body:has(#page-decision.active) .top-bar { width: 100%; max-width: 1760px; margin-inline: auto; background: var(--bg-primary); border-bottom: 1px solid var(--border-color); }
+body:has(#page-decision.active) .top-bar { width: var(--decision-page-width,100%); max-width: 1760px; margin-left: var(--decision-page-left,auto); margin-right: auto; background: var(--bg-primary); border-bottom: 1px solid var(--border-color); }
 body:has(#page-decision.active) .logo-icon { color: var(--accent-blue-light); }
 body:has(#page-decision.active) .nav-item { border-radius: 2px; }
 body:has(#page-decision.active) .nav-item.active { background: transparent; color: var(--accent-blue-light); box-shadow: inset 0 -2px var(--accent-blue-light); }

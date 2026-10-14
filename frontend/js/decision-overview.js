@@ -455,6 +455,10 @@ const DecisionOverviewPage = {
             this.syncMotion();
         });
         window.addEventListener('resize', () => { if (this.active()) this.fit(); });
+        // Match the actual paper edges, including the main scroller's gutter.
+        this.shellObserver = new ResizeObserver(() => this.alignNavigation());
+        this.shellObserver.observe(document.getElementById('page-decision'));
+        this.shellObserver.observe(document.querySelector('.main-content'));
         // Reuse Operations' existing polling snapshot; never start a second API poll.
         this.timer = setInterval(() => {
             if (this.active() && !document.hidden && Date.now() > this.sourceInteractionUntil) this.refresh();
@@ -589,7 +593,17 @@ const DecisionOverviewPage = {
         const zoom=toolbar.querySelector('.decision-zoom').getBoundingClientRect();
         toolbar.classList.toggle('has-total-row',ash.left<actions.right+16 || ash.right>zoom.left-16);
     },
+    alignNavigation() {
+        if (!this.active()) return;
+        const page = document.getElementById('page-decision'), header = document.querySelector('.top-bar');
+        if (!page || !header) return;
+        const {left, width} = page.getBoundingClientRect();
+        if (width <= 0) return;
+        header.style.setProperty('--decision-page-left', `${left}px`);
+        header.style.setProperty('--decision-page-width', `${width}px`);
+    },
     fit() {
+        this.alignNavigation();
         const viewport = document.getElementById('decision-canvas-scroll');
         const width=this.graphWidth();
         const scale = this.zoom ?? Math.min(1, Math.max(.65, viewport.clientWidth / width));
