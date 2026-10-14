@@ -77,12 +77,12 @@ def test_default_24_hours_and_timezone_equivalence(sessions):
     {'start':'not-a-date','end':'2026-10-09T10:00:00+08:00'},
 ])
 def test_api_rejects_invalid_ranges(client,monkeypatch,params):
-    monkeypatch.setattr('app.decision_hourly.ash_history.utc_now',lambda:NOW)
+    monkeypatch.setattr('app.decision_hourly.ash_settlement.utc_now',lambda:NOW+timedelta(hours=2))
     assert client.get('/api/v1/decision/total-ash-hours',params=params).status_code==422
 
 
 def test_api_is_read_only_and_returns_bounded_complete_range(client,sessions,monkeypatch):
-    monkeypatch.setattr('app.decision_hourly.ash_history.utc_now',lambda:NOW)
+    monkeypatch.setattr('app.decision_hourly.ash_settlement.utc_now',lambda:NOW+timedelta(hours=2))
     with sessions.begin() as db:
         save(db,START,8.5,720)
     r=client.get('/api/v1/decision/total-ash-hours',params={'start':iso_time(START),'end':iso_time(END)})

@@ -154,6 +154,8 @@ def tick(now=None, sessions=SessionLocal):
         # Retain full evidence in verified compressed storage before clearing hot rows.
         archive_old_hour(db,iso_time(start-timedelta(days=7)))
         db.commit()
+    from .ash_settlement import settlement_tick
+    settlement_tick(now, sessions)
 
 
 def read_hour(db, now=None, live=None):

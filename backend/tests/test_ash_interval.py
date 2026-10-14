@@ -129,8 +129,8 @@ def test_minute_validation(sessions,start,end):
         read_ash_interval(db,start,end,NOW)
 
 
-def test_interval_api_supports_current_hour_minutes_read_only(client,sessions,monkeypatch):
-    monkeypatch.setattr('app.decision_hourly.ash_interval.utc_now',lambda:NOW)
+def test_interval_api_supports_settled_hour_minutes_read_only(client,sessions,monkeypatch):
+    monkeypatch.setattr('app.decision_hourly.ash_settlement.utc_now',lambda:NOW+timedelta(hours=3))
     with sessions.begin() as db:
         save_rows(db,[row(720,400,8),row(721,100,10)])
     params={'start':iso_time(HOUR),'end':iso_time(HOUR+timedelta(minutes=1))}

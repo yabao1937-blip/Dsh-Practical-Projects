@@ -27,6 +27,16 @@ class DecisionCycleHour(Base):
     snapshot: Mapped[dict] = mapped_column(JSON)
 
 
+class DecisionAshSettlement(Base):
+    """Retrospective ash only; never replaces the original decision/advice archive."""
+    __tablename__ = 'gpt_ash_settlements'
+    start: Mapped[str] = mapped_column(String(32), primary_key=True)
+    end: Mapped[str] = mapped_column(String(32))
+    deadline: Mapped[str] = mapped_column(String(32))
+    generated_at: Mapped[str] = mapped_column(String(32))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+
+
 class DecisionTelemetryPin(Base):
     """Keep authoritative readings as long as hot OR compressed decisions cite them."""
     __tablename__ = 'decision_telemetry_pins'

@@ -137,6 +137,6 @@ const DecisionAshHistory = {
         this.dialog.querySelector('#ash-history-result').innerHTML=`<section class="ash-summary" aria-label="区间平均灰分"><div><p>区间平均灰分</p><div class="ash-average" title="${esc(averageHint)}">${this.number(s.value)}<span>%</span></div><p class="ash-summary-range">${esc(this.label(result.period.start))} — ${esc(this.label(result.period.end))}</p></div><dl><div><dt>有值时段</dt><dd>${s.valid_segments}<span> / ${s.total_segments} 段</span></dd></div><div><dt>有效样本覆盖</dt><dd>${this.number(s.coverage*100,1)}<span>%</span></dd></div></dl></section>
             <div class="ash-table-title"><h3>分时段平均灰分</h3><span>按小时分段 · 单位 %</span></div>
             <div class="ash-table-scroll" tabindex="0" role="region" aria-label="区间灰分记录"><table><thead><tr><th>统计时段</th><th>灰分 (%)</th><th>数据 / 覆盖</th></tr></thead><tbody>${rows}</tbody></table></div>
-            <p class="ash-history-footnote">预测值 · 精确到分钟 · 悬停数据状态查看说明</p>`;
+            <p class="ash-history-footnote">${result.settlement_policy?'延迟2小时结算 · ': '预测值 · '}精确到分钟 · 悬停数据状态查看说明</p>`;
     },
 };

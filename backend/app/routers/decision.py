@@ -145,21 +145,21 @@ def hourly_decision(db: Session = Depends(get_db)):
 
 @router.get('/total-ash-hours')
 def total_ash_hours(start: datetime | None = None, end: datetime | None = None, db: Session = Depends(get_db)):
-    from ..decision_hourly.ash_history import read_ash_hours
+    from ..decision_hourly.ash_settlement import read_settled_hours
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))
     try:
-        return read_ash_hours(db, start, end)
+        return read_settled_hours(db, start, end)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
 
 
 @router.get('/total-ash-interval')
 def total_ash_interval(start: datetime | None = None, end: datetime | None = None, db: Session = Depends(get_db)):
-    from ..decision_hourly.ash_interval import read_ash_interval
+    from ..decision_hourly.ash_settlement import read_settled_interval
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))
     try:
-        return read_ash_interval(db,start,end)
+        return read_settled_interval(db,start,end)
     except ValueError as error:
         raise HTTPException(422,str(error)) from error
