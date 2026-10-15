@@ -10,6 +10,28 @@ const DecisionHourly = {
     clock() { return typeof performance==='undefined'?Date.now():performance.now(); },
     enabled(page) { return page.view==='gpt'; },
     qualityPolicy(r) { return ['gpt-hourly-quality-density-v1','gpt-hourly-setpoint-v2'].includes(r?.advice_policy); },
+    adviceReason(r) {
+        const raw=r?.suggested_density?.reason || '';
+        if(!this.qualityPolicy(r)) return raw;
+        const coverage=r.coverage || {}, required=coverage.required_ratio ?? .8, reasons=[];
+        // Explain the historical data gate first. Execution details cannot make
+        // an incomplete historical basis usable, so omit them from this tooltip.
+        for(const [key,title] of [['ash','小时灰分'],['density','平均密度']]) {
+            if(!r.advice_blockers?.includes(key)) continue;
+            const basis=r.advice_inputs?.[key] || {};
+            const label=(basis.label || '').replace(/:/g,'：').replace(/–/g,'-');
+            const prefix=`${title} ${label}`.trim();
+            if(!Number.isFinite(basis.value)) reasons.push(`${prefix} 不可用`);
+            else if(this.coverageLow(basis.coverage,{...coverage,required_ratio:required})) {
+                const limit=(required*100).toFixed(0)+'%';
+                reasons.push(`${prefix} 有效覆盖率 ${(basis.coverage*100).toFixed(1)}% ${basis.coverage<required?'不足':'未超过'}${limit}`);
+            }
+        }
+        if(reasons.length) return reasons.join('；');
+        const marker='；小时灰分 '+(r.advice_inputs?.ash?.label || '');
+        const end=raw.lastIndexOf(marker);
+        return (end>=0?raw.slice(0,end):raw).replace(/，暂缓调密/g,'');
+    },
     sourceKey() {
         const choices=typeof DecisionSources==='undefined'?{}:DecisionSources.config?.resolved_choices || {};
         return JSON.stringify(Object.keys(choices).sort().map(key=>[key,choices[key]]));
@@ -131,6 +153,7 @@ const DecisionHourly = {
     },
     qualityDataGaps(r) {
         const gaps=new Map(), blocked=!Number.isFinite(r.suggested_density.value);
+        const reason=this.adviceReason(r);
         const required=(r.coverage.required_ratio*100).toFixed(0)+'%';
         // These cards describe the density hour. The advice's ash can be from
         // an older hour; do not blame unrelated current-hour input statistics.
@@ -141,11 +164,11 @@ const DecisionHourly = {
             if(missing) gaps.set(id,{severity:'warning',label:'统计缺数',message:c?.reason || '该统计小时数据不完整',reason:c?.reason || '该统计小时数据不完整'});
         }
         if(blocked && r.advice_blockers?.includes('density')) gaps.set('density-current',{
-            severity:'error',label:'数据不足',message:`平均密度缺失或有效覆盖未超过 ${required}`,reason:r.suggested_density.reason});
+            severity:'error',label:'数据不足',message:`平均密度缺失或有效覆盖未超过 ${required}`,reason});
         if(blocked && r.advice_blockers?.includes('setpoint')) gaps.set('density-current',{
-            severity:'error',label:'设定值缺失',message:'执行所需设定密度不可用',reason:r.suggested_density.reason});
+            severity:'error',label:'设定值缺失',message:'执行所需设定密度不可用',reason});
         if(blocked && r.advice_blockers?.length) gaps.set('density',{
-            severity:'error',label:'建议不足',message:`小时灰分和平均密度均需有效覆盖超过 ${required}`,reason:r.suggested_density.reason});
+            severity:'error',label:'建议不足',message:`小时灰分和平均密度均需有效覆盖超过 ${required}`,reason});
         return gaps;
     },
     gapClass(gap) { return gap ? gap.severity==='error'?' is-hourly-gap':' is-hourly-warning' : ''; },
@@ -159,7 +182,7 @@ const DecisionHourly = {
     summary(page,root) {
         if(!this.enabled(page) || page.hourMode() || !root) return '';
         const r=this.presentation(), available=Number.isFinite(r?.suggested_density?.value);
-        const shown=DecisionDensityDisplay.present('hourly',page,r,available,r?.suggested_density?.reason || this.error || '正在读取上一小时建议');
+        const shown=DecisionDensityDisplay.present('hourly',page,r,available,this.adviceReason(r) || this.error || '正在读取上一小时建议');
         const value=shown.value;
         const gap=r?this.dataGaps(r).get('density'):null;
         const updatedAt=new Date(shown.applyStart || '');
@@ -211,7 +234,7 @@ const DecisionHourly = {
         const available=Number.isFinite(c?.value), isAdvice=node.id==='density';
         const components=c?.components && !Array.isArray(c.components) ? Object.entries(c.components).map(([label,part])=>({
             label,value:part.value,available:Number.isFinite(part.value),fraction:true})) : null;
-        const shown=isAdvice?DecisionDensityDisplay.present('hourly',page,result,available,c?.reason || this.error || '正在读取上一小时统计'):null;
+        const shown=isAdvice?DecisionDensityDisplay.present('hourly',page,result,available,this.adviceReason(result) || this.error || '正在读取上一小时统计'):null;
         const reason=shown?.reason || c?.reason || this.error || '正在读取上一小时统计';
         const source=isAdvice ? available ? `用于 ${result.period.apply_label} · ${result.guidance.direction==='down'?'整体下调':result.guidance.direction==='up'?'整体上调':'保持'}` : '覆盖不足或当前状态暂缓' :
             c?.carried ? `沿用 · ${page.time(c.observed_at)}` : c?.sample_count ? `${c.sample_count} 条有效样本 · 小时平均` : components ? '有效样本中的运行占比' : reason;
