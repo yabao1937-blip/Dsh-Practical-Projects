@@ -8,6 +8,18 @@
      · 整库镜像由 App._scheduleMirror 合并后调用 putStateBody（见其注释），
        本模块不再自己决定发送时机
    ======================================== */
+// Older Windows browsers have AbortController but lack AbortSignal.timeout.
+// Install the fallback before business scripts load; preserve native support.
+(() => {
+    if (typeof AbortSignal === 'undefined' || typeof AbortController === 'undefined'
+            || typeof AbortSignal.timeout === 'function') return;
+    AbortSignal.timeout = milliseconds => {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), milliseconds);
+        return controller.signal;
+    };
+})();
+
 window.Api = {
     base: '/api/v1',
 
