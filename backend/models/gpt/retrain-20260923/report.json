@@ -1,0 +1,333 @@
+{
+  "trainedAt": "2026-09-23 17:02:36",
+  "revision": "gpt-coverage-robust-20260922",
+  "source": {
+    "file": "粗精煤泥灰分影响因素9-23.xlsx",
+    "sha256": "5c2d3ee9ac972379eeb35c10007e78ee65868dc5472ff36b9b9b97d9ccd55121",
+    "sheets": [
+      {
+        "sheet": "Sheet1 (2)",
+        "records": 61
+      }
+    ],
+    "dateCorrections": [
+      {
+        "sheet": "Sheet1 (2)",
+        "cell": "A4",
+        "original": 9.3,
+        "resolved": "2026-09-03",
+        "reason": "与旧表9月3日末条衔接；9月30日晚于本次数据截止日，排除该解释"
+      }
+    ]
+  },
+  "protocol": "冻结上一版算法和旧数据，先评估完整新增日期；评估后全部数据用于重训，不再作为未来独立测试集。",
+  "audit": {
+    "oldN": 152,
+    "oldDays": 37,
+    "oldSha256": "044aded0b9559170016c238b4b00caa2b7982dbf73cd694a3e618d86903c3993",
+    "newN": 61,
+    "totalN": 213,
+    "totalDays": 54,
+    "first": "2026-06-16 09:31:00",
+    "last": "2026-09-21 00:02:00",
+    "sha256": "0350e6ac62ce3ec2e23c55ed9471f8adb958e8dacb679168ac9635cc5785e83c",
+    "testN": 59,
+    "testDays": 17,
+    "sameOldDayExcludedN": 2,
+    "missingFeatures": {
+      "raw_ash": 0,
+      "coal_amount": 0,
+      "sysA": 0,
+      "sysB": 0,
+      "sys401": 0,
+      "sys402": 0,
+      "desliming473": 0,
+      "desliming474": 0,
+      "is_stoppage": 0,
+      "level": 0
+    }
+  },
+  "results": {
+    "sample": {
+      "oldTraining": {
+        "n": 152,
+        "production": "mlr",
+        "config": {
+          "subset": "all",
+          "alpha": 0.1,
+          "penalty": 4
+        },
+        "training": {
+          "r2": 0.3846358913306981,
+          "mae": 2.0372238511882177,
+          "rmse": 2.607448149781521,
+          "passRate": 25.0
+        },
+        "timeSelectionQ2": -0.08222136112284972,
+        "groupCv": {
+          "r2": 0.3048042927995619,
+          "adjR2": 0.3048042927995619,
+          "rmse": 2.7714250670790146,
+          "mae": 2.148185596628076,
+          "passRate": 22.36842105263158,
+          "passRate1": 29.605263157894733,
+          "passRate15": 44.73684210526316,
+          "n": 152,
+          "days": 37,
+          "method": "leave-one-day-out"
+        },
+        "nestedTimeValidation": {
+          "r2": -0.036792055139204694,
+          "adjR2": -0.036792055139204694,
+          "rmse": 2.8566436178330283,
+          "mae": 2.1269130384765855,
+          "passRate": 26.82926829268293,
+          "passRate1": 31.70731707317073,
+          "passRate15": 51.21951219512195,
+          "n": 41,
+          "folds": [
+            {
+              "trainEnd": "2026-07-13 22:40:00",
+              "testStart": "2026-07-14 07:43:00",
+              "testEnd": "2026-08-27 21:51:00",
+              "n": 22,
+              "production": "mlr"
+            },
+            {
+              "trainEnd": "2026-08-27 21:51:00",
+              "testStart": "2026-08-28 00:20:00",
+              "testEnd": "2026-09-03 07:22:00",
+              "n": 19,
+              "production": "mlr"
+            }
+          ],
+          "baselineMae": 2.2371087739123685,
+          "baselineRmse": 2.9572867833582084,
+          "beatsBaseline": true,
+          "method": "nested-day-walk-forward"
+        }
+      },
+      "newDateHoldout": {
+        "n": 59,
+        "first": "2026-09-04 00:45:00",
+        "last": "2026-09-21 00:02:00",
+        "r2": -0.49549747650402476,
+        "adjR2": -0.49549747650402476,
+        "rmse": 2.602908934080746,
+        "mae": 2.0692899424705633,
+        "passRate": 25.423728813559322,
+        "passRate1": 33.89830508474576,
+        "passRate15": 45.76271186440678,
+        "meanBaseline": {
+          "r2": -0.1271384807088176,
+          "adjR2": -0.1271384807088176,
+          "rmse": 2.2597207327764632,
+          "mae": 1.6675144959857278,
+          "passRate": 33.89830508474576,
+          "passRate1": 45.76271186440678,
+          "passRate15": 59.32203389830508
+        },
+        "outsideTrainingRangeN": 3
+      },
+      "retrained": {
+        "n": 213,
+        "production": "mlr",
+        "config": {
+          "subset": "all",
+          "alpha": 1,
+          "penalty": 1
+        },
+        "training": {
+          "r2": 0.23730568602950852,
+          "mae": 2.018450025859736,
+          "rmse": 2.6638784095541284,
+          "passRate": 31.455399061032864
+        },
+        "timeSelectionQ2": 0.029391693321205836,
+        "groupCv": {
+          "r2": 0.18906518988866183,
+          "adjR2": 0.18906518988866183,
+          "rmse": 2.7468321080732996,
+          "mae": 2.07852453614832,
+          "passRate": 30.51643192488263,
+          "passRate1": 35.68075117370892,
+          "passRate15": 46.478873239436616,
+          "n": 213,
+          "days": 54,
+          "method": "leave-one-day-out"
+        },
+        "nestedTimeValidation": {
+          "r2": -0.20689900198353217,
+          "adjR2": -0.20689900198353217,
+          "rmse": 2.3383073558545506,
+          "mae": 1.7443537912892169,
+          "passRate": 35.59322033898305,
+          "passRate1": 40.67796610169492,
+          "passRate15": 57.6271186440678,
+          "n": 59,
+          "folds": [
+            {
+              "trainEnd": "2026-09-03 23:01:00",
+              "testStart": "2026-09-04 00:45:00",
+              "testEnd": "2026-09-11 21:58:00",
+              "n": 32,
+              "production": "mlr"
+            },
+            {
+              "trainEnd": "2026-09-11 21:58:00",
+              "testStart": "2026-09-12 00:21:00",
+              "testEnd": "2026-09-21 00:02:00",
+              "n": 27,
+              "production": "mlr"
+            }
+          ],
+          "baselineMae": 1.630999469821231,
+          "baselineRmse": 2.2334265900590613,
+          "beatsBaseline": false,
+          "method": "nested-day-walk-forward"
+        }
+      }
+    },
+    "daily": {
+      "oldTraining": {
+        "n": 37,
+        "production": "mlr",
+        "config": {
+          "subset": "all",
+          "alpha": 0.3,
+          "penalty": 1,
+          "robust": true
+        },
+        "training": {
+          "r2": 0.5266500000477137,
+          "mae": 0.9029896624447868,
+          "rmse": 1.2520610563955956,
+          "passRate": 62.16216216216216
+        },
+        "timeSelectionQ2": -0.013068674673652358,
+        "groupCv": {
+          "r2": 0.32547717742207116,
+          "adjR2": 0.32547717742207116,
+          "rmse": 1.4946263732116163,
+          "mae": 1.119337402116192,
+          "passRate": 51.35135135135135,
+          "passRate1": 59.45945945945946,
+          "passRate15": 72.97297297297297,
+          "n": 37,
+          "days": 37,
+          "method": "leave-one-day-out"
+        },
+        "nestedTimeValidation": {
+          "r2": 0.3814554816891008,
+          "adjR2": 0.3814554816891008,
+          "rmse": 1.1221246202158972,
+          "mae": 0.812590893806374,
+          "passRate": 66.66666666666666,
+          "passRate1": 66.66666666666666,
+          "passRate15": 83.33333333333334,
+          "n": 12,
+          "folds": [
+            {
+              "trainEnd": "2026-07-13 12:00:00",
+              "testStart": "2026-07-14 12:00:00",
+              "testEnd": "2026-08-27 12:00:00",
+              "n": 6,
+              "production": "mlr"
+            },
+            {
+              "trainEnd": "2026-08-27 12:00:00",
+              "testStart": "2026-08-28 12:00:00",
+              "testEnd": "2026-09-03 12:00:00",
+              "n": 6,
+              "production": "mlr"
+            }
+          ],
+          "baselineMae": 1.4630400179211467,
+          "baselineRmse": 1.7408830118238656,
+          "beatsBaseline": true,
+          "method": "nested-day-walk-forward"
+        }
+      },
+      "newDateHoldout": {
+        "n": 17,
+        "first": "2026-09-04 12:00:00",
+        "last": "2026-09-21 12:00:00",
+        "r2": -1.616445307675277,
+        "adjR2": -1.616445307675277,
+        "rmse": 1.4717126068995845,
+        "mae": 1.2608436444878242,
+        "passRate": 35.294117647058826,
+        "passRate1": 47.05882352941176,
+        "passRate15": 47.05882352941176,
+        "meanBaseline": {
+          "r2": -1.0178189252777807,
+          "adjR2": -1.0178189252777807,
+          "rmse": 1.2924337043930256,
+          "mae": 1.0047469528351887,
+          "passRate": 52.94117647058824,
+          "passRate1": 64.70588235294117,
+          "passRate15": 76.47058823529412
+        },
+        "outsideTrainingRangeN": 3
+      },
+      "retrained": {
+        "n": 54,
+        "production": "pls",
+        "config": {
+          "subset": "all",
+          "A": 1,
+          "penalty": 1
+        },
+        "training": {
+          "r2": 0.35507913707974026,
+          "mae": 1.0271935094661513,
+          "rmse": 1.3116384974369895,
+          "passRate": 46.2962962962963
+        },
+        "timeSelectionQ2": 0.2783345668697076,
+        "groupCv": {
+          "r2": 0.18218874149134845,
+          "adjR2": 0.18218874149134845,
+          "rmse": 1.4770237692344408,
+          "mae": 1.153143065731505,
+          "passRate": 44.44444444444444,
+          "passRate1": 53.70370370370371,
+          "passRate15": 72.22222222222221,
+          "n": 54,
+          "days": 54,
+          "method": "leave-one-day-out"
+        },
+        "nestedTimeValidation": {
+          "r2": -0.7761268120417493,
+          "adjR2": -0.7761268120417493,
+          "rmse": 1.2125625887540543,
+          "mae": 0.9791627649682556,
+          "passRate": 52.94117647058824,
+          "passRate1": 52.94117647058824,
+          "passRate15": 70.58823529411765,
+          "n": 17,
+          "folds": [
+            {
+              "trainEnd": "2026-09-03 12:00:00",
+              "testStart": "2026-09-04 12:00:00",
+              "testEnd": "2026-09-11 12:00:00",
+              "n": 8,
+              "production": "mlr"
+            },
+            {
+              "trainEnd": "2026-09-11 12:00:00",
+              "testStart": "2026-09-12 12:00:00",
+              "testEnd": "2026-09-21 12:00:00",
+              "n": 9,
+              "production": "mlr"
+            }
+          ],
+          "baselineMae": 0.8983784784784783,
+          "baselineRmse": 1.198359758593299,
+          "beatsBaseline": false,
+          "method": "nested-day-walk-forward"
+        }
+      }
+    }
+  }
+}

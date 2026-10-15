@@ -1,0 +1,31 @@
+{
+  "reviewDate": "2026-09-24",
+  "sourceFile": "粗精煤泥灰分影响因素9-23.xlsx",
+  "trainingSourceSha256": "5c2d3ee9ac972379eeb35c10007e78ee65868dc5472ff36b9b9b97d9ccd55121",
+  "reviewSourceSha256": "f2c1c190d26380af8b28b88679f8171c146e3afe58593c1afffe4b69e474d9c2",
+  "effectiveNewRecordCount": 61,
+  "changedEffectiveRecords": 0,
+  "mergedRecordCount": 213,
+  "dateSequenceChecks": [
+    {
+      "sheet": "Sheet1 (2)",
+      "sourceRows": "30:34",
+      "rawDate": 9.1,
+      "resolvedDate": "2026-09-10",
+      "records": 5,
+      "previousDate": "2026-09-09",
+      "nextDate": "2026-09-11"
+    },
+    {
+      "sheet": "Sheet1 (2)",
+      "sourceRows": "60:63",
+      "rawDate": 9.2,
+      "resolvedDate": "2026-09-20",
+      "records": 4,
+      "previousDate": "2026-09-19",
+      "nextDate": "2026-09-21"
+    }
+  ],
+  "archivedModelAndMetricReproduction": "exact match excluding reconstruction timestamps",
+  "purpose": "GPT candidate and evaluation archive; predictive performance has not beaten the historical mean baseline; merging files does not deploy a database model"
+}
