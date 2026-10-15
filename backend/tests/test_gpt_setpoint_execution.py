@@ -172,7 +172,12 @@ def test_hourly_mean_is_target_reference_but_current_setpoint_limits_execution(s
     with sessions() as db:
         r=read_hour(db,HOUR,current)
         assert r['guidance']['reference_target']['value']==pytest.approx(1.46)
-        assert r['guidance']['rhoCur']==1.50
-        assert r['suggested_density']['value']==1.47
+        assert r['guidance']['rhoCur']==pytest.approx(1.48)
+        assert r['suggested_density']['value']==1.46
+        assert r['execution_guidance']['rhoCur']==1.50
+        assert r['execution_guidance']['rhoNew']==1.47
         settlement['item']['value']=8.7
-        assert read_hour(db,HOUR,current)['suggested_density']['value']==1.50
+        r=read_hour(db,HOUR,current)
+        assert r['suggested_density']['value']==1.48
+        assert r['execution_guidance']['rhoNew']==1.50
+        assert r['execution_guidance']['execution_state']=='keep'

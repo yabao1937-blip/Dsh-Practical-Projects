@@ -20,10 +20,12 @@ from .evidence import PROVISIONAL
 from .models import DecisionCycleContext, DecisionCycleHour, DecisionCycleSample
 from .statistics import CADENCE, MIN_COVERAGE, valid
 from .production_coverage import stopped_intervals, overlap, fields as coverage_fields
-from ..gpt_density.execution import advise, setpoints, feedback_start
+from ..gpt_density.execution import advise, setpoints, empirical_target, EPSILON
+from ..gpt_density.execution import POLICY as EXECUTION_POLICY
+from ..gpt_density.hourly_reference import action_context
 from ..hourly_brief.inputs import Inputs
 
-POLICY = 'gpt-hourly-setpoint-v2'
+POLICY = 'gpt-hourly-reference-v3'
 
 
 def period(start, end):
@@ -180,43 +182,51 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
         [context_keys(db, ash_start, ash_end), context_keys(db, start, end, result)], current_definition)
     if not ok:
         reasons.append(config_reason)
-    cells = current.get('inputs') or current.get('cells') or {}
-    if error := current_problem(cells.get('density', {}), 'density', now):
-        reasons.append('当前分选密度'+error+'，暂缓调密')
-    stop = cells.get('is_stoppage', {})
-    if current.get('model', {}).get('method') in ('expert8', 'expert9') and (error := current_problem(stop, 'is_stoppage', now)):
-        reasons.append('当前开停机状态'+error+'，暂缓调密')
-    elif stop.get('value') == 1:
-        reasons.append('当前设备停机或低负荷，暂缓调密')
-    basis = current.get('execution_basis') or setpoints(Inputs(db, now, authoritative=True), cells.get('density', {}))
-    guide = dict(rhoCur=basis['value'], rhoNew=None, deltaRho=None, direction='unavailable',
-        maxStep=.03, advice_frozen=False, validation='awaiting_experiment', empirical_note=PROVISIONAL,
-        feasible_interval=None, interval_width_limit=None)
-    if numeric(ash['value']) and numeric(density['value']):
-        heavy = settlement.get('heavy_ash') or {}
-        records = heavy.get('records') or []
-        # Retain assay/action provenance without using it as an execution gate.
-        ends = [feedback_start(dict(status='manual', observed_at=r['observed_at'])) for r in records]
-        evidence_end = min(ends) if ends and all(ends) else ash_start
-        guide.update(advise(db, now, basis, ash['value'], result['target'], density['value'],
-            evidence_end, store.get('densityGuide')))
-        if guide['rhoNew'] is None:
-            reasons.append(guide['reason'])
-            blockers.append('setpoint')
+        blockers.append('configuration')
+    # The historical reference survives missing live inputs. Live protections
+    # belong exclusively to the operator's executable next setpoint below.
+    estimate = empirical_target(ash['value'], density['value'], result['target']) if not reasons else None
+    value = round(estimate['value'], 3) if estimate else None
+    delta = round(value-density['value'], 6) if value is not None else None
+    risk = action_context(db, result['sources'], ash_end, now, ash.get('provisional'))
     basis_text = (f'小时灰分 {ash["label"]}'+('（暂估）' if ash.get('provisional') else '')+
-                  f'；工况平均密度 {density["label"]}；单次执行以当前设定为基准，最大 ±{guide["maxStep"]:.3f}')
-    if reasons:
-        guide.update(rhoNew=None, deltaRho=None, direction='unavailable',
-                     execution_state='unavailable', channels={})
-        explanation = '；'.join(reasons)
-    else:
-        explanation = guide['reason']
-    reason = explanation+'；'+basis_text+'；'+PROVISIONAL
-    guide.update(reason=reason, hold=bool(reasons), ash_basis=ash, density_basis=density)
-    advice = dict(value=guide['rhoNew'], status='calculated' if guide['rhoNew'] is not None else 'missing',
-                  unit='g/cm³', source='小时工况目标与当前设定密度', reason=reason)
+                  f'；工况平均密度 {density["label"]}')
+    reason = '；'.join(reasons) if reasons else '小时工况参考目标；'+basis_text+'；'+PROVISIONAL
+    guide = dict(policy=POLICY, rhoCur=density['value'], rhoNew=value, deltaRho=delta,
+        direction='unavailable' if delta is None else 'stable' if abs(delta) < EPSILON else 'down' if delta < 0 else 'up',
+        hold=bool(reasons), execution_state='unavailable' if reasons else 'reference', channels={},
+        reference_target=estimate, rhoTargetFull=value, reason=reason, advice_frozen=False,
+        validation='awaiting_experiment', empirical_note=PROVISIONAL,
+        feasible_interval=None, interval_width_limit=None, ash_basis=ash, density_basis=density)
+    cells = current.get('inputs') or current.get('cells') or {}
+    execution_reasons, execution_blockers = list(reasons), list(blockers)
+    if error := current_problem(cells.get('density', {}), 'density', now):
+        execution_reasons.append('当前分选密度'+error+'，暂缓调密')
+        execution_blockers.append('current_density')
+    stop = cells.get('is_stoppage', {})
+    if error := current_problem(stop, 'is_stoppage', now):
+        execution_reasons.append('当前开停机状态'+error+'，暂缓调密')
+        execution_blockers.append('current_state')
+    elif stop.get('value') == 1:
+        execution_reasons.append('当前设备停机或低负荷，暂缓调密')
+        execution_blockers.append('current_state')
+    basis = current.get('execution_basis') or setpoints(Inputs(db, now, authoritative=True), cells.get('density', {}))
+    execution = dict(policy=EXECUTION_POLICY, rhoCur=basis['value'], rhoNew=None, deltaRho=None, direction='unavailable',
+        maxStep=.03, advice_frozen=False, validation='awaiting_experiment', empirical_note=PROVISIONAL,
+        execution_state='unavailable', channels={})
+    if not execution_reasons:
+        execution.update(advise(db, now, basis, ash['value'], result['target'], density['value'],
+            ash_end, store.get('densityGuide')))
+        if execution['rhoNew'] is None:
+            execution_reasons.append(execution['reason'])
+            execution_blockers.append('setpoint')
+    if execution_reasons:
+        execution.update(reason='；'.join(execution_reasons), hold=True)
+    advice = dict(value=value, status='calculated' if value is not None else 'missing',
+                  unit='g/cm³', source='小时工况参考目标', reason=reason)
     result.update(advice_policy=POLICY, advice_frozen=False, advice_inputs=dict(ash=ash, density=density),
         advice_blockers=blockers, guidance=guide, density_basis=density, execution_basis=basis, suggested_density=advice,
+        execution_guidance=execution, execution_blockers=execution_blockers, repeat_correction=risk,
         coverage=dict(policy=POLICY, ratio=min(ash.get('coverage') or 0, density['coverage']),
             ash_ratio=ash.get('coverage') or 0, density_ratio=density['coverage'], required_ratio=MIN_COVERAGE,
             required_ratio_exclusive=True, max_gap_seconds=None))

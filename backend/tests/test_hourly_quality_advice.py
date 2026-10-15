@@ -120,6 +120,7 @@ def test_each_input_requires_more_than_80_percent(sessions, prepared, which, rat
             assert r['guidance']['deltaRho'] is None
             assert r['guidance']['execution_state'] == 'unavailable'
             assert '需超过 80%' in r['suggested_density']['reason']
+            assert r['execution_guidance']['rhoNew'] is None
         # A missing final five minutes does not create the old 30s/latest gate.
         assert '小时末' not in r['suggested_density']['reason']
 
@@ -159,10 +160,12 @@ def test_real_configuration_changes_are_still_protected(sessions, prepared, chan
         r = read_hour(db, HOUR, current)
         assert r['suggested_density']['value'] is None
         assert '变化' in r['suggested_density']['reason']
+        assert 'configuration' in r['advice_blockers']
+        assert r['execution_guidance']['rhoNew'] is None
 
 
 @pytest.mark.parametrize('target,expected', [(dict(min=9,max=9.5),1.48),
-    (dict(min=8,max=8.5),1.45),(dict(min=9.5,max=10),1.493)])
+    (dict(min=8,max=8.5),1.427),(dict(min=9.5,max=10),1.493)])
 def test_target_only_edit_reuses_facts_and_preserves_frozen_history(sessions, prepared, target, expected):
     current, _, base, _ = prepared
     current['target'] = target
@@ -202,10 +205,12 @@ def test_new_target_adjusts_without_waiting_for_post_action_feedback(sessions, p
                 after=dict(pair=dict(setpoint=dict(c,definition_id=c['sample']['definition_id']))))))
     with sessions() as db:
         r = read_hour(db,HOUR,current)
-        assert r['guidance']['execution_state'] == 'adjust'
-        assert r['suggested_density']['value'] == 1.45
-        assert r['guidance']['deltaRho'] == -.03
-        assert r['guidance']['actions']
+        assert r['guidance']['execution_state'] == 'reference'
+        assert r['suggested_density']['value'] == 1.393
+        assert r['execution_guidance']['rhoNew'] == 1.45
+        assert r['execution_guidance']['deltaRho'] == -.03
+        assert r['repeat_correction']['action_count'] == 1
+        assert not r['repeat_correction']['blocks_advice']
 
 
 def test_missing_definition_only_does_not_invent_configuration_change(sessions, prepared):
@@ -215,19 +220,28 @@ def test_missing_definition_only_does_not_invent_configuration_change(sessions, 
         assert read_hour(db,HOUR,current)['suggested_density']['value'] == 1.46
 
 
-@pytest.mark.parametrize('cause', ['stop','density','stale','unit'])
-def test_current_protections_do_not_depend_on_instant_suggestion(sessions, prepared, cause):
+@pytest.mark.parametrize('cause', ['stop','unknown_state','density','stale','unit','setpoint'])
+def test_current_protections_only_block_execution_not_hourly_reference(sessions, prepared, cause):
     current, _, _, _ = prepared
     if cause == 'stop':
         current['inputs']['is_stoppage'] = dict(value=1,status='calculated')
+    elif cause == 'unknown_state':
+        current['inputs']['is_stoppage'] = dict(value=None,status='missing')
     elif cause == 'density':
         current['inputs']['density'] = dict(value=1.48,status='held')
     elif cause == 'stale':
         current['inputs']['density']['observed_at'] = iso_time(HOUR-timedelta(seconds=60))
-    else:
+    elif cause == 'unit':
         current['inputs']['density']['unit'] = 'wrong'
+    else:
+        current['execution_basis'] = dict(value=None,components={},reason='MD_SET 不可用')
     with sessions() as db:
-        assert read_hour(db,HOUR,current)['suggested_density']['value'] is None
+        r = read_hour(db,HOUR,current)
+        assert r['suggested_density']['value'] == 1.46
+        assert not r['guidance']['hold'] and r['advice_blockers'] == []
+        assert r['execution_guidance']['rhoNew'] is None
+        assert r['execution_guidance']['channels'] == {}
+        assert r['execution_blockers']
 
 
 def test_legacy_action_holds_do_not_block_hourly_advice(sessions, prepared):
@@ -241,8 +255,47 @@ def test_legacy_action_holds_do_not_block_hourly_advice(sessions, prepared):
         before = list(db.connection().connection.driver_connection.iterdump())
         r = read_hour(db,HOUR,current)
         assert r['suggested_density']['value'] == 1.46
-        assert r['guidance']['execution_state'] == 'adjust'
+        assert r['execution_guidance']['execution_state'] == 'adjust'
         assert list(db.connection().connection.driver_connection.iterdump()) == before
+
+
+def test_action_notice_is_route_and_time_bounded_even_without_live_data(sessions, prepared):
+    from app.decision_hourly.models import DensityAction
+    current, settlement, _, _ = prepared
+    c = current['execution_basis']['components']['A304']
+    point = dict(c, definition_id=c['sample']['definition_id'])
+    with sessions.begin() as db:
+        for identity, when, channel, changes in [
+            ('boundary',START,'A304',{}),
+            ('second',HOUR-timedelta(seconds=10),'A304',{}),
+            ('future',HOUR+timedelta(seconds=1),'A304',{}),
+            ('earlier',START-timedelta(seconds=1),'A304',{}),
+            ('other-source',HOUR,'A304',dict(source_id='other')),
+            ('other-point',HOUR,'A304',dict(point_key='other')),
+            ('other-definition',HOUR,'A304',dict(definition_id='other')),
+            ('other-channel',HOUR,'A303',{}),
+            ('no-move',HOUR,'A304',dict(value=1.51)),
+        ]:
+            db.add(DensityAction(id=identity,channel=channel,detected_at=iso_time(when),
+                evidence=dict(continuous=False,before=dict(pair=dict(setpoint=dict(value=1.51))),
+                    after=dict(pair=dict(setpoint={**point,**changes})))) )
+    current['inputs']['density'] = dict(value=None,status='missing')
+    current['execution_basis'] = dict(value=None,components={},reason='MD_SET 不可用')
+    with sessions() as db:
+        before = list(db.connection().connection.driver_connection.iterdump())
+        r = read_hour(db,HOUR,current)
+        risk = r['repeat_correction']
+        assert [a['action_id'] for a in risk['actions']] == ['boundary','second']
+        assert risk['action_count'] == 2 and risk['last_action_at'] == iso_time(HOUR-timedelta(seconds=10))
+        assert '实际调密时间需核对' in risk['messages'][0]
+        assert risk['provisional'] and not risk['blocks_advice']
+        assert r['suggested_density']['value'] == 1.46
+        assert r['advice_blockers'] == [] and not r['guidance']['hold']
+        assert read_hour(db,HOUR,current)['repeat_correction'] == risk
+        assert list(db.connection().connection.driver_connection.iterdump()) == before
+    settlement['item']['provisional'] = False
+    with sessions() as db:
+        assert len(read_hour(db,HOUR,current)['repeat_correction']['messages']) == 1
 
 
 def test_burst_samples_and_invalid_density_cannot_manufacture_coverage(sessions, prepared):
@@ -306,7 +359,8 @@ def test_real_settlement_and_manual_revision_feed_hour_advice(sessions, prepared
     with sessions() as db:
         r=read_hour(db,HOUR+timedelta(seconds=2),current)
         assert r['advice_inputs']['ash']['value']==pytest.approx(10.5)
-        assert r['suggested_density']['value']==1.45
+        assert r['suggested_density']['value']==1.38
+        assert r['execution_guidance']['rhoNew']==1.45
         assert not r['advice_inputs']['ash']['provisional']
         assert db.get(DecisionCycleHour,iso_time(START)).snapshot==base
 
@@ -315,6 +369,8 @@ def test_hourly_api_returns_new_policy_and_two_bases(sessions, prepared, client,
     monkeypatch.setattr('app.decision_hourly.service.utc_now',lambda:HOUR)
     r = client.get('/api/v1/decision/hourly')
     assert r.status_code == 200
-    assert r.json()['advice_policy'] == 'gpt-hourly-setpoint-v2'
+    assert r.json()['advice_policy'] == 'gpt-hourly-reference-v3'
+    assert r.json()['guidance']['policy'] == 'gpt-hourly-reference-v3'
+    assert r.json()['execution_guidance']['policy'] == 'gpt-setpoint-execution-v2'
     assert r.json()['advice_inputs']['ash']['end'] == iso_time(START)
     assert r.json()['advice_inputs']['density']['end'] == iso_time(HOUR)

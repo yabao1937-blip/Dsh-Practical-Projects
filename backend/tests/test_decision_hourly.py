@@ -155,11 +155,13 @@ def test_new_policy_does_not_resurrect_old_offsets_without_its_two_inputs(sessio
     with sessions() as db:
         response=read_hour(db,HOUR,live=current)
         assert response['suggested_density']['value'] is None
-        assert response['advice_policy']=='gpt-hourly-setpoint-v2'
+        assert response['advice_policy']=='gpt-hourly-reference-v3'
         assert 'ash' in response['advice_blockers']
         stopped=deepcopy(current)
         stopped['inputs']['is_stoppage']=dict(value=1,status='calculated')
-        assert '设备停机' in read_hour(db,HOUR,live=stopped)['suggested_density']['reason']
+        response=read_hour(db,HOUR,live=stopped)
+        assert '设备停机' not in response['suggested_density']['reason']
+        assert '设备停机' in response['execution_guidance']['reason']
         assert db.get(DecisionCycleHour,iso_time(START)).snapshot==summary
 
 
@@ -299,7 +301,9 @@ def test_definition_changes_invalidate_context_and_current_guard(sessions,seeded
         assert '变化' in read_hour(db,HOUR,live=changed)['suggested_density']['reason']
         stopped=deepcopy(current)
         stopped['inputs']['is_stoppage']=dict(value=1,status='calculated')
-        assert '设备停机' in read_hour(db,HOUR,live=stopped)['suggested_density']['reason']
+        response=read_hour(db,HOUR,live=stopped)
+        assert '设备停机' not in response['suggested_density']['reason']
+        assert '设备停机' in response['execution_guidance']['reason']
         assert db.get(DecisionCycleHour,iso_time(START)).snapshot['suggested_density']['value']==1.5
 
 

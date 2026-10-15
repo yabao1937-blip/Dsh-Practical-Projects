@@ -63,6 +63,17 @@ assert.equal(m.present('instant',page,unavailable,false,'模型修改').value,nu
 assert.equal(m.present('instant',page,null,false,'模型修改后断网').value,null);
 c=context();m=c.memory;
 assert.equal(m.present('instant',page,null,false,'模型修改后刷新').value,null);
+// The hourly value changes meaning from an executed step to a historical goal.
+// Even a missing first v3 response must invalidate the old hourly execution cache.
+const legacy=result(1.47);legacy.guidance={policy:'gpt-setpoint-execution-v2'};legacy.advice_policy='gpt-hourly-setpoint-v2';
+m.remember('hourly',page,legacy);
+m.remember('instant',page,result(1.49));
+const upgraded=result(null);upgraded.guidance={policy:'gpt-hourly-reference-v3'};upgraded.advice_policy=upgraded.guidance.policy;
+assert.equal(m.present('hourly',page,upgraded,false,'历史覆盖不足').value,null);
+assert.equal(m.present('hourly',page,null,false,'离线').value,null);
+assert.equal(m.present('instant',page,null,false,'离线').value,1.49);
+upgraded.suggested_density={value:1.46,status:'calculated'};m.remember('hourly',page,upgraded);
+assert.equal(m.present('hourly',page,null,false,'离线').value,1.46);
 saved.set(m.storageKey,'broken JSON');c=context();
 assert.equal(c.memory.present('instant',page,null,false,'首次加载').value,null);
 console.log('Density display memory: independent values, missing input, offline, reload, rollover, timestamps and configuration isolation passed.');

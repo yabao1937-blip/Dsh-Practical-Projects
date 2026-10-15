@@ -9,7 +9,7 @@ const DecisionHourly = {
     epoch() { return typeof DecisionSources==='undefined'?0:DecisionSources.epoch; },
     clock() { return typeof performance==='undefined'?Date.now():performance.now(); },
     enabled(page) { return page.view==='gpt'; },
-    qualityPolicy(r) { return ['gpt-hourly-quality-density-v1','gpt-hourly-setpoint-v2'].includes(r?.advice_policy); },
+    qualityPolicy(r) { return ['gpt-hourly-quality-density-v1','gpt-hourly-setpoint-v2','gpt-hourly-reference-v3'].includes(r?.advice_policy); },
     adviceReason(r) {
         const raw=r?.suggested_density?.reason || '';
         if(!this.qualityPolicy(r)) return raw;
@@ -236,7 +236,8 @@ const DecisionHourly = {
             label,value:part.value,available:Number.isFinite(part.value),fraction:true})) : null;
         const shown=isAdvice?DecisionDensityDisplay.present('hourly',page,result,available,this.adviceReason(result) || this.error || '正在读取上一小时统计'):null;
         const reason=shown?.reason || c?.reason || this.error || '正在读取上一小时统计';
-        const source=isAdvice ? available ? `用于 ${result.period.apply_label} · ${result.guidance.direction==='down'?'整体下调':result.guidance.direction==='up'?'整体上调':'保持'}` : '覆盖不足或当前状态暂缓' :
+        const reference=result?.advice_policy==='gpt-hourly-reference-v3';
+        const source=isAdvice ? available ? reference ? `工况参考目标 · 用于 ${result.period.apply_label}` : `用于 ${result.period.apply_label} · ${result.guidance.direction==='down'?'整体下调':result.guidance.direction==='up'?'整体上调':'保持'}` : reference ? '历史数据不足或计算口径变化' : '覆盖不足或当前状态暂缓' :
             c?.carried ? `沿用 · ${page.time(c.observed_at)}` : c?.sample_count ? `${c.sample_count} 条有效样本 · 小时平均` : components ? '有效样本中的运行占比' : reason;
         return {hourly:true,shared:true,calculated:true,inputs:[],available:available || !!components?.some(c=>c.available),
             numericValue:available?c.value:null,unit:c?.unit || '',sampleAt:shown?.at || c?.observed_at,components,held:!!shown?.retained,
@@ -249,7 +250,7 @@ const DecisionHourly = {
         if(this.qualityPolicy(r)) {
             const {ash,density}=r.advice_inputs;
             document.getElementById('decision-mode-label').textContent='小时累加 · 人工执行';
-            document.getElementById('decision-mode-note').textContent=`卡片展示上一完整小时工况；小时灰分与实测均值用于估计工况目标，本次执行相对当前设定密度每路最多调整 ±0.03。采用最新可用灰分持续计算建议。生产覆盖超过 ${(coverage.required_ratio*100).toFixed(0)}% 才发布正式建议，确认停产无产出的时段除外。专家经验参考，等待实验验证。`;
+            document.getElementById('decision-mode-note').textContent=`卡片展示上一完整小时工况；最新发布的小时灰分与上一小时平均密度用于估计工况参考目标，两个时段的生产覆盖均须超过 ${(coverage.required_ratio*100).toFixed(0)}%。当前采集状态只影响执行建议；每路单次执行相对当前设定密度最多调整 ±0.03。采用最新可用灰分持续计算，专家经验参考，等待实验验证。`;
             page.renderHTML('decision-context',`<span>统计时段 <strong>${page.escape(r.period.label)}</strong></span><span>建议灰分 <strong>${page.escape(ash.label)}${ash.provisional?'（暂估）':''} · ${page.number(ash.value,2,'%')}</strong></span><span>平均密度 <strong>${page.escape(density.label)} · ${page.number(density.value,3)}</strong></span><span>有效覆盖 <strong>灰分 ${(coverage.ash_ratio*100).toFixed(1)}% · 密度 ${(coverage.density_ratio*100).toFixed(1)}%</strong></span><span>建议用于 <strong>${page.escape(r.period.apply_label)}</strong></span>`);
             return;
         }
@@ -270,19 +271,24 @@ const DecisionHourly = {
         }
         if(node.id==='density' && this.qualityPolicy(r)) {
             const {ash,density}=r.advice_inputs;
+            const execution=r.execution_guidance || r.guidance;
             pairs.push(['建议灰分时段',ash.label+(ash.provisional?'（暂估，补录后更新）':'')],
                 ['小时总灰分',page.number(ash.value,2,'%')],['灰分有效覆盖',`${(ash.coverage*100).toFixed(1)}%`],
                 ['密度平均时段',density.label],['小时平均密度',page.number(density.value,3,'g/cm³')],
                 ['密度有效覆盖',`${(density.coverage*100).toFixed(1)}%`],
                 ['当前设定密度',page.number(r.execution_basis?.value,3,'g/cm³')],
                 ['工况参考目标',page.number(r.guidance.reference_target?.value,3,'g/cm³')],
-                ['本次执行调整',page.number(r.guidance.deltaRho,4,'g/cm³')],
-                ['每路执行上限',`±${page.number(r.guidance.maxStep,3)}`],['建议使用时段',r.period.apply_label],
+                ['下一步执行建议',page.number(execution.rhoNew,3,'g/cm³')],
+                ['执行说明',execution.reason || '等待读取'],
+                ['本次执行调整',page.number(execution.deltaRho,4,'g/cm³')],
+                ['每路执行上限',`±${page.number(execution.maxStep,3)}`],['建议使用时段',r.period.apply_label],
                 ['灰分统计时长',`${Math.round(ash.expected_production_seconds??3600)} 秒（已排除确认停产 ${Math.round(ash.stopped_seconds||0)} 秒）`],
                 ['密度统计时长',`${Math.round(density.expected_production_seconds??3600)} 秒（已排除确认停产 ${Math.round(density.stopped_seconds||0)} 秒）`],
                 ['更新规则','采用最新可用灰分持续计算；单次执行相对当前设定密度限幅'],['验证状态','专家经验参考 · 等待响应实验']);
-            for(const [label,channel] of Object.entries(r.guidance.channels || {})) pairs.push([
+            for(const [label,channel] of Object.entries(execution.channels || {})) pairs.push([
                 label+' 设定建议',`${page.number(channel.current,3)} → ${page.number(channel.suggested,3)} g/cm³`]);
+            for(const message of r.repeat_correction?.messages || []) pairs.push(['调密提示',message]);
+            if(r.repeat_correction?.last_action_at) pairs.push(['最近检测到设定变化',page.time(r.repeat_correction.last_action_at)]);
         } else if(node.id==='density' && r) pairs.push(['小时末有效密度',page.number(r.guidance.rhoCur,3,'g/cm³')],
             ['基准采样时间',page.time(r.guidance.basis_at)],['平均建议偏移',page.number(r.guidance.mean_delta,5,'g/cm³')],
             ['单次执行步幅',`±${page.number(r.guidance.maxStep,3)}`],['验证状态','专家经验建议 · 非实验验证的达标区间'],
@@ -293,7 +299,7 @@ const DecisionHourly = {
             label,`${Number.isFinite(part.value)?page.number(part.value*100,1,'%'):'—'} 运行 · ${part.sample_count} 条有效样本`]);
         if(d.summaryParts) for(const p of d.summaryParts) pairs.push([p.node.title,p.display.value]);
         const facts=pairs.map(([label,value])=>`<dt>${page.escape(label)}</dt><dd>${page.escape(value)}</dd>`).join('');
-        page.renderHTML('decision-inspector',`<div class="decision-inspector-header"><span>小时统计详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><h3>${page.escape(node.title)}</h3><dl class="decision-facts">${facts}</dl><p>统计来源沿用该小时的决策总览配置；在即时模式中调整后，从后续采样开始生效。</p>${node.id==='density'?`<p>${page.escape(r?.suggested_density.reason || this.error)}</p>`:''}</div>`);
+        page.renderHTML('decision-inspector',`<div class="decision-inspector-header"><span>小时统计详情</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><h3>${page.escape(node.title)}</h3><dl class="decision-facts">${facts}</dl><p>统计来源沿用该小时的决策总览配置；在即时模式中调整后，从后续采样开始生效。</p>${node.id==='density'?`<p>${page.escape(this.adviceReason(r) || this.error)}</p>`:''}</div>`);
         page.queueInspectorPosition();
     },
 };
