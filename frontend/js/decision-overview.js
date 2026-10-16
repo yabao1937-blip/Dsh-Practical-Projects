@@ -924,9 +924,9 @@ const DecisionOverviewPage = {
         }).join('');
         const shown=hourly?hourResult:this.liveMode()?DecisionRealtime.presentation():null,pending=hourly?DecisionHourly.pending():this.liveMode() && DecisionRealtime.pending();
         const totalReason=this.liveMode() ? pending?'更新中 · 上轮结果仅供对照':shown?.total_ash?.reason || (hourly?DecisionHourly.error:DecisionRealtime.error) || '正在计算' : '';
-        const total=this.liveMode()?`<strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'产煤量加权总灰分':'小时平均总灰分'):pending?'上轮总灰分':'预测总灰分'} ${this.number(shown?.total_ash?.value,2,'%')}</strong><span title="${this.escape(totalReason)}">${this.escape(totalReason.length>45?(hourly && Number.isFinite(shown?.total_ash?.value)?'按已保存口径统计 · 详见小时灰分': '输入待补充，点击建议密度查看原因'):totalReason)}</span>`:`公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}`;
+        const total=this.liveMode()?`<strong>${hourly?(shown?.total_ash?.aggregation==='output-mass-v1'?'产煤量加权总灰分':'小时平均总灰分'):pending?'上轮总灰分':'实时总精煤灰分'} ${this.number(shown?.total_ash?.value,2,'%')}</strong><span title="${this.escape(totalReason)}">${this.escape(totalReason.length>45?(hourly && Number.isFinite(shown?.total_ash?.value)?'按已保存口径统计 · 详见小时灰分': '输入待补充，点击建议密度查看原因'):totalReason)}</span>`:`公式核算 ${this.number(s.formula,2,'%')}<br>当前采用 ${this.number(s.total.value,2,'%')}`;
         const ashHistory=this.view==='gpt'?'<button type="button" class="decision-ash-open" data-ash-history aria-haspopup="dialog">查看区间灰分 ↗</button><button type="button" class="decision-ash-open" data-evidence-open>工况分段 / 调密跟踪 ↗</button>':'';
-        this.renderHTML('decision-toolbar-total',this.instantLayout()?`<span class="decision-ash-metric" data-decision-key="instant-ash"><span class="decision-total-label">预测总灰分</span><strong>${this.number(this.liveMode()?shown?.total_ash?.value:s.formula,2)}<small> %</small></strong></span>`:'');
+        this.renderHTML('decision-toolbar-total',this.instantLayout()?`<span class="decision-ash-metric" data-decision-key="instant-ash"><span class="decision-total-label">实时总精煤灰分</span><strong>${this.number(this.liveMode()?shown?.total_ash?.value:s.formula,2)}<small> %</small></strong></span>`:'');
         document.getElementById('decision-toolbar-total').hidden=!this.instantLayout();
         const totalPanel=this.instantLayout()
             ? ''

@@ -136,7 +136,7 @@ const DecisionRealtime = {
                 display:{value:page.number(c.value,3,c.unit),source:(c.source || '等待输入')+(feature?.clipped ? `；模型限幅后 ${feature.used}` : ''),sampleAt:c.observed_at,enteredAt:c.entered_at}};
         });
         if(node.id==='density') inputs.unshift(
-            {node:{title:'预测总灰分'},display:{value:page.number(result?.total_ash?.value,2,'%'),source:result?.total_ash?.reason || reason,sampleAt:result?.generated_at}},
+            {node:{title:'实时总精煤灰分'},display:{value:page.number(result?.total_ash?.value,2,'%'),source:result?.total_ash?.reason || reason,sampleAt:result?.generated_at}},
             {node:{title:'粗精煤泥预测灰分'},display:{value:page.number(result?.coarse_ash?.value,2,'%'),source:result?.coarse_ash?.reason || reason}},
             {node:{title:'重介精煤量'},display:{value:page.number(result?.heavy_amount?.value,3,'t/h'),source:'501 + 502 − 浮精量 − 粗精煤泥量'}});
         const amount=page.pointDisplay(page.nodes.find(n=>n.id==='coarse-amount'));

@@ -324,3 +324,20 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .decision-workspace .decision-node:is(.is-hourly-gap,.is-hourly-warning):is(:hover,.is-selected) { outline-color:var(--dm-quality); border-color:var(--dm-quality); background:var(--dm-quality-bg); box-shadow:3px 3px 0 color-mix(in srgb,var(--dm-quality) 20%,transparent); }
 .decision-workspace :is(.is-hourly-gap,.is-hourly-warning) :is(.decision-node-heading,.decision-node-value,.decision-node-source,.decision-root-unit,strong) { color:var(--dm-quality); }
 .decision-workspace :is(.is-hourly-gap,.is-hourly-warning) .decision-badge { color:var(--dm-quality); border-color:var(--dm-quality); }
+
+/* The hourly recommendation leads; keep the instant calculation as a quiet reference. */
+.is-instant-layout .decision-hourly-summary { padding:24px; gap:14px; border:2px solid var(--dm-cyan); background:#293be3; color:#fff; box-shadow:0 6px 20px #1727a82b; }
+.is-instant-layout .decision-hourly-summary > .decision-node-heading { font-size:21px; font-weight:700; }
+.is-instant-layout .decision-hourly-summary > .decision-node-value { font-size:54px; font-weight:700; letter-spacing:-.02em; }
+.is-instant-layout .decision-hourly-summary :is(.decision-node-source,.decision-root-unit) { color:#ffffffcc; }
+.is-instant-layout .decision-hourly-summary > .decision-node-value.decision-value-empty { font-size:26px; letter-spacing:0; }
+.decision-workspace .is-instant-layout .decision-hourly-summary:is(.is-hourly-gap,.is-hourly-warning) { background:var(--dm-quality-bg); border-color:var(--dm-quality); border-left-width:6px; color:var(--dm-quality); box-shadow:3px 3px 0 color-mix(in srgb,var(--dm-quality) 20%,transparent); }
+.decision-workspace .is-instant-layout .decision-hourly-summary:is(.is-hourly-gap,.is-hourly-warning) :is(.decision-node-heading,.decision-node-value,.decision-node-source,.decision-root-unit) { color:var(--dm-quality); }
+.is-instant-layout .decision-node.decision-density-instant { border:1px solid var(--dm-border); background:var(--dm-card); color:var(--dm-text); box-shadow:3px 3px 0 color-mix(in srgb,var(--dm-border) 25%,transparent); }
+.is-instant-layout .decision-density-instant > .decision-node-heading { font-size:16px; font-weight:500; color:var(--dm-muted); }
+.is-instant-layout .decision-density-instant > .decision-node-value { font-size:32px; color:var(--dm-text); }
+.is-instant-layout .decision-density-instant > .decision-node-value.decision-value-empty { font-size:20px; }
+.is-instant-layout .decision-density-instant :is(.decision-node-source,.decision-root-unit) { color:var(--dm-muted); }
+.is-instant-layout .decision-density-instant.has-flow::after { display:none; }
+.is-instant-layout .decision-density-instant.is-selected { outline:1px solid var(--dm-muted); outline-offset:3px; box-shadow:none; }
+.is-instant-layout .decision-density-instant:focus-visible { outline:3px solid var(--dm-cyan); outline-offset:3px; }
