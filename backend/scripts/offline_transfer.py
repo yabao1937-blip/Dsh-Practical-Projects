@@ -29,6 +29,7 @@ def serve(output):
     if not compatibility.is_relative_to(output.resolve()):
         raise ValueError('Compatibility update must stay inside the configured output directory')
     project_update = (output/'extras'/'ProjectUpdate.zip').resolve()
+    diagnostics = (output/'extras'/'ProjectDiagnostics.zip').resolve()
     prefix = '/'+settings['token']
     allowed = {settings['client'], settings['bind'], '127.0.0.1'}
 
@@ -64,7 +65,8 @@ def serve(output):
                     if chrome.is_file() else '')
                 content = (f'<!doctype html><meta charset="utf-8"><title>离线安装</title>'
                     f'<body style="font:22px sans-serif;padding:32px;line-height:1.7">'
-                    f'{project}<h2>首次安装 · Windows 10 64位 · 重介密控系统</h2>'
+                    f'{project}'+(f'<h2>主机故障诊断</h2><p><a href="{prefix}/diagnostics.zip">下载一键诊断包</a>：全部解压后运行 DiagnoseProject.cmd，不停止服务、不修改数据库。</p><hr>' if diagnostics.is_file() else '')+
+                    f'<h2>首次安装 · Windows 10 64位 · 重介密控系统</h2>'
                     f'<p><a href="{prefix}/download.zip">下载离线安装包（{bundle.stat().st_size/1048576:.0f} MB）</a></p>'
                     f'<ol><li>下载完成后，右键 ZIP → 全部解压。</li>'
                     f'<li>进入解压文件夹，双击 <b>Install.cmd</b>。</li>'
@@ -85,6 +87,8 @@ def serve(output):
                 self.download(compatibility, 'application/zip')
             elif path == prefix+'/project-update.zip' and project_update.is_file():
                 self.download(project_update, 'application/zip')
+            elif path == prefix+'/diagnostics.zip' and diagnostics.is_file():
+                self.download(diagnostics, 'application/zip')
             else:
                 self.send_error(404)
 
@@ -103,16 +107,23 @@ def serve(output):
             if self.client_address[0] != settings['client']:
                 self.send_error(403)
                 return
-            if urlsplit(self.path).path != prefix+'/status':
+            report_path = urlsplit(self.path).path
+            if report_path not in (prefix+'/status',prefix+'/diagnostics'):
                 self.send_error(404)
                 return
             try:
                 size = int(self.headers.get('Content-Length', '0'))
-                if not 0 < size <= 16384:
+                if not 0 < size <= (65536 if report_path.endswith('/diagnostics') else 16384):
                     raise ValueError()
                 report = json.loads(self.rfile.read(size))
                 if not isinstance(report, dict):
                     raise ValueError()
+                if report_path.endswith('/diagnostics'):
+                    report = {k:report[k] for k in ('at','disk_free_mb','files','processes','http','database','logs') if k in report}
+                    (output/'target-diagnostics.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+                    self.send_response(204)
+                    self.end_headers()
+                    return
                 if report.get('stage') not in ('verifying', 'copying', 'dependencies', 'starting', 'installed', 'failed'):
                     raise ValueError()
                 # Keep a small, known schema. Never interpret a report as code.
