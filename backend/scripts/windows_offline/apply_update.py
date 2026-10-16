@@ -1,5 +1,6 @@
 """Verified source-only update. Never replace production databases/config/models."""
 import argparse
+from contextlib import closing
 from datetime import datetime
 import hashlib
 import importlib.util
@@ -45,13 +46,51 @@ def verify(package,root,manifest):
             raise ValueError('Installed source is missing: '+name)
 
 
-def backup_database(root,backup):
+def backup_database(root,backup,report=lambda stage,message:None,*,timeout=1200):
     path = root/'backend/data/dense_medium.db'
-    with sqlite3.connect(path.as_uri()+'?mode=ro',uri=True) as source:
-        with sqlite3.connect(backup/'dense_medium.db') as target:
-            source.backup(target)
-            if target.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
-                raise ValueError('Database backup integrity check failed')
+    started = time.monotonic()
+    last_report = started-5
+    report('copying','Copying production database; collection remains running.')
+    def progress(status,remaining,total):
+        nonlocal last_report
+        now = time.monotonic()
+        if now-started >= timeout:
+            raise TimeoutError('Database backup timed out; source files and running service were not changed.')
+        if now-last_report >= 5 or remaining == 0:
+            percent = (total-remaining)*100/total if total else 0
+            report('copying',f'Database backup {percent:.1f}% ({total-remaining}/{total} pages), {now-started:.0f}s elapsed.')
+            last_report = time.monotonic()
+    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as source:
+        # Hold one WAL read snapshot so collection cannot restart a batched copy.
+        source.execute('BEGIN')
+        source.execute('SELECT name FROM sqlite_master LIMIT 1').fetchone()
+        with closing(sqlite3.connect(backup/'dense_medium.db')) as target:
+            try:
+                source.backup(target,pages=2048,progress=progress,sleep=.1)
+            finally:
+                source.rollback()
+            report('copying','Database copied; checking backup integrity. Collection remains running.')
+            check_started = time.monotonic()
+            last_check_report = check_started
+            def check_progress():
+                nonlocal last_check_report
+                now = time.monotonic()
+                if now-check_started >= timeout: return 1
+                if now-last_check_report >= 5:
+                    report('copying',f'Checking database backup integrity, {now-check_started:.0f}s elapsed.')
+                    last_check_report = time.monotonic()
+                return 0
+            target.set_progress_handler(check_progress,10000)
+            try:
+                if target.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
+                    raise ValueError('Database backup integrity check failed')
+            except sqlite3.OperationalError as exc:
+                if time.monotonic()-check_started >= timeout:
+                    raise TimeoutError('Backup integrity check timed out; source files and running service were not changed.') from exc
+                raise
+            finally:
+                target.set_progress_handler(None,0)
+    report('copying','Database backup verified. Preparing source update.')
 
 
 def powershell(script,*args,cwd):
@@ -75,12 +114,12 @@ def restart(root):
     raise RuntimeError('Updated service did not become healthy')
 
 
-def apply(package,root,manifest):
+def apply(package,root,manifest,report=lambda stage,message:None):
     verify(package,root,manifest)
     backup = root/'backups'/('source-update-'+datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
     backup.mkdir(parents=True)
     # Snapshot the live WAL database consistently; the collector can keep running.
-    backup_database(root,backup)
+    backup_database(root,backup,report)
     original = {}
     for name in manifest['files']:
         source = safe_path(root,name)
@@ -90,8 +129,10 @@ def apply(package,root,manifest):
             saved.parent.mkdir(parents=True,exist_ok=True)
             shutil.copy2(source,saved)
     (backup/'files.json').write_text(json.dumps(original,indent=2),encoding='utf-8')
+    report('copying','Backup complete; restarting only the project Web service.')
     powershell(package/'StopOwnedWeb.ps1','-InstallDir',str(root),cwd=root)
     try:
+        report('copying','Installing verified source files.')
         for name in manifest['files']:
             target = safe_path(root,name)
             target.parent.mkdir(parents=True,exist_ok=True)
@@ -99,6 +140,7 @@ def apply(package,root,manifest):
             shutil.copy2(safe_path(package/'payload',name),temporary)
             temporary.replace(target)
             clear_bytecode(target)
+        report('starting','Starting updated Web service and checking health.')
         restart(root)
         with urlopen('http://127.0.0.1:8000/api/v1/decision/hourly',timeout=45) as response:
             data = json.load(response)
@@ -108,6 +150,7 @@ def apply(package,root,manifest):
             if '实时总精煤灰分' not in response.read().decode('utf-8'):
                 raise RuntimeError('Updated frontend was not loaded')
     except BaseException:
+        report('copying','Update failed; restoring previous source and restarting Web. Production database will be retained.')
         powershell(package/'StopOwnedWeb.ps1','-InstallDir',str(root),cwd=root)
         for name,existed in original.items():
             target = safe_path(root,name)
@@ -136,7 +179,7 @@ def main():
         except OSError: pass
     report('verifying','Verifying source update; production database/configuration will be preserved.')
     try:
-        backup = apply(package,args.install_dir.resolve(),manifest)
+        backup = apply(package,args.install_dir.resolve(),manifest,report)
         report('installed','Source update complete. Backup: '+str(backup)+'. Refresh Chrome with Ctrl+F5.')
         return 0
     except Exception as exc:

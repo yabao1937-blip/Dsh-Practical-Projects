@@ -81,3 +81,50 @@ def test_failed_start_rolls_back_code_but_keeps_new_production_rows(prepared,mon
     assert target.read_text() == 'old code' and count == 2
     with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
         assert db.execute('select * from evidence').fetchall() == [(1,),(2,)]
+
+
+def test_live_wal_backup_is_consistent_and_releases_snapshot_before_check(prepared,tmp_path):
+    _,root,_,_,_,_ = prepared
+    backup = tmp_path/'snapshot'
+    backup.mkdir()
+    events = []
+    path = root/'backend/data/dense_medium.db'
+    with sqlite3.connect(path) as writer:
+        writer.execute('PRAGMA journal_mode=WAL')
+        # More than one batch: write while the copy still has pages remaining.
+        writer.execute('CREATE TABLE payload (data blob)')
+        writer.executemany('INSERT INTO payload VALUES(zeroblob(1048576))',[()]*10)
+        writer.commit()
+        inserted = False
+        def report(stage,message):
+            nonlocal inserted
+            events.append((stage,message))
+            if 'pages)' in message and not inserted:
+                writer.execute('INSERT INTO evidence VALUES(2)')
+                writer.commit()
+                inserted = True
+            if 'checking backup integrity' in message:
+                # A leaked source snapshot would prevent truncating the live WAL.
+                assert writer.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()[0] == 0
+        update.backup_database(root,backup,report)
+        assert inserted
+        assert writer.execute('SELECT * FROM evidence').fetchall() == [(1,),(2,)]
+    with sqlite3.connect(backup/'dense_medium.db') as snapshot:
+        assert snapshot.execute('SELECT * FROM evidence').fetchall() == [(1,)]
+        assert snapshot.execute('SELECT COUNT(*) FROM payload').fetchone() == (10,)
+    assert all(stage == 'copying' for stage,_ in events)
+    assert any('checking backup integrity' in message for _,message in events)
+    assert 'verified' in events[-1][1]
+
+
+def test_backup_timeout_leaves_source_and_web_untouched(prepared,monkeypatch):
+    package,root,_,target,manifest,calls = prepared
+    backup_database = update.backup_database
+    monkeypatch.setattr(update,'backup_database',lambda root,backup,report:
+        backup_database(root,backup,report,timeout=0))
+    with pytest.raises(TimeoutError,match='backup timed out'):
+        update.apply(package,root,manifest)
+    assert target.read_text() == 'old code'
+    assert not calls
+    with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
+        assert db.execute('SELECT * FROM evidence').fetchall() == [(1,)]
