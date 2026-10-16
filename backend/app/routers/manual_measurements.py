@@ -78,7 +78,7 @@ def create_measurement(body: ManualMeasurementIn, response: Response, db: Sessio
     now = timestamp_now()
     record = ManualMeasurement(metric=body.metric, name=definition["name"], unit=definition["unit"],
                                value=body.value, observed_at=body.observed_at or now, created_at=now,
-                               client_id=body.client_id, request_hash=digest)
+                               client_id=body.client_id, request_hash=digest, time_basis='production-time-v1')
     db.add(record)
     try:
         db.commit()

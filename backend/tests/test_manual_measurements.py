@@ -169,7 +169,8 @@ def test_latest_uses_measurement_time_instead_of_entry_order(setup):
     point = client.get(URL + "/latest").json()["items"][0]
     assert point["available"] and point["unit"] == "%"
     assert point["sample"] == {"record_id": current["id"], "value": 8.5,
-                               "observed_at": current["observed_at"], "created_at": current["created_at"]}
+                               "observed_at": current["observed_at"], "created_at": current["created_at"],
+                               "entered_observed_at": current["observed_at"], "time_basis": "production-time-v1"}
     with sessions() as db:
         assert db.get(ManualMeasurement, point["sample"]["record_id"]).value == 8.5
 

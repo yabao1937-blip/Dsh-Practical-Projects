@@ -48,11 +48,12 @@ def setpoints(inputs, actual):
 
 
 def assay_end(cell):
-    """Manual sample in hour 10 describes production 08–09, not its entry time."""
+    """New cells carry effective production time; unmarked legacy cells keep lag."""
     try:
         stamp = business_time(cell['observed_at'])
         if cell.get('status') in ('manual', 'historical', 'default', 'carried'):
-            return stamp.astimezone(LOCAL).replace(minute=0, second=0, microsecond=0)-timedelta(hours=1)
+            offset = 1 if cell.get('time_basis') else -1
+            return stamp.astimezone(LOCAL).replace(minute=0, second=0, microsecond=0)+timedelta(hours=offset)
         return stamp if cell.get('status') == 'good' else None
     except (KeyError, TypeError, ValueError):
         return None

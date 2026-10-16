@@ -16,12 +16,13 @@ def upgrade():
         unique = inspector.get_unique_constraints("manual_measurements")
         types = {"id": sa.Integer, "value": sa.Float}
         lengths = {"metric": 32, "name": 64, "unit": 16, "observed_at": 32,
-                   "created_at": 32, "client_id": 64, "request_hash": 64}
+                   "created_at": 32, "client_id": 64, "request_hash": 64, "time_basis": 32}
         valid_types = all(isinstance(column["type"], types.get(column["name"], sa.String))
                           and (column["name"] not in lengths or column["type"].length == lengths[column["name"]])
                           and column["nullable"] == (column["name"] == "client_id") for column in columns)
         checks = {constraint["name"] for constraint in inspector.get_check_constraints("manual_measurements")}
-        if ({column["name"] for column in columns} != expected
+        # Startup may already have applied the additive production-time upgrade.
+        if (not expected <= {column["name"] for column in columns} <= expected | {'time_basis'}
                 or not valid_types
                 or inspector.get_pk_constraint("manual_measurements")["constrained_columns"] != ["id"]
                 or not any(constraint["column_names"] == ["client_id"] for constraint in unique)

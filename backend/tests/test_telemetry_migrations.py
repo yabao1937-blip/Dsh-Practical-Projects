@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 BACKEND = Path(__file__).parents[1]
+MANUAL_COLUMNS = 'id,metric,name,value,unit,observed_at,created_at,client_id,request_hash'
 
 
 def run(env, *arguments):
@@ -25,11 +26,12 @@ def test_migration_preserves_existing_business_and_telemetry(tmp_path, auto_crea
         run(env, "-c", "from app.main import app; from app.database import engine; from sqlalchemy import text; conn=engine.connect(); conn.execute(text(\"INSERT INTO telemetry_sources (source_id,name,state,retry_seconds) VALUES ('test','test','stopped',0)\")); conn.commit(); conn.close()")
     run(env, "-m", "alembic", "upgrade", "head")
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "c3a610140001"
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "c3a610160001"
         tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {'gpt_decision_evidence_archives','gpt_density_observations','gpt_density_actions','gpt_density_action_entries'} <= tables
         assert 'decision_telemetry_pins' in tables
         assert 'gpt_ash_settlements' in tables
+        assert 'gpt_hourly_density_anchors' in tables
         assert db.execute("SELECT count(*) FROM gpt_coarse_model_revisions").fetchone()[0] == 0
         assert [r[1] for r in db.execute("PRAGMA table_info(hourly_brief_feedback)")] == ["id", "hour", "content", "created_at", "client_id"]
         assert [r[1] for r in db.execute("PRAGMA table_info(decision_cycle_samples)")] == ["slot", "sampled_at", "context_key", "fingerprint", "snapshot"]
@@ -74,22 +76,23 @@ def test_manual_assay_upgrade_preserves_old_rows_and_constraints(tmp_path, start
         run(env, '-c', 'from app.main import app')  # Idempotent startup before Alembic catches up.
     run(env, '-m', 'alembic', 'upgrade', 'head')
     with sqlite3.connect(path) as db:
-        assert db.execute('SELECT * FROM manual_measurements').fetchall() == [old]
+        assert db.execute(f'SELECT {MANUAL_COLUMNS} FROM manual_measurements').fetchall() == [old]
+        assert db.execute('SELECT time_basis FROM manual_measurements').fetchone()[0] == 'legacy-lag-2h'
         indexes = {row[1] for row in db.execute('PRAGMA index_list(manual_measurements)')}
         assert {'extra_manual_value','ix_manual_measurement_metric_id'} <= indexes
         new = (43,'coarse_slime_ash','粗精煤泥灰分',8.5,'%',old[5],old[6],'new-retry','new-hash')
-        db.execute('INSERT INTO manual_measurements VALUES (?,?,?,?,?,?,?,?,?)', new)
+        db.execute(f'INSERT INTO manual_measurements ({MANUAL_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?)', new)
         with pytest.raises(sqlite3.IntegrityError):
-            db.execute('INSERT INTO manual_measurements VALUES (?,?,?,?,?,?,?,?,?)', (44,*new[1:7],new[7],new[8]))
+            db.execute(f'INSERT INTO manual_measurements ({MANUAL_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?)', (44,*new[1:7],new[7],new[8]))
         with pytest.raises(sqlite3.IntegrityError):
             db.execute('UPDATE manual_measurements SET value=101 WHERE id=43')
-        assert db.execute('SELECT * FROM manual_measurements ORDER BY id').fetchall() == [old,new]
+        assert db.execute(f'SELECT {MANUAL_COLUMNS} FROM manual_measurements ORDER BY id').fetchall() == [old,new]
     # A downgrade must refuse to discard the newly archived assays.
     result = subprocess.run([sys.executable,'-X','utf8','-m','alembic','downgrade','c3a610120001'], cwd=BACKEND,
                             env=env, capture_output=True, text=True, encoding='utf-8')
     assert result.returncode != 0 and '已有粗精煤泥灰分记录' in result.stderr
     with sqlite3.connect(path) as db:
-        assert db.execute('SELECT * FROM manual_measurements ORDER BY id').fetchall() == [old,new]
+        assert db.execute(f'SELECT {MANUAL_COLUMNS} FROM manual_measurements ORDER BY id').fetchall() == [old,new]
         assert db.execute('SELECT version_num FROM alembic_version').fetchone()[0] == 'c3a610130001'
 
 

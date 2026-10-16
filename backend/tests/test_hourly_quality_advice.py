@@ -8,6 +8,7 @@ from sqlalchemy import delete, select
 from app.decision_hourly.models import DecisionCycleContext, DecisionCycleHour
 from app.decision_hourly.quality_advice import density_mean
 from app.gpt_density.execution import advise
+from app.gpt_density.hourly_anchor import capture
 from app.decision_hourly.service import context_definition, read_hour
 from app.decision_hourly.statistics import digest
 from app.services.decision_sources import shared_snapshot
@@ -27,6 +28,7 @@ def prepared(sessions, seeded, monkeypatch):
     with sessions.begin() as db:
         current = shared_snapshot(db)
         definition = context_definition(current, load_store(db))
+        capture(db, HOUR, current, definition)
         key = digest(definition)
         db.add(DecisionCycleContext(key=key, definition=definition))
         base = dict(policy='decision-hourly-v2', period=dict(start=iso_time(START), end=iso_time(HOUR),
@@ -66,7 +68,7 @@ def test_range_deadband_direction_and_cap(sessions, prepared, ash, expected):
     assert abs(g['deltaRho']) <= .03
 
 
-def test_prior_mean_not_last_reading_or_old_offset_and_is_read_only(sessions, prepared):
+def test_frozen_setpoint_not_last_actual_or_prior_mean_and_get_is_read_only(sessions, prepared):
     current, _, base, _ = prepared
     current['inputs']['density']['value'] = 1.53
     current['suggested_density'] = dict(value=None, reason='即时粗精预测缺数')
@@ -76,7 +78,9 @@ def test_prior_mean_not_last_reading_or_old_offset_and_is_read_only(sessions, pr
         assert r['suggested_density']['value'] == 1.46
         assert r['guidance']['rhoCur'] == pytest.approx(1.48)
         assert r['advice_inputs']['ash']['start'] == iso_time(ASH_START)
-        assert r['advice_inputs']['density']['start'] == iso_time(START)
+        assert r['advice_inputs']['density']['start'] == iso_time(HOUR)
+        assert r['advice_inputs']['density']['captured_at'] == iso_time(HOUR)
+        assert r['advice_inputs']['density']['basis_origin'] == 'hour-first-valid-md-set'
         assert r['advice_inputs']['ash']['provisional']
         assert r['cells']['total_ash']['value'] == 99  # Ordinary statistics keep their original hour.
         assert r['cells']['suggested_density'] == r['suggested_density']
@@ -101,7 +105,7 @@ def test_late_assay_revision_changes_advice_without_replaying_hour(sessions, pre
 
 
 @pytest.mark.parametrize('which,ratio,allowed', [('ash',.8,False),('ash',.801,True),('ash',.862,True),
-    ('density',.8,False),('density',577/720,True)])
+    ('density',0,True),('density',.8,True),('density',577/720,True)])
 def test_each_input_requires_more_than_80_percent(sessions, prepared, which, ratio, allowed):
     current, settlement, _, _ = prepared
     if which == 'ash':
@@ -369,8 +373,8 @@ def test_hourly_api_returns_new_policy_and_two_bases(sessions, prepared, client,
     monkeypatch.setattr('app.decision_hourly.service.utc_now',lambda:HOUR)
     r = client.get('/api/v1/decision/hourly')
     assert r.status_code == 200
-    assert r.json()['advice_policy'] == 'gpt-hourly-reference-v3'
-    assert r.json()['guidance']['policy'] == 'gpt-hourly-reference-v3'
+    assert r.json()['advice_policy'] == 'gpt-hourly-reference-v4'
+    assert r.json()['guidance']['policy'] == 'gpt-hourly-reference-v4'
     assert r.json()['execution_guidance']['policy'] == 'gpt-setpoint-execution-v2'
     assert r.json()['advice_inputs']['ash']['end'] == iso_time(START)
-    assert r.json()['advice_inputs']['density']['end'] == iso_time(HOUR)
+    assert r.json()['advice_inputs']['density']['end'] == iso_time(HOUR+timedelta(hours=1))

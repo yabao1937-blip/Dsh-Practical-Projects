@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from ..models import AutoState, CalcLog, CoalRecord, ManualMeasurement, Setting
+from ..models import AutoState, CalcLog, CoalRecord, Setting
 from ..services.resolvers import INSTRUMENT_DEFAULT, measurement_number, manual_valid
 from ..telemetry.derived import FOUR_SYSTEM_MEMBERS, DESLIMING_MEMBERS, FLOAT_PRESS_MEMBERS, DENSITY_AVERAGE_MEMBERS
 from ..telemetry.domain import availability, definition_id, iso_time, parse_time
@@ -155,13 +155,12 @@ class Inputs:
         """Latest manual measurement by observation time, gated by availability time."""
         candidates = []
         if metric:
-            row = self.db.scalar(select(ManualMeasurement).where(
-                ManualMeasurement.metric == metric, ManualMeasurement.observed_at <= self.cutoff,
-                ManualMeasurement.created_at <= self.cutoff
-            ).order_by(ManualMeasurement.observed_at.desc(), ManualMeasurement.id.desc()).limit(1))
+            from ..services.manual_measurements import latest_measurement, measurement_time
+            row = latest_measurement(self.db, metric, self.cutoff)
             if row:
-                candidates.append(cell(row.value, "手工补录", row.observed_at, "manual",
-                                       record_id=row.id, created_at=row.created_at, metric=metric))
+                candidates.append(cell(row.value, "手工补录", measurement_time(row), "manual",
+                    record_id=row.id, created_at=row.created_at, metric=metric,
+                    entered_observed_at=row.observed_at, time_basis=row.time_basis))
         for path in auto_paths:
             cfg = self.manual_auto
             for part in path:
@@ -208,6 +207,14 @@ class Inputs:
                     candidates.append(cell(value, "在线仪表补录", iso_time(business_time(row.ts)), "manual",
                                            record_id=row.id, created_at=iso_time(business_time(row.created_at))))
                     break
+        if metric == 'heavy_clean_coal_ash':
+            # Older instrument/manual-record paths still carry report time.
+            # Compare every candidate in production time, not only DB entries.
+            for candidate in candidates:
+                if not candidate.get('time_basis'):
+                    candidate['entered_observed_at'] = candidate['observed_at']
+                    candidate['observed_at'] = iso_time(business_time(candidate['observed_at'])-timedelta(hours=2))
+                    candidate['time_basis'] = 'legacy-lag-2h'
         return max(candidates, key=lambda c: (business_time(c["observed_at"]),
                    business_time(c["created_at"])), default=None)
 

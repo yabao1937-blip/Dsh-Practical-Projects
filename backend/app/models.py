@@ -100,6 +100,7 @@ class ManualMeasurement(Base):
     __table_args__ = (
         UniqueConstraint("client_id", name="uq_manual_measurements_client_id"),
         Index("ix_manual_measurement_metric_id", "metric", "id"),
+        Index("ix_manual_measurement_effective_latest", "metric", "time_basis", "observed_at", "id"),
         CheckConstraint("value >= 0", name="ck_manual_measurement_nonnegative"),
         CheckConstraint("metric IN ('heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_amount', 'coarse_slime_ash')", name="ck_manual_measurement_metric"),
         CheckConstraint("metric = 'coarse_slime_amount' OR value <= 100", name="ck_manual_measurement_percentage"),
@@ -111,6 +112,10 @@ class ManualMeasurement(Base):
     unit: Mapped[str] = mapped_column(String(16), nullable=False)
     observed_at: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Old heavy assays keep their original two-hour attribution. Only new API
+    # entries explicitly opt into production time; never rewrite raw timestamps.
+    time_basis: Mapped[str] = mapped_column(String(32), nullable=False,
+        default="legacy-lag-2h", server_default="legacy-lag-2h")
     client_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
 

@@ -97,9 +97,9 @@ def test_late_assay_updates_estimate_and_preserves_original_decisions(sessions):
         assert settled['item']['recalculated_count'] == 1
         settle_due_hours(db, NOW)
         # Even next-day late entry revises its assigned hour; no fixed cutoff.
-        assay(db, 10, observed=PUBLISH, created=NOW+timedelta(days=1))
+        assay(db, 10, observed=PUBLISH+timedelta(minutes=30), created=NOW+timedelta(days=1))
         revised = get_settlement(db, START, NOW+timedelta(days=1))
-        assert revised['item']['value'] == pytest.approx(9.65)
+        assert revised['item']['value'] == pytest.approx(10.5)
         assert db.get(DecisionCycleSample, original.slot).snapshot == original.snapshot
         assert db.get(DecisionCycleHour, iso_time(START)).snapshot['advice'] == 'unchanged'
         assert db.get(DecisionCycleHour, iso_time(START)).snapshot['total_ash']['value'] == 6.25
@@ -110,7 +110,7 @@ def test_late_assay_updates_estimate_and_preserves_original_decisions(sessions):
         assert list(db.connection().connection.driver_connection.iterdump()) == before
 
 
-def test_non_round_sampling_membership_availability_and_record_mean(sessions):
+def test_non_round_sampling_membership_availability_and_latest_record(sessions):
     with sessions.begin() as db:
         sample(db)
         a = assay(db, 8, observed=PUBLISH)
@@ -119,9 +119,9 @@ def test_non_round_sampling_membership_availability_and_record_mean(sessions):
         assay(db, 90, observed=PUBLISH+timedelta(hours=1))
         assay(db, 90, observed=NOW+timedelta(minutes=1), created=NOW)  # Future prefilled sample.
         result = build_settlement(db, START)
-        assert result['heavy_ash']['value'] == 9
-        assert [r['id'] for r in result['heavy_ash']['records']] == [a.id,b.id]
-        assert result['item']['value'] == pytest.approx(9.65)
+        assert result['heavy_ash']['value'] == 10
+        assert [r['id'] for r in result['heavy_ash']['records']] == [b.id]
+        assert result['item']['value'] == pytest.approx(10.5)
 
 
 def test_estimate_uses_latest_prior_sample_and_never_borrows_later_hour(sessions):
@@ -256,7 +256,7 @@ def test_concurrent_settlement_workers_update_same_hour_once(sessions):
     with sessions() as db:
         updated = db.get(DecisionAshSettlement, iso_time(START)).snapshot
         assert updated['revision'] != frozen['revision']
-        assert updated['heavy_ash']['value'] == 53.5
+        assert updated['heavy_ash']['value'] == 99
 
 
 def test_api_publishes_only_settled_hours_and_has_no_read_writes(client,sessions,monkeypatch):
@@ -287,7 +287,7 @@ def test_old_policy_cache_is_replaced_and_pending_source_data_is_not_frozen(sess
         settle_due_hours(db,NOW)
         result=get_settlement(db,START,NOW)
         assert result['item']['value']==pytest.approx(8.8) and result['item']['cached']
-        assert result['policy']=='gpt-ash-settlement-v3'
+        assert result['policy']=='gpt-ash-settlement-v4'
 
 
 def test_assay_entered_during_replay_cannot_commit_stale_estimate(sessions):

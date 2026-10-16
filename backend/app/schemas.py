@@ -169,6 +169,7 @@ class ManualMeasurementOut(BaseModel):
     unit: str
     observed_at: str
     created_at: str
+    time_basis: str
 
 
 class ManualMeasurementList(BaseModel):

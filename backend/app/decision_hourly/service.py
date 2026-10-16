@@ -28,7 +28,8 @@ def window(now):
 def compact_cell(c):
     result = {k:deepcopy(c[k]) for k in ('value','status','reason','source','unit','observed_at','created_at',
         'record_id','metric','input_path','item_id','source_id','point_key','raw_value','density_label','entered_at',
-        'retained_sample','raw_sample','key','alignment','derivation','definition_id') if k in c}
+        'retained_sample','raw_sample','key','alignment','derivation','definition_id',
+        'entered_observed_at','time_basis') if k in c}
     effective = c.get('effective_density') or {}
     if effective.get('raw_sample'):
         result['raw_sample'] = deepcopy(effective['raw_sample'])
@@ -86,6 +87,8 @@ def record(db, now, result=None, store=None):
         return False
     store = store if store is not None else load_store(db)
     context = context_definition(result,store)
+    from ..gpt_density.hourly_anchor import capture
+    capture(db, now, result, context)
     key = digest(context)
     if not db.get(DecisionCycleContext,key):
         db.add(DecisionCycleContext(key=key,definition=context))

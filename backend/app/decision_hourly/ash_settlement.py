@@ -16,6 +16,7 @@ from sqlalchemy import func, select, text
 from ..hourly_brief.inputs import LOCAL, business_time, numeric
 from ..models import ManualMeasurement
 from ..services.density import calc_total_ash
+from ..services.manual_measurements import measurement_time
 from ..telemetry.domain import iso_time, utc_now
 from .archive import archived_rows
 from .ash_history import read_ash_hours
@@ -25,8 +26,8 @@ from .references import resolve_snapshots
 from .statistics import CADENCE, valid
 from .production_coverage import stopped_intervals, fields as coverage_fields, overlap
 
-POLICY = 'gpt-ash-settlement-v3'
-# A sample at 10:00–10:59 describes 08:00–09:00. Publish that hour from 10:00.
+POLICY = 'gpt-ash-settlement-v4'
+# Publish 08:00–09:00 from 10:00; new assays already carry production time.
 DELAY = timedelta(hours=1)
 LEGACY = 'legacy-sample-mean'
 
@@ -56,24 +57,24 @@ def load_rows(db, start):
 
 
 def available_assays(db, now):
-    return list(db.scalars(select(ManualMeasurement).where(ManualMeasurement.metric == 'heavy_clean_coal_ash',
+    rows = db.scalars(select(ManualMeasurement).where(ManualMeasurement.metric == 'heavy_clean_coal_ash',
         ManualMeasurement.unit == '%', ManualMeasurement.value >= 0, ManualMeasurement.value <= 100,
         ManualMeasurement.created_at <= iso_time(now), ManualMeasurement.observed_at <= iso_time(now))
-        .order_by(ManualMeasurement.observed_at, ManualMeasurement.id)))
+        .order_by(ManualMeasurement.observed_at, ManualMeasurement.id))
+    return sorted(rows, key=lambda r:(measurement_time(r), r.id))
 
 
 def manual_basis(db, start, end, now=None, available=None):
     now = now or utc_now()
-    sample_start, sample_end = end+DELAY, end+DELAY+timedelta(hours=1)
     available = available_assays(db, now) if available is None else available
-    records = [r for r in available if iso_time(sample_start) <= r.observed_at < iso_time(sample_end)]
-    carried = not records
-    if carried:
-        # Latest known preceding assay, never borrow a later production hour's lab.
-        records = [r for r in available if r.observed_at < iso_time(sample_start)][-1:]
-    return dict(value=fsum(r.value for r in records)/len(records) if records else None,
-        carried=carried, records=[dict(id=r.id, observed_at=r.observed_at, created_at=r.created_at, value=float(r.value))
-                                 for r in records], sample_window=dict(start=iso_time(sample_start), end=iso_time(sample_end)))
+    # Latest effective sample in this hour, otherwise carry the latest earlier
+    # one. Later production hours can never leak backward into this settlement.
+    records = [r for r in available if measurement_time(r) < iso_time(end)][-1:]
+    carried = not records or measurement_time(records[0]) < iso_time(start)
+    return dict(value=float(records[0].value) if records else None,
+        carried=carried, records=[dict(id=r.id, observed_at=r.observed_at, created_at=r.created_at,
+            production_at=measurement_time(r), time_basis=r.time_basis, value=float(r.value)) for r in records],
+        sample_window=dict(start=iso_time(start), end=iso_time(end)))
 
 
 def source_revision(db, start):
@@ -228,11 +229,11 @@ def build_settlement(db, start, now=None, basis=None, source=None):
     item.update(settlement_policy=POLICY, publication_at=iso_time(end+DELAY),
                 deadline=iso_time(end+DELAY), manual_count=len(basis['records']),
                 manual_carried=basis['carried'], recalculated_count=replaced, provisional=provisional)
-    item['reason'] += '；重介采样按采样整点前两小时归属（10点采样对应8–9点）'
+    item['reason'] += '；重介按生产所属小时取最新化验，旧记录保留原两小时偏移归属'
     if provisional:
         item['reason'] += '；暂估：对应重介化验待补录，补录后更新'
     if replaced:
-        item['reason'] += f'；采用重介化验{basis["value"]:.2f}%（'+('沿用最近前序采样' if basis['carried'] else f'对应{len(basis["records"])}条均值')+'）'
+        item['reason'] += f'；采用重介化验{basis["value"]:.2f}%（'+('沿用最近前序采样' if basis['carried'] else '该小时最新采样')+'）'
     elif basis['records']:
         item['reason'] += '；本小时未应用晚补化验'
     if not rows and basis['value'] is not None:
@@ -254,7 +255,7 @@ def prepare_due_hours(db, now):
     # Visit a bounded slice of old hours, plus newly entered assays' own hours.
     # Never parse every saved contribution JSON on every five-second worker tick.
     offset = int(now.timestamp()/CADENCE) % len(backlog) if backlog else 0
-    recent = [iso_time(business_time(r.observed_at).replace(minute=0, second=0, microsecond=0)-timedelta(hours=2))
+    recent = [iso_time(business_time(measurement_time(r)).replace(minute=0, second=0, microsecond=0))
               for r in reversed(available) if r.created_at >= iso_time(now-timedelta(minutes=1))]
     rotated = (backlog[offset:]+backlog[:offset])[:2]
     starts = list(dict.fromkeys([current, *[key for key in recent if key <= current][:4], *rotated]))
@@ -351,7 +352,7 @@ def report(items, start, end, now, hourly):
         timezone='Asia/Shanghai', unit='%', publication_delay_seconds=int(DELAY.total_seconds()),
         generated_at=iso_time(now), latest_end=iso_time(latest_end(now)),
         period=dict(start=iso_time(start), end=iso_time(end)), items=items, summary=summary,
-        method='重介10点采样归属8–9点（非整点按采样小时归属）；对应化验未补录时沿用最近前序值暂估，补录后更新。其他组分保留原记录，按实际产煤量加权；缺失不补零。'+
+        method='重介按实际生产所属小时取最新化验，旧记录保留原两小时偏移归属；缺少时沿用最近前序值暂估，晚补后更新本小时及后续沿用小时。其他组分保留原记录，按实际产煤量加权；缺失不补零。'+
             ('含旧统计参考，旧值未纳入晚补化验。' if reference else ''))
 
 

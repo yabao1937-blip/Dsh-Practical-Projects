@@ -37,8 +37,10 @@ const ManualMeasurements = {
     updateUnit() {
         const definition = this.definitions.find(d => d.key === this.el('metric').value);
         this.el('unit').textContent = definition ? `（${definition.unit}）` : '';
-        this.el('purpose').hidden = !definition?.archive_only;
-        this.el('purpose').textContent = definition?.archive_only ? '仅保存记录，不参与实时计算。' : '';
+        const heavy=definition?.key==='heavy_clean_coal_ash';
+        this.el('purpose').hidden = !definition?.archive_only && !heavy;
+        this.el('purpose').textContent = definition?.archive_only ? '仅保存记录，不参与实时计算。' :
+            heavy ? '填写实际生产所属时间，不再减两小时；同一小时取最新采样，晚补后更新小时灰分及后续沿用值。' : '';
         if (definition?.maximum != null) this.el('value').max = definition.maximum;
         else this.el('value').removeAttribute('max');
     },

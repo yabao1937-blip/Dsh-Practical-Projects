@@ -1,4 +1,4 @@
-"""GPT hourly targets from revisable ash and authoritative prior-hour density.
+"""GPT hourly targets from revisable ash and the hour's frozen MD_SET.
 
 This read-time view never rewrites the original cycle/hour decisions. Ash and
 density intentionally describe different hours; both bases travel with the advice.
@@ -23,9 +23,10 @@ from .production_coverage import stopped_intervals, overlap, fields as coverage_
 from ..gpt_density.execution import advise, setpoints, empirical_target, EPSILON
 from ..gpt_density.execution import POLICY as EXECUTION_POLICY
 from ..gpt_density.hourly_reference import action_context
+from ..gpt_density.hourly_anchor import read as read_anchor
 from ..hourly_brief.inputs import Inputs
 
-POLICY = 'gpt-hourly-reference-v3'
+POLICY = 'gpt-hourly-reference-v4'
 
 
 def period(start, end):
@@ -107,8 +108,8 @@ def context_keys(db, start, end, snapshot=None):
     return keys
 
 
-def compatible_contexts(db, groups, current):
-    definitions = [current]
+def compatible_contexts(db, groups, current, extra=()):
+    definitions = [current, *extra]
     for keys in groups:
         if not keys:
             return False, '小时数据缺少来源与模型口径记录'
@@ -124,12 +125,12 @@ def compatible_contexts(db, groups, current):
     known = {}
     for definition in definitions:
         if {k:v for k,v in definition.items() if k not in ignored} != expected:
-            return False, '灰分小时、密度小时或当前的来源、模型或调密参数发生变化'
+            return False, '灰分小时、小时设定基准或当前的来源、模型或调密参数发生变化'
         # A temporarily missing input can omit its definition. Only conflicting
         # known definitions prove a real configuration change.
         for identity, value in definition.get('point_definitions', {}).items():
             if identity in known and known[identity] != value:
-                return False, '灰分小时、密度小时或当前的采集点定义发生变化'
+                return False, '灰分小时、小时设定基准或当前的采集点定义发生变化'
             known[identity] = value
     return True, ''
 
@@ -159,7 +160,6 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
     result['statistical_target'] = deepcopy(result['target'])
     result['target'] = deepcopy(current['target'])
     result['advice_sources'] = deepcopy(current['sources'])
-    start, end = business_time(result['period']['start']), business_time(result['period']['end'])
     ash_end = latest_end(now)
     ash_start = ash_end-timedelta(hours=1)
     settlement = get_settlement(db, ash_start, now)
@@ -168,18 +168,20 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
         ('value', 'coverage', 'valid_seconds', 'sample_count', 'provisional', 'aggregation', 'reason',
          'coverage_policy', 'stopped_seconds', 'expected_production_seconds', 'wall_coverage')},
         'revision':settlement['revision'], 'unit':'%'}
-    density = density_mean(db, start, end, result['sources'])
+    density = read_anchor(db, now)
     reasons = []
     blockers = []
-    for key, basis, title in [('ash', ash, '小时灰分'), ('density', density, '平均密度')]:
+    for key, basis, title in [('ash', ash, '小时灰分'), ('density', density, '小时设定基准')]:
         if not numeric(basis['value']):
             reasons.append(f'{title} {basis["label"]} 不可用：{basis["reason"]}')
             blockers.append(key)
-        elif (basis.get('coverage') or 0) <= MIN_COVERAGE:
+        elif key == 'ash' and (basis.get('coverage') or 0) <= MIN_COVERAGE:
             reasons.append(f'{title} {basis["label"]} 有效覆盖 {basis["coverage"]:.1%}，需超过 {MIN_COVERAGE:.0%}')
             blockers.append(key)
     ok, config_reason = compatible_contexts(db,
-        [context_keys(db, ash_start, ash_end), context_keys(db, start, end, result)], current_definition)
+        [context_keys(db, ash_start, ash_end)], current_definition,
+        [density['context']] if density['context'] else [])
+    density.pop('context')  # Internal consistency evidence is not a display cell.
     if not ok:
         reasons.append(config_reason)
         blockers.append('configuration')
@@ -190,7 +192,7 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
     delta = round(value-density['value'], 6) if value is not None else None
     risk = action_context(db, result['sources'], ash_end, now, ash.get('provisional'))
     basis_text = (f'小时灰分 {ash["label"]}'+('（暂估）' if ash.get('provisional') else '')+
-                  f'；工况平均密度 {density["label"]}')
+                  f'；本小时固定设定基准 {density["value"]}')
     reason = '；'.join(reasons) if reasons else '小时工况参考目标；'+basis_text+'；'+PROVISIONAL
     guide = dict(policy=POLICY, rhoCur=density['value'], rhoNew=value, deltaRho=delta,
         direction='unavailable' if delta is None else 'stable' if abs(delta) < EPSILON else 'down' if delta < 0 else 'up',
@@ -227,11 +229,10 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
     result.update(advice_policy=POLICY, advice_frozen=False, advice_inputs=dict(ash=ash, density=density),
         advice_blockers=blockers, guidance=guide, density_basis=density, execution_basis=basis, suggested_density=advice,
         execution_guidance=execution, execution_blockers=execution_blockers, repeat_correction=risk,
-        coverage=dict(policy=POLICY, ratio=min(ash.get('coverage') or 0, density['coverage']),
-            ash_ratio=ash.get('coverage') or 0, density_ratio=density['coverage'], required_ratio=MIN_COVERAGE,
+        coverage=dict(policy=POLICY, ratio=ash.get('coverage') or 0,
+            ash_ratio=ash.get('coverage') or 0, required_ratio=MIN_COVERAGE,
             required_ratio_exclusive=True, max_gap_seconds=None))
     result['cells']['suggested_density'] = advice
-    result['cells']['density'] = deepcopy(density)
     result['notes'] = [n for n in result.get('notes', []) if '单次执行' not in n]
-    result['notes'].append('小时工况目标采用最新发布灰分与上一完整小时实测均值；正式执行相对当前设定每路限 ±0.03。确认停产无产出的时段不计入生产覆盖分母，未知时段仍算缺口。')
+    result['notes'].append('小时工况目标采用最新发布灰分和本小时首次有效设定密度；补录与目标调整按同一基准重算。正式执行相对当前设定每路限 ±0.03。仅灰分要求生产有效覆盖严格超过80%。')
     return result

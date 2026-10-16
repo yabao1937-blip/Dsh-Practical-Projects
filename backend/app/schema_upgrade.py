@@ -62,6 +62,10 @@ def upgrade_schema(engine):
                 conn.exec_driver_sql('ALTER TABLE heavy_samples ADD COLUMN client_id VARCHAR(64)')
             conn.exec_driver_sql('CREATE UNIQUE INDEX IF NOT EXISTS uq_heavy_client_id ON heavy_samples(client_id)')
             update_manual_metric_constraint(conn)
+            cols = {r[1] for r in conn.exec_driver_sql('PRAGMA table_info(manual_measurements)')}
+            if 'time_basis' not in cols:
+                conn.exec_driver_sql("ALTER TABLE manual_measurements ADD COLUMN time_basis VARCHAR(32) NOT NULL DEFAULT 'legacy-lag-2h'")
+            conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS ix_manual_measurement_effective_latest ON manual_measurements(metric,time_basis,observed_at,id)')
             conn.commit()
         except Exception:
             conn.rollback()

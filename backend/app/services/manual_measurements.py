@@ -16,6 +16,31 @@ ENTRY_METRICS = {key: value for key, value in METRICS.items() if key != "coarse_
 POINT_METRICS = {key: value for key, value in METRICS.items() if not value.get("archive_only")}
 BEIJING = timezone(timedelta(hours=8))
 TIME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?$")
+LEGACY_TIME = 'legacy-lag-2h'
+PRODUCTION_TIME = 'production-time-v1'
+
+
+def measurement_time(record):
+    """Effective production time without altering the submitted audit record."""
+    stamp = datetime.fromisoformat(record.observed_at.replace('Z', '+00:00'))
+    if record.metric == 'heavy_clean_coal_ash' and record.time_basis == LEGACY_TIME:
+        stamp -= timedelta(hours=2)
+    return stamp.astimezone(timezone.utc).isoformat(timespec='milliseconds')
+
+
+def latest_measurement(db, metric, cutoff):
+    from sqlalchemy import select
+    from ..models import ManualMeasurement
+    query = select(ManualMeasurement).where(ManualMeasurement.metric == metric,
+        ManualMeasurement.observed_at <= cutoff, ManualMeasurement.created_at <= cutoff)
+    query = query.order_by(ManualMeasurement.observed_at.desc(), ManualMeasurement.id.desc()).limit(1)
+    if metric != 'heavy_clean_coal_ash':
+        return db.scalar(query)
+    # The offset is constant inside each policy. Two indexed candidates avoid
+    # scanning the permanent assay history and correctly interleave old/new data.
+    candidates = [db.scalar(query.where(ManualMeasurement.time_basis == policy))
+                  for policy in (LEGACY_TIME, PRODUCTION_TIME)]
+    return max((r for r in candidates if r), key=lambda r:(measurement_time(r), r.id), default=None)
 
 
 def timestamp_now():
@@ -50,9 +75,7 @@ def latest_points(db):
     now = timestamp_now()
     items = []
     for metric, definition in POINT_METRICS.items():
-        record = (db.query(ManualMeasurement)
-                  .filter(ManualMeasurement.metric == metric, ManualMeasurement.observed_at <= now)
-                  .order_by(ManualMeasurement.observed_at.desc(), ManualMeasurement.id.desc()).first())
+        record = latest_measurement(db, metric, now)
         valid = bool(record and record.value is not None and math.isfinite(record.value)
                      and record.value >= 0 and (definition["maximum"] is None or record.value <= definition["maximum"]))
         items.append({
@@ -62,7 +85,9 @@ def latest_points(db):
             "available": valid, "status": "good" if valid else "invalid_value" if record else "no_data",
             "sample": {"record_id": record.id if record else None,
                        "value": record.value if valid else None,
-                       "observed_at": record.observed_at if record else None,
+                       "observed_at": measurement_time(record) if record else None,
+                       "entered_observed_at": record.observed_at if record else None,
+                       "time_basis": record.time_basis if record else None,
                        "created_at": record.created_at if record else None},
         })
     return {"items": items, "checked_at": now}

@@ -41,6 +41,14 @@ class DecisionAshSettlement(Base):
     snapshot: Mapped[dict] = mapped_column(JSON)
 
 
+class GptHourlyDensityAnchor(Base):
+    """First valid MD_SET per application hour; independent of assay/target edits."""
+    __tablename__ = 'gpt_hourly_density_anchors'
+    start: Mapped[str] = mapped_column(String(32), primary_key=True)
+    captured_at: Mapped[str] = mapped_column(String(32))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+
+
 class DecisionTelemetryPin(Base):
     """Keep authoritative readings as long as hot OR compressed decisions cite them."""
     __tablename__ = 'decision_telemetry_pins'
