@@ -222,6 +222,7 @@ def test_old_frozen_value_survives_without_details_but_cannot_fill_minutes(sessi
         assert r['item']['recalculated_count'] == 0 and r['contributions'] == []
         assert '未纳入晚补化验' in r['item']['reason']
         assert '采用重介化验' not in r['item']['reason']
+        settle_due_hours(db, NOW)
         assert read_settled_hours(db, START, END, NOW)['summary']['value'] == 8.5
         assert read_settled_interval(db, START, START+timedelta(minutes=1), NOW)['summary']['value'] is None
 
@@ -249,8 +250,9 @@ def test_concurrent_settlement_workers_update_same_hour_once(sessions):
         list(workers.map(lambda _: settlement_tick(NOW, sessions), range(2)))
     with sessions.begin() as db:
         saved = list(db.scalars(select(DecisionAshSettlement)))
-        assert len(saved) == 1 and saved[0].snapshot['item']['value'] == pytest.approx(8.8)
-        frozen = deepcopy(saved[0].snapshot)
+        current = [r for r in saved if r.start == iso_time(START)]
+        assert len(current) == 1 and current[0].snapshot['item']['value'] == pytest.approx(8.8)
+        frozen = deepcopy(current[0].snapshot)
         assay(db, 99, created=NOW+timedelta(seconds=1))
     settlement_tick(NOW+timedelta(minutes=1), sessions)
     with sessions() as db:
@@ -265,6 +267,14 @@ def test_api_publishes_only_settled_hours_and_has_no_read_writes(client,sessions
         sample(db)
         assay(db)
     params=dict(start=iso_time(START),end=iso_time(END))
+    pending = client.get('/api/v1/decision/total-ash-hours',params=params)
+    assert pending.status_code == 200
+    assert pending.json()['pending']
+    assert pending.json()['items'][0]['status'] == 'pending'
+    assert pending.json()['summary']['value'] is None
+    with sessions() as db:
+        assert list(db.scalars(select(DecisionAshSettlement))) == []
+    settlement_tick(NOW, sessions)
     for route in ('total-ash-hours','total-ash-interval'):
         r=client.get('/api/v1/decision/'+route,params=params)
         assert r.status_code==200,r.text
@@ -273,7 +283,7 @@ def test_api_publishes_only_settled_hours_and_has_no_read_writes(client,sessions
         invalid=client.get('/api/v1/decision/'+route,params=dict(start=iso_time(END),end=iso_time(END+timedelta(hours=1))))
         assert invalid.status_code==422
     with sessions() as db:
-        assert list(db.scalars(select(DecisionAshSettlement)))==[]
+        assert db.get(DecisionAshSettlement,iso_time(START)).snapshot['item']['value'] == pytest.approx(8.8)
 
 
 def test_old_policy_cache_is_replaced_and_pending_source_data_is_not_frozen(sessions):

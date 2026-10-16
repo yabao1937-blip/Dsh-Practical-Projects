@@ -146,12 +146,14 @@ def test_previous_90_percent_gate_is_rechecked_without_removing_other_protection
 
 
 def test_new_policy_does_not_resurrect_old_offsets_without_its_two_inputs(sessions,seeded):
+    from app.decision_hourly.ash_settlement import settlement_tick
     with sessions.begin() as db:
         current=shared_snapshot(db)
         summary=legacy_hour()
         summary.update(sources=current['sources'],target=current['target'])
         summary['context_key']=digest(context_definition(current,load_store(db)))
         db.add(DecisionCycleHour(start=iso_time(START),end=iso_time(HOUR),generated_at=iso_time(HOUR),snapshot=summary))
+    settlement_tick(HOUR,sessions)
     with sessions() as db:
         response=read_hour(db,HOUR,live=current)
         assert response['suggested_density']['value'] is None
@@ -280,6 +282,7 @@ def test_actual_snapshot_timestamp_wins_over_pre_lock_clock(sessions,seeded):
 
 
 def test_definition_changes_invalidate_context_and_current_guard(sessions,seeded):
+    from app.decision_hourly.ash_settlement import settlement_tick
     with sessions.begin() as db:
         current=shared_snapshot(db)
         original=context_definition(current,load_store(db))
@@ -296,6 +299,7 @@ def test_definition_changes_invalidate_context_and_current_guard(sessions,seeded
         db.add(DecisionCycleHour(start=iso_time(START),end=iso_time(HOUR),generated_at=iso_time(HOUR),snapshot=summary))
         db.add(DecisionCycleHour(start=iso_time(START-timedelta(hours=1)),end=iso_time(START),
                                  generated_at=iso_time(START),snapshot=deepcopy(summary)))
+    settlement_tick(HOUR,sessions)
     with sessions() as db:
         assert read_hour(db,HOUR,live=current)['suggested_density']['value'] is None  # No new ash coverage.
         assert '变化' in read_hour(db,HOUR,live=changed)['suggested_density']['reason']

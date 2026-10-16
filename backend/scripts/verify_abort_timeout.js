@@ -22,12 +22,15 @@ const code = fs.readFileSync(path.join(__dirname, '../../frontend/js/api.js'), '
     assert.equal(requested.aborted, false);
     assert.equal(timers[0].delay, 5000);
     timers[0].callback();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(timers[1].delay, 2000, 'readiness cancellation must use a separate lightweight liveness probe');
+    timers[1].callback();
     await assert.rejects(pending, /request aborted/);
     assert.equal(requested.aborted, true);
     const another = legacySignal.timeout(15000);
     assert.equal(another.aborted, false, 'each request gets its own signal');
-    assert.equal(timers[1].delay, 15000);
-    timers[1].callback();
+    assert.equal(timers[2].delay, 15000);
+    timers[2].callback();
     assert.equal(another.aborted, true);
 
     const native = () => 'native';

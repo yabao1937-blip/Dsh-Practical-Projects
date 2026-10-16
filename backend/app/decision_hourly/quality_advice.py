@@ -162,8 +162,11 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
     result['advice_sources'] = deepcopy(current['sources'])
     ash_end = latest_end(now)
     ash_start = ash_end-timedelta(hours=1)
-    settlement = get_settlement(db, ash_start, now)
+    settlement = get_settlement(db, ash_start, now, defer_missing=True)
     item = settlement['item']
+    if item.get('pending'):
+        return dict(status='pending', advice_pending=True, advice_policy=POLICY,
+            checked_at=iso_time(now), period=deepcopy(result['period']), reason=item['reason'])
     ash = {**period(ash_start, ash_end), **{k:deepcopy(item.get(k)) for k in
         ('value', 'coverage', 'valid_seconds', 'sample_count', 'provisional', 'aggregation', 'reason',
          'coverage_policy', 'stopped_seconds', 'expected_production_seconds', 'wall_coverage')},

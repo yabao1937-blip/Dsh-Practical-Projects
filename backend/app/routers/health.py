@@ -17,7 +17,9 @@ REQUIRED_TABLES = {"coal_records", "settings", "auto_state", "telemetry_sources"
 
 
 @router.get("/health/live")
-def live():
+async def live():
+    # Keep liveness on the event loop: a backlog of synchronous database work
+    # must not queue this constant-time probe behind AnyIO worker threads.
     return {"status": "ok", "version": APP_VERSION, "uptime_seconds": round(time.monotonic() - started, 1)}
 
 

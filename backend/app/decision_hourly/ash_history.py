@@ -11,7 +11,8 @@ from .statistics import EXPECTED
 from .evidence import MASS
 
 
-def read_ash_hours(db, start: datetime | None = None, end: datetime | None = None, now=None):
+def hour_range(start: datetime | None = None, end: datetime | None = None, now=None):
+    """Validate an hourly range without reading stored statistical snapshots."""
     now = now or utc_now()
     latest_end = now.astimezone(LOCAL).replace(minute=0, second=0, microsecond=0)
     if (start is None) != (end is None):
@@ -33,6 +34,13 @@ def read_ash_hours(db, start: datetime | None = None, end: datetime | None = Non
         raise ValueError('单次最多查询 31 天，请缩短区间')
     if end > latest_end:
         raise ValueError('只显示已结束的完整小时，结束时间不能晚于当前整点')
+    return start, end
+
+
+def read_ash_hours(db, start: datetime | None = None, end: datetime | None = None, now=None):
+    now = now or utc_now()
+    latest_end = now.astimezone(LOCAL).replace(minute=0, second=0, microsecond=0)
+    start, end = hour_range(start, end, now)
 
     saved = {r.start: r for r in db.scalars(select(DecisionCycleHour).where(
         DecisionCycleHour.start >= iso_time(start), DecisionCycleHour.start < iso_time(end)))}

@@ -128,3 +128,28 @@ def test_backup_timeout_leaves_source_and_web_untouched(prepared,monkeypatch):
     assert not calls
     with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
         assert db.execute('SELECT * FROM evidence').fetchall() == [(1,)]
+
+
+def test_query_hotfix_cannot_skip_snapshot_for_storage_changes(prepared):
+    package,root,_,target,manifest,calls = prepared
+    manifest['profile'] = 'query-only-hotfix'
+    with pytest.raises(ValueError,match='cannot change schema'):
+        update.apply(package,root,manifest)
+    assert not calls and target.read_text() == 'old code'
+    assert not (root/'backups').exists()
+
+
+def test_allowlisted_query_hotfix_preserves_database_without_full_scan(prepared,monkeypatch):
+    package,root,source,target,manifest,calls = prepared
+    name = 'frontend/js/api.js'
+    source.rename(source.with_name('api.js'))
+    target.rename(target.with_name('api.js'))
+    manifest['files'] = {name:next(iter(manifest['files'].values()))}
+    manifest['profile'] = 'query-only-hotfix'
+    monkeypatch.setattr(update,'backup_database',lambda *a,**kw:pytest.fail('Query hotfix must not scan live data'))
+    backup = update.apply(package,root,manifest)
+    assert (root/name).read_text() == 'new code'
+    assert (backup/'source'/name).read_text() == 'old code'
+    assert not (backup/'dense_medium.db').exists()
+    with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
+        assert db.execute('SELECT * FROM evidence').fetchall() == [(1,)]

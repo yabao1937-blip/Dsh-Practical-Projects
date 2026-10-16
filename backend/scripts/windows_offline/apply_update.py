@@ -36,6 +36,14 @@ def safe_path(root,name):
 def verify(package,root,manifest):
     if not (root/'offline-install.json').is_file() or not (root/'Start.ps1').is_file():
         raise ValueError('Unrecognized installation; nothing was changed')
+    profile = manifest.get('profile')
+    if profile not in (None,'query-only-hotfix'):
+        raise ValueError('Unknown update profile')
+    if profile == 'query-only-hotfix' and not set(manifest['files']).issubset({
+            'backend/app/decision_hourly/ash_history.py','backend/app/decision_hourly/ash_settlement.py',
+            'backend/app/decision_hourly/quality_advice.py','backend/app/routers/health.py',
+            'frontend/js/api.js','frontend/js/operations.js'}):
+        raise ValueError('Query hotfix cannot change schema, model, storage or startup code')
     for name,info in manifest['files'].items():
         payload,target = safe_path(package/'payload',name),safe_path(root,name)
         if not payload.is_file() or digest(payload) != info['sha256']:
@@ -119,7 +127,12 @@ def apply(package,root,manifest,report=lambda stage,message:None):
     backup = root/'backups'/('source-update-'+datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
     backup.mkdir(parents=True)
     # Snapshot the live WAL database consistently; the collector can keep running.
-    backup_database(root,backup,report)
+    if manifest.get('profile') == 'query-only-hotfix':
+        # This allowlisted update cannot alter schema or model/data files.
+        # Keep the previously verified full host backup and save old source below.
+        report('copying','Query-only hotfix: saving source backup; production database and verified full backup are retained.')
+    else:
+        backup_database(root,backup,report)
     original = {}
     for name in manifest['files']:
         source = safe_path(root,name)
@@ -160,7 +173,9 @@ def apply(package,root,manifest,report=lambda stage,message:None):
         restart(root)
         raise
     (root/'source-update.json').write_text(json.dumps(dict(revision=manifest['revision'],
-        installed_at=datetime.now().astimezone().isoformat(),backup=str(backup)),indent=2),encoding='utf-8')
+        installed_at=datetime.now().astimezone().isoformat(),backup=str(backup),
+        profile=manifest.get('profile') or 'standard',
+        database_snapshot=manifest.get('profile') != 'query-only-hotfix'),indent=2),encoding='utf-8')
     return backup
 
 

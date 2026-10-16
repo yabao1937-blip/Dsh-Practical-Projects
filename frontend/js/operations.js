@@ -148,7 +148,8 @@ window.Operations = {
             const [health, telemetry] = results;
             if (health.status === 'fulfilled') {
                 this.health = health.value;
-                this.serverState = this.health.ok && this.health.status === 'ok' ? 'online' : 'unavailable';
+                this.serverState = this.health.status === 'busy' ? 'busy' :
+                    this.health.ok && this.health.status === 'ok' ? 'online' : 'unavailable';
             } else this.serverState = 'offline';
             this.telemetryFailed = telemetry.status !== 'fulfilled';
             if (!this.telemetryFailed) this.telemetry = telemetry.value;
@@ -200,7 +201,7 @@ window.Operations = {
     render() {
         this.renderReconnectControl();
         if (typeof App.renderAlerts === 'function') App.renderAlerts();
-        const serverNames = {checking:'检查中', online:'后端在线', offline:'后端离线', unavailable:'数据库未就绪', local:'单机模式'};
+        const serverNames = {checking:'检查中', online:'后端在线', busy:'后端繁忙', offline:'后端离线', unavailable:'数据库未就绪', local:'单机模式'};
         const server = serverNames[this.serverState];
         this.text('server-status-label', server);
         this.text('ops-server', server);
@@ -220,6 +221,7 @@ window.Operations = {
         const available = this.telemetryFailed ? 0 : items.filter(item => item.available).length;
         this.text('ops-points', available + ' / ' + items.length);
         this.text('ops-message', this.serverState === 'local' ? '通过服务器地址打开页面，即可查看实时采集状态。' :
+            this.serverState === 'busy' ? '后端仍可达，数据库健康查询暂未完成；采集状态独立核对。' :
             this.telemetryFailed ? '采集查询失败，保留最后读数供核对；当前读数不可用。' :
             sources.length ? '时间为本机接收时间，每 5 秒刷新；灰色值表示当前不可用，悬停可查看原因。' : '采集尚未启动。完成现场点表和连接配置后，这里将显示实时读数。');
         if (typeof DecisionOverviewPage !== 'undefined') DecisionOverviewPage.telemetryUpdated();

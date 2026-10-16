@@ -70,7 +70,7 @@ ctx.localStorage = {getItem(){return null;}, setItem(){throw Error('quota');}, r
     ops.telemetry = {sources:[{name:'KEP',state:'connected'}],items:[{name:'<img onerror=bad>',key:'density',source_id:'kep',unit:'g/cm³',available:true,status:'good',sample:{value:0,quality:'good'}}]};
     ops.render();
     assert.match(elements['telemetry-tbody'].innerHTML, /&lt;img/);
-    assert.match(elements['telemetry-tbody'].innerHTML, />0<\/td>/);
+    assert.match(elements['telemetry-tbody'].innerHTML, />0 g\/cm³<\/td>/);
     assert.match(elements['server-status-dot'].className, /online/);
     ops.telemetryFailed = true;
     ops.serverState = 'offline';
@@ -85,6 +85,7 @@ ctx.localStorage = {getItem(){return null;}, setItem(){throw Error('quota');}, r
     assert.equal(elements['status-sync'].textContent, '已同步', '服务器恢复成功后必须清掉旧的失败状态');
 
     ctx.document.visibilityState = 'hidden';
+    ctx.window.Api.getManualMeasurementPoints = async () => ({items:[]});
     let finishHealth, finishTelemetry, healthCalls = 0, telemetryCalls = 0;
     ctx.window.Api.getHealth = () => {healthCalls++; return new Promise(resolve => {finishHealth = resolve;});};
     ctx.window.Api.getTelemetry = () => {telemetryCalls++; return new Promise(resolve => {finishTelemetry = resolve;});};

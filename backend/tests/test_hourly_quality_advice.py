@@ -52,8 +52,9 @@ def prepared(sessions, seeded, monkeypatch):
     settlement = dict(revision='first', heavy_ash=dict(value=8, records=[]),
         item=dict(value=9.3, coverage=1., valid_seconds=3600, sample_count=720, provisional=True,
                   aggregation='output-mass-v1', reason='按原时段实际产煤量加权'))
-    def settled(db, start, now):
+    def settled(db, start, now, defer_missing=False):
         assert start == ASH_START
+        assert defer_missing
         return deepcopy(settlement)
     monkeypatch.setattr('app.decision_hourly.quality_advice.get_settlement', settled)
     return current, settlement, base, cfg
@@ -332,7 +333,7 @@ def test_bad_sample_truncates_coverage_and_placeholder_is_excluded(sessions, pre
 
 
 def test_real_settlement_and_manual_revision_feed_hour_advice(sessions, prepared, monkeypatch):
-    from app.decision_hourly.ash_settlement import get_settlement
+    from app.decision_hourly.ash_settlement import get_settlement, settlement_tick
     from app.decision_hourly.models import DecisionCycleSample
     from test_decision_evidence import row
     from test_ash_settlement import assay
@@ -353,6 +354,7 @@ def test_real_settlement_and_manual_revision_feed_hour_advice(sessions, prepared
                               sources=dict(resolved_choices={'heavy-ash':None}))
             db.add(DecisionCycleSample(slot=r.slot,sampled_at=stamp,fingerprint=str(i),
                 context_key=base['context_key'],snapshot=r.snapshot))
+    settlement_tick(HOUR, sessions)
     with sessions() as db:
         r=read_hour(db,HOUR,current)
         assert r['advice_inputs']['ash']['value']==pytest.approx(8.8)
@@ -360,6 +362,12 @@ def test_real_settlement_and_manual_revision_feed_hour_advice(sessions, prepared
         assert r['advice_inputs']['ash']['provisional']
     with sessions.begin() as db:
         assay(db,10,observed=HOUR,created=HOUR+timedelta(seconds=1))
+    with sessions() as db:
+        pending = read_hour(db,HOUR+timedelta(seconds=2),current)
+        assert pending['status'] == 'pending'
+        assert pending['advice_pending']
+        assert 'suggested_density' not in pending
+    settlement_tick(HOUR+timedelta(seconds=2), sessions)
     with sessions() as db:
         r=read_hour(db,HOUR+timedelta(seconds=2),current)
         assert r['advice_inputs']['ash']['value']==pytest.approx(10.5)

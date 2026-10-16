@@ -91,8 +91,24 @@ window.Api = {
     },
 
     async getHealth() {
-        const response = await fetch(this.base + '/health', {signal: AbortSignal.timeout(5000), cache: 'no-store'});
-        return {ok: response.ok, ...(await response.json())};
+        let response;
+        try {
+            response = await fetch(this.base + '/health', {signal: AbortSignal.timeout(5000), cache: 'no-store'});
+        } catch (_) {
+            // Readiness shares the database worker pool. A lightweight liveness
+            // probe distinguishes a busy process from an unreachable server.
+            const live = await fetch(this.base + '/health/live', {signal: AbortSignal.timeout(2000), cache: 'no-store'});
+            const value = await live.json().catch(() => null);
+            if (live.ok && value?.status === 'ok') {
+                return {ok:false, status:'busy', live:value,
+                    checks:{database:{status:'unknown',error_code:'readiness_unreachable'}}};
+            }
+            return {ok:false, status:'unavailable', live:value};
+        }
+        // A real 503 response is a completed readiness check, not a timeout.
+        // Preserve its database failure even if the process is otherwise alive.
+        const value = await response.json().catch(() => null);
+        return {...(value || {}), ok:response.ok, status:value?.status || 'unavailable'};
     },
 
     async getTelemetry() {

@@ -19,7 +19,7 @@ from ..services.density import calc_total_ash
 from ..services.manual_measurements import measurement_time
 from ..telemetry.domain import iso_time, utc_now
 from .archive import archived_rows
-from .ash_history import read_ash_hours
+from .ash_history import hour_range, read_ash_hours
 from .evidence import MASS, POLICY as EVIDENCE_POLICY, at, weights
 from .models import DecisionAshSettlement, DecisionCycleHour, DecisionCycleSample, DecisionEvidenceArchive
 from .references import resolve_snapshots
@@ -258,7 +258,10 @@ def prepare_due_hours(db, now):
     recent = [iso_time(business_time(measurement_time(r)).replace(minute=0, second=0, microsecond=0))
               for r in reversed(available) if r.created_at >= iso_time(now-timedelta(minutes=1))]
     rotated = (backlog[offset:]+backlog[:offset])[:2]
-    starts = list(dict.fromkeys([current, *[key for key in recent if key <= current][:4], *rotated]))
+    # A policy upgrade invalidates old revisions. Prepare the visible table first
+    # so browser polling never has to compete with the worker's historical replay.
+    visible = [iso_time(end-timedelta(hours=i)) for i in range(1, 11)]
+    starts = list(dict.fromkeys([*visible, *[key for key in recent if key <= current][:4], *rotated]))
     prepared = []
     for key in starts:
         start = business_time(key)
@@ -314,13 +317,23 @@ def settlement_tick(now, sessions):
         db.commit()
 
 
-def get_settlement(db, start, now):
+def get_settlement(db, start, now, defer_missing=False):
     if start+timedelta(hours=1)+DELAY > now:
         raise ValueError('该小时尚未到结束后一小时的采样归属时间')
     saved = db.get(DecisionAshSettlement, iso_time(start))
     basis = manual_basis(db, start, start+timedelta(hours=1), now)
     source = source_revision(db, start)
     cached = saved and saved.snapshot.get('revision') == revision(basis, source)
+    if not cached and defer_missing:
+        # GET polling must never replay the same 720 samples concurrently with
+        # background preparation. Incompatible old policy results are not values.
+        item = contribution_item([], start, start+timedelta(hours=1))
+        item.update(status='pending', pending=True, frozen=False, cached=False,
+            settlement_policy=POLICY, publication_at=iso_time(start+timedelta(hours=1)+DELAY),
+            deadline=iso_time(start+timedelta(hours=1)+DELAY), provisional=basis['carried'],
+            reason='小时灰分后台结算中，请稍候')
+        return dict(policy=POLICY, revision=revision(basis, source), item=item,
+            heavy_ash=basis, contributions=[], stopped_intervals=[], pending=True)
     result = deepcopy(saved.snapshot) if cached else build_settlement(db, start, now, basis, source)
     result['item'].update(frozen=False, cached=bool(cached))
     return result
@@ -352,16 +365,18 @@ def report(items, start, end, now, hourly):
         timezone='Asia/Shanghai', unit='%', publication_delay_seconds=int(DELAY.total_seconds()),
         generated_at=iso_time(now), latest_end=iso_time(latest_end(now)),
         period=dict(start=iso_time(start), end=iso_time(end)), items=items, summary=summary,
+        pending=any(i.get('pending', False) for i in items),
         method='重介按实际生产所属小时取最新化验，旧记录保留原两小时偏移归属；缺少时沿用最近前序值暂估，晚补后更新本小时及后续沿用小时。其他组分保留原记录，按实际产煤量加权；缺失不补零。'+
             ('含旧统计参考，旧值未纳入晚补化验。' if reference else ''))
 
 
-def read_settled_hours(db, start=None, end=None, now=None):
+def read_settled_hours(db, start=None, end=None, now=None, defer_missing=True):
     now = now or utc_now()
-    # Reuse existing range validation with a delayed clock, never alter the original snapshots.
-    original = read_ash_hours(db, start, end, now-DELAY)
-    start, end = (business_time(original['period'][key]) for key in ('start', 'end'))
-    items = [get_settlement(db, business_time(i['start']), now)['item'] for i in original['items']]
+    start, end = hour_range(start, end, now-DELAY)
+    items, cursor = [], start
+    while cursor < end:
+        items.append(get_settlement(db, cursor, now, defer_missing=defer_missing)['item'])
+        cursor += timedelta(hours=1)
     return report(items, start, end, now, True)
 
 

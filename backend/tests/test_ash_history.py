@@ -82,9 +82,13 @@ def test_api_rejects_invalid_ranges(client,monkeypatch,params):
 
 
 def test_api_is_read_only_and_returns_bounded_complete_range(client,sessions,monkeypatch):
+    from app.decision_hourly.ash_settlement import settlement_tick
     monkeypatch.setattr('app.decision_hourly.ash_settlement.utc_now',lambda:NOW+timedelta(hours=1))
     with sessions.begin() as db:
         save(db,START,8.5,720)
+    # Background preparation, including hours without original data, precedes polling.
+    for _ in range(2):
+        settlement_tick(NOW+timedelta(hours=1),sessions)
     r=client.get('/api/v1/decision/total-ash-hours',params={'start':iso_time(START),'end':iso_time(END)})
     assert r.status_code==200,r.text
     assert r.json()['summary']['value']==8.5
