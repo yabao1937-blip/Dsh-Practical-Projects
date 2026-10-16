@@ -15,6 +15,11 @@ import os
 import pathlib
 import sys
 
+from client_mode import client_url
+if _client_target := client_url():
+    print('Client mode: open '+_client_target+'; local database service is disabled.')
+    raise SystemExit(0)
+
 log_path = pathlib.Path(os.environ.get("DMCS_LOG")
                         or (pathlib.Path(os.environ.get("TEMP") or ".") / "dmcs_server.log"))
 log_path.parent.mkdir(parents=True, exist_ok=True)

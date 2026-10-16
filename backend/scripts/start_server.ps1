@@ -18,6 +18,19 @@ $workdir = Join-Path $repo 'backend'
 $log = Join-Path $env:TEMP 'dmcs_server.log'
 $port = 8000
 
+$taskClientConfig = Join-Path $repo 'backend\data\client-mode.json'
+if (Test-Path -LiteralPath $taskClientConfig) {
+    $taskClient = Get-Content -LiteralPath $taskClientConfig -Raw -Encoding UTF8 | ConvertFrom-Json
+    $taskClientUri = [Uri]$taskClient.server_url
+    if ($taskClient.mode -ne 'client' -or $taskClientUri.Scheme -notin @('http','https') -or
+            $taskClientUri.UserInfo -or $taskClientUri.Query -or $taskClientUri.Fragment -or $taskClientUri.AbsolutePath -ne '/') {
+        throw 'Invalid local client configuration. No local service was started.'
+    }
+    Write-Host ('Client mode: use host service ' + $taskClientUri.AbsoluteUri)
+    if (-not $NoBrowser) { Start-Process $taskClientUri.AbsoluteUri }
+    exit 0
+}
+
 function Get-LanUrls {
     $real, $virtual = @(), @()
     foreach ($ip in (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |

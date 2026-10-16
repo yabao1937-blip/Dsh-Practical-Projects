@@ -6,10 +6,12 @@ import sys
 BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
-from app.telemetry.control import CollectorStartError, ensure_collector_started
-
-
 def main():
+    from client_mode import client_url
+    if target := client_url():
+        print('Client mode: collection belongs to '+target)
+        return 0
+    from app.telemetry.control import CollectorStartError, ensure_collector_started
     parser = argparse.ArgumentParser(description="后台启动 KEPServer 只读采集")
     parser.add_argument("--config", type=Path, default=BACKEND / "config/kepserver.local.json")
     args = parser.parse_args()

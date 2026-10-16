@@ -7,10 +7,12 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from app.telemetry.config import load_config
-
-
 def main():
+    from client_mode import client_url
+    if target := client_url():
+        print('Client mode: collection belongs to '+target)
+        return 0
+    from app.telemetry.config import load_config
     parser = argparse.ArgumentParser(description="KEPServer OPC UA 只读采集；不会写入 PLC")
     parser.add_argument("--config", type=Path, default=Path(__file__).parent / "config/kepserver.local.json")
     parser.add_argument("--validate", action="store_true", help="只校验配置，不连接、不写数据库")

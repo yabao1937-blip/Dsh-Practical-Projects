@@ -63,3 +63,4 @@ backend/data/telemetry-runtime/
 backend/data/baseline-evidence-*/
 /outputs/
 /render/
+backend/data/client-mode.json

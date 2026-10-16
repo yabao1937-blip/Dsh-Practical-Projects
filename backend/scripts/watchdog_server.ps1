@@ -15,6 +15,10 @@ param([int]$IntervalSec = 60)
 
 $ErrorActionPreference = 'Continue'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+if (Test-Path -LiteralPath (Join-Path $repo 'backend\data\client-mode.json')) {
+    Write-Host 'Client mode: local watchdog is disabled.'
+    exit 0
+}
 $starter = Join-Path $PSScriptRoot 'start_server.ps1'
 $port = 8000
 $log = Join-Path $env:TEMP 'dmcs_watchdog.log'
