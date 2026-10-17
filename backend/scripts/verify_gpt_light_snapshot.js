@@ -105,6 +105,8 @@ assert.equal(snapshot.modelGroup.trainedAt,result.model.trained_at);
 assert.equal(snapshot.reader.ashMeasurementInfo('heavy').sampleAt,stamp);
 assert.equal(snapshot.reader.ashMeasurementInfo('heavy').enteredAt,entered);
 render(snapshot);
+assert.match(page.nodes.find(node=>node.id==='raw-ash').description,/不参与当前八因子预测/,
+    'EXPERT8 reference explanation uses runtime metadata without downloading the analysis model');
 page.selected='tail-level';page.renderInspector(true);
 assert.match(elements['decision-inspector'].innerHTML,/主机测试夹具/);
 assert.ok(elements['decision-inspector'].innerHTML.includes(page.time(stamp)),'inspector retains source observation time');

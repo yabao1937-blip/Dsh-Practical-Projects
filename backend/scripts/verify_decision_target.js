@@ -6,8 +6,9 @@ for(const file of ['decision-density-display.js','decision-realtime.js','decisio
 const [live,sources,hourly,editor]=vm.runInContext('[DecisionRealtime,DecisionSources,DecisionHourly,DecisionTarget]',ctx);
 const copy=x=>JSON.parse(JSON.stringify(x));
 let bindings=0;
-for(const id of ['open','form','min','max','fields','cancel','status']) elements['decision-target-'+id]={
+for(const id of ['open','form','min','max','fields','cancel','submit','status']) elements['decision-target-'+id]={
     value:'',hidden:true,disabled:false,textContent:'',setAttribute(){},focus(){},addEventListener(){bindings++;}};
+elements['decision-target-fields'].querySelectorAll=()=>['min','max','submit'].map(id=>elements['decision-target-'+id]);
 const page={liveMode:()=>true,view:'gpt',active:()=>true,hourMode:()=>false,pointChoices:{},
     renderGraph(){},renderContext(){},renderInspector(){}};
 ctx.window.location.protocol='http:';
@@ -66,5 +67,12 @@ hourly.update=()=>{};
     await hourly.update(page,true);
     assert.equal(sources.config.target_min,8.75);
     assert.equal(hourly.presentation().target.min,8.75);
+    ctx.Api.isReadOnlyTest=()=>true;ctx.Api.readOnlyMessage='只读主机数据';
+    await editor.open(page);
+    assert.equal(elements['decision-target-min'].disabled,true);
+    assert.equal(elements['decision-target-submit'].disabled,true);
+    assert.equal(elements['decision-target-cancel'].disabled,false,'read-only editor can always be closed');
+    const unchanged=patches;await editor.submit(page);assert.equal(patches,unchanged);
+    editor.close();assert.equal(editor.opened,false);
     console.log('Target editor: drafts, invalid input, conflicts, timeout confirmation, stale responses and cross-client sync passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -9,6 +9,8 @@ function fixture(readOnly, failState = false) {
         heavySamples:[{client_id:'old-unsent', synced:false}], _revision:'laptop'};
     const host = {coarseCoal:[{id:'host'}], floatCoal:[], calcLogs:[], heavySamples:[{client_id:'host-sample',synced:false}],
         rawSlime:[], manualEntries:[{id:'host-entry'}], _revision:'host'};
+    const bootstrap={schema_version:1,mode:'readonly-test',generated_at:'2026-10-17T04:00:00Z',
+        settings:{ashTarget:8.75,densityAutoOn:false},sources:{revision:7,resolved_choices:{}}};
     const pending = JSON.stringify({wall:1,stamp:'old-pending',body:JSON.stringify(oldStore)});
     const storage = new Map([['dmcs_store',JSON.stringify(oldStore)], ['dmcs_mirror_pending',pending], ['theme','dark']]);
     const writes = [], requests = [], timers = [], toasts = [], timeouts = [];
@@ -30,6 +32,10 @@ function fixture(readOnly, failState = false) {
             removeItem(key){writes.push(key);storage.delete(key);}},
         fetch:async(url,options={})=>{
             requests.push({url,options});
+            if (url.endsWith('/readonly-runtime/bootstrap')) {
+                if (failState) throw new Error('host unavailable');
+                return {ok:true,json:async()=>JSON.parse(JSON.stringify(bootstrap))};
+            }
             if (url.endsWith('/state') && (!options.method || options.method === 'GET')) {
                 if (failState) throw new Error('host unavailable');
                 return {ok:true,json:async()=>JSON.parse(JSON.stringify(host))};
@@ -43,7 +49,7 @@ function fixture(readOnly, failState = false) {
     App.showToast = (message,kind)=>toasts.push({message,kind});
     for (const name of ['_syncGuideSchemeBtn','_syncTotalAshBtn','bindNav','startClock','checkAlerts',
         'initPage','_onExternalInput','refreshAllPages']) App[name]=()=>{};
-    return {App,Api:ctx.window.Api,ops:ctx.window.Operations,ctx,host,storage,writes,requests,timers,toasts,timeouts,elements,events,pending};
+    return {App,Api:ctx.window.Api,ops:ctx.window.Operations,ctx,host,bootstrap,storage,writes,requests,timers,toasts,timeouts,elements,events,pending};
 }
 
 async function pollingFixture(readOnly, name) {
@@ -78,12 +84,13 @@ async function pollingFixture(readOnly, name) {
     readOnly.App._completeDensityDecisionResponses=readOnly.App.recomputeInfluenceValues=()=>historyChanges++;
     readOnly.ctx.window.DMCS_SEED_STORE={__merged:2,coarseCoal:[{id:'demo'}]};
     await readOnly.App.init();
-    assert.equal(readOnly.App.store.coarseCoal[0].id,'host','initial state comes from host even when old local store is populated');
-    assert.equal(readOnly.App.store.heavySamples.length,1,'never append local unsent samples to host state');
-    assert.equal(readOnly.App.store.manualEntries[0].id,'host-entry','host business data is authoritative');
+    assert.equal(readOnly.App.store.coarseCoal.length,0,'core startup does not load history, old laptop data or seed');
+    assert.equal(readOnly.App.store.heavySamples.length,0,'never append local unsent samples');
+    assert.equal(readOnly.App.store.manualEntries.length,0,'historical entries wait for an explicit view');
+    assert.equal(readOnly.App.store.ashTarget,8.75,'settings come from the host bootstrap');
     assert.equal(historyChanges,0,'read-only startup does not rewrite historical calculations');
     assert.equal(readOnly.requests.length,1,'initialization reads state once and sends no mirror/sample writes');
-    assert.equal(readOnly.requests[0].url,'/api/v1/state','local backend remains the API entrypoint');
+    assert.equal(readOnly.requests[0].url,'/api/v1/readonly-runtime/bootstrap','core startup never requests full state');
     assert.equal(readOnly.elements['main-content'].hidden,false,'host data success reveals business pages');
     assert.match(readOnly.elements['dmcs-readonly-status'].textContent,/主机数据只读：http:\/\/host\.invalid\//);
     readOnly.App.saveStore();
@@ -125,11 +132,51 @@ async function pollingFixture(readOnly, name) {
     assert.equal(offline.elements['main-content'].hidden,true,'failed host load hides legacy instrument defaults and business pages');
     assert.match(offline.elements['dmcs-readonly-status'].textContent,/主机数据读取失败.*刷新页面重试/);
     assert.equal(offline.writes.length,0);
-    offline.ctx.fetch=async()=>({ok:true,json:async()=>offline.host});
+    offline.ctx.fetch=async()=>({ok:true,json:async()=>offline.bootstrap});
     await offline.App.refreshReadOnlyState();
     assert.equal(offline.elements['main-content'].hidden,false,'successful retry restores business pages');
     assert.match(offline.elements['dmcs-readonly-status'].textContent,/主机数据只读：http:\/\/host\.invalid\//,
         'successful retry restores original test-server banner');
+
+    const history=fixture(true);
+    await history.App.init();
+    const reads=[history.App.ensureReadOnlyHistory(),history.App.ensureReadOnlyHistory(),history.App.ensureReadOnlyHistory()];
+    assert.equal(reads[0],reads[1],'explicit history reads share the same browser request');
+    await Promise.all(reads);
+    assert.equal(history.requests.filter(r=>r.url.endsWith('/state')).length,1);
+    assert.equal(history.App.store.coarseCoal[0].id,'host','legacy views receive the original complete host state');
+    assert.equal(history.App.store.heavySamples.length,1,'old laptop samples never merge into lazy history');
+    await history.App.ensureReadOnlyHistory();
+    assert.equal(history.requests.length,2,'already loaded history is not fetched again by navigation');
+    history.App._applyReadOnlyBootstrap(history.bootstrap);
+    assert.equal(history.App.store.coarseCoal[0].id,'host','a late bootstrap cannot erase already completed history');
+    assert.equal(history.App._readOnlyFullStateLoaded,true);
+    const configured=await history.Api.decisionSources();
+    assert.equal(configured.revision,7);
+    assert.equal(history.requests.at(-1).url,'/api/v1/readonly-runtime/bootstrap','configuration readers also avoid full startup');
+    history.ctx.fetch=async()=>{throw new Error('history refresh unavailable');};
+    assert.equal(await history.App.refreshReadOnlyState(),false);
+    assert.equal(history.elements['main-content'].hidden,false,'failed explicit history refresh does not hide a healthy core');
+    assert.equal(history.App.store.coarseCoal[0].id,'host');
+    assert.match(history.App._readOnlyRefreshError,/刷新失败/);
+    const race=fixture(true);await race.App.init();
+    let finishBootstrap,finishHistory;
+    race.ctx.fetch=url=>new Promise(resolve=>{
+        if(url.endsWith('/state'))finishHistory=()=>resolve({ok:true,json:async()=>race.host});
+        else finishBootstrap=()=>resolve({ok:true,json:async()=>race.bootstrap});
+    });
+    const lateBootstrap=race.App.refreshReadOnlyState(),fastHistory=race.App.ensureReadOnlyHistory();
+    finishHistory();await fastHistory;finishBootstrap();await lateBootstrap;
+    assert.equal(race.App.store.coarseCoal[0].id,'host','delayed bootstrap after full completion preserves all history');
+    const failedHistory=fixture(true);
+    await failedHistory.App.init();
+    failedHistory.ctx.fetch=async()=>{throw new Error('isolated unavailable');};
+    await assert.rejects(failedHistory.App.ensureReadOnlyHistory(),/isolated unavailable/);
+    assert.equal(failedHistory.elements['main-content'].hidden,false,'historical failure never hides working core');
+    assert.equal(failedHistory.App._readOnlyFullStateLoaded,undefined);
+    failedHistory.ctx.fetch=async()=>({ok:true,json:async()=>failedHistory.host});
+    await failedHistory.App.ensureReadOnlyHistory();
+    assert.equal(failedHistory.App._readOnlyFullStateLoaded,true,'historical failure can be retried');
 
     const production=fixture(false);
     assert.equal(production.Api.isReadOnlyTest(),false);

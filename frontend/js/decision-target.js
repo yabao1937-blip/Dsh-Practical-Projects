@@ -33,7 +33,11 @@ const DecisionTarget = {
             document.getElementById('decision-target-max').value=DecisionSources.config.target_max;
             document.getElementById('decision-target-form').hidden=false;
             document.getElementById('decision-target-open').setAttribute('aria-expanded','true');
-            this.opened=true; this.message('点击应用后，即时与小时建议采用新范围。');
+            const readOnly=!!Api.isReadOnlyTest?.();
+            const fields=document.getElementById('decision-target-fields');
+            fields.disabled=false;
+            fields.querySelectorAll('input,button[type="submit"]').forEach(control=>{control.disabled=readOnly;});
+            this.opened=true; this.message(readOnly ? Api.readOnlyMessage : '点击应用后，即时与小时建议采用新范围。');
             document.getElementById('decision-target-min').focus();
         } catch(error) { App.showToast('目标范围读取失败：'+error.message,'error'); }
         finally {this.busy=false;}
@@ -47,6 +51,7 @@ const DecisionTarget = {
     },
     async submit(page) {
         if(this.busy) return;
+        if(Api.isReadOnlyTest?.()) {this.message(Api.readOnlyMessage);return;}
         const low=document.getElementById('decision-target-min').value.trim();
         const high=document.getElementById('decision-target-max').value.trim();
         const min=Number(low),max=Number(high);

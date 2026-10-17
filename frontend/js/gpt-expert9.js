@@ -17,6 +17,7 @@ const GptExpert9 = {
         return 30.5-.3*Math.min(75,Math.max(25,v[last]))+model.correction_limit*Math.tanh(terms.reduce((a,b)=>a+b,0)/model.correction_limit);
     },
     async load(force=false) {
+        if (window.Api?.isReadOnlyTest?.() && !window.CoreWorkspace?.needsAnalysis?.()) return;
         if(this.pending || (!force && Date.now()-this.lastAttempt<30000) || !location.protocol.startsWith('http')) return this.pending;
         this.lastAttempt=Date.now();
         this.pending=(async()=>{

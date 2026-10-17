@@ -24,7 +24,7 @@ const DecisionSources = {
         this.legacyChoices ||= {...page.pointChoices};
         this.loading=(async()=>{
             let config=await Api.decisionSources();
-            if (!config.revision) {
+            if (!config.revision && !Api.isReadOnlyTest?.()) {
                 const choices=Object.fromEntries(Object.entries(this.legacyChoices).filter(([node,value])=>
                     node in this.nodes && !['density-current','coarse-amount'].includes(node)));
                 try { config=await Api.decisionSources({revision:0,choices}); }

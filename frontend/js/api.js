@@ -179,6 +179,11 @@ window.Api = {
 
     async decisionSources(body) {
         if (body) this.requireWritable();
+        if (!body && this.isReadOnlyTest()) {
+            const result = (await this.getReadOnlyBootstrap()).sources;
+            if (!Number.isInteger(result?.revision) || !result.resolved_choices) throw new Error('共享来源配置响应异常');
+            return result;
+        }
         const headers = {};
         if (body) {
             headers['Content-Type'] = 'application/json';
@@ -261,6 +266,16 @@ window.Api = {
             throw new Error(message);
         }
         if (!value.ok || !value.source_id || !value.requested_at) throw new Error('采集启动响应格式异常');
+        return value;
+    },
+
+    async getReadOnlyBootstrap() {
+        if (!this.isReadOnlyTest()) throw new Error('轻量启动接口仅用于只读测试服');
+        const response = await fetch(this.base + '/readonly-runtime/bootstrap', {
+            signal: AbortSignal.timeout(20000), cache: 'no-store',
+        });
+        const value = await response.json();
+        if (!response.ok) throw new Error(value.detail?.message || '主机启动设置暂不可用');
         return value;
     },
 

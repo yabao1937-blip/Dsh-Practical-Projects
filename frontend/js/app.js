@@ -77,6 +77,8 @@ const App = {
     // 初始化
     async init() {
         this._syncReady = false;
+        if (typeof CoreWorkspace !== 'undefined') CoreWorkspace.install();
+        this.bindNav();
         if (this.isReadOnlyTest()) {
             this._readOnlyDefaults = JSON.parse(JSON.stringify(this.store));
             this._hadLocalStore = false;
@@ -163,7 +165,7 @@ const App = {
             };
             this.saveStore(true);
         }
-        this.bindNav();        this.startClock();
+        this.startClock();
 
         // 「从服务器恢复数据」按钮:仅后端托管(http://)模式显示
         const pullBtn = document.getElementById('btn-pull-server');
@@ -198,10 +200,13 @@ const App = {
         // 存量 influence_value 一次性重算（旧口径写死 8.50 → 当前口径），__fixes.influence 标记只跑一次
         if (!this.isReadOnlyTest()) this.recomputeInfluenceValues();
 
-        this.checkAlerts();
+        if (this.isReadOnlyTest()) this.renderAlerts();
+        else this.checkAlerts();
         // 只初始化首页（当前可见页）
-        this.initPage('page-overview');
-        if (window.location.hash === '#decision') this.goToPage('page-decision');
+        const initialPage = this._pendingPage || (window.location.hash === '#decision' || this.isReadOnlyTest()
+            ? 'page-decision' : 'page-overview');
+        this._pendingPage = null;
+        this.goToPage(initialPage);
     },
 
     isReadOnlyTest() {
@@ -215,23 +220,68 @@ const App = {
         this.store = Object.assign(JSON.parse(JSON.stringify(defaults)), st);
         this._serverStateConfirmed = true;
         this._readOnlyLoadError = null;
+        this._readOnlyRefreshError = null;
         this.mirrorStatus.pending = false;
         this.mirrorStatus.lastError = null;
         this.mirrorStatus.lastOkAt = Date.now();
+        this._readOnlyFullStateLoaded = true;
+        return true;
+    },
+
+    _applyReadOnlyBootstrap(data) {
+        if (data?.schema_version !== 1 || data.mode !== 'readonly-test' ||
+            !data.settings || typeof data.settings !== 'object' || Array.isArray(data.settings) ||
+            !data.sources?.resolved_choices || !Number.isFinite(Date.parse(data.generated_at)))
+            throw new Error('主机启动设置返回异常');
+        const keys = ['ashTarget','ashTargetTol','guideScheme','totalAshManualOn','heavyAshManualOn',
+            'densityGuide','densityAutoOn','coarseTolerance','coarseTrainRange'];
+        const settings = Object.fromEntries(keys.filter(key => Object.hasOwn(data.settings, key))
+            .map(key => [key, data.settings[key]]));
+        // A bootstrap started before an explicit full read must not erase its
+        // newer completed history or DS model when the bootstrap arrives last.
+        if (!this._readOnlyFullStateLoaded)
+            this.store = Object.assign(JSON.parse(JSON.stringify(this._readOnlyDefaults || this.store)), settings);
+        this._readOnlyBootstrap = data;
+        this._serverStateConfirmed = true;
+        this._readOnlyLoadError = null;
+        this._readOnlyRefreshError = null;
+        this.mirrorStatus.pending = false;
+        this.mirrorStatus.lastError = null;
+        this.mirrorStatus.lastOkAt = Date.now();
+        if (typeof DecisionSources !== 'undefined') DecisionSources.apply(DecisionOverviewPage, data.sources);
         return true;
     },
 
     async refreshReadOnlyState() {
         try {
-            const applied = this._applyReadOnlyState(await window.Api.getState());
+            const applied = this._readOnlyFullStateLoaded
+                ? this._applyReadOnlyState(await window.Api.getState())
+                : this._applyReadOnlyBootstrap(await window.Api.getReadOnlyBootstrap());
             this._renderReadOnlyStatus();
             return applied;
         } catch (error) {
+            if (this._readOnlyBootstrap) {
+                this._readOnlyRefreshError = '主机数据刷新失败：' + (error.message || '服务不可达');
+                this.showToast(this._readOnlyRefreshError + '；保留已读取的历史，实时决策仍独立刷新。', 'error');
+                return false;
+            }
             this._readOnlyLoadError = '主机数据读取失败：' + (error.message || '服务不可达');
             this._renderReadOnlyStatus();
             this.showToast(this._readOnlyLoadError + '；未加载笔记本历史库或演示数据。', 'error');
             return false;
         }
+    },
+
+    ensureReadOnlyHistory() {
+        if (!this.isReadOnlyTest() || this._readOnlyFullStateLoaded) return Promise.resolve(true);
+        if (this._readOnlyHistoryLoading) return this._readOnlyHistoryLoading;
+        this._readOnlyHistoryLoading = (async () => {
+            // An explicit historical view can fail without hiding the core workspace.
+            const value = await window.Api.getState();
+            this._applyReadOnlyState(value);
+            return true;
+        })().finally(() => { this._readOnlyHistoryLoading = null; });
+        return this._readOnlyHistoryLoading;
     },
 
     _renderReadOnlyStatus() {
@@ -887,6 +937,7 @@ const App = {
         if (typeof DecisionOverviewPage !== 'undefined' && DecisionOverviewPage.initialized) {
             DecisionOverviewPage.refresh();
         }
+        if (this.isReadOnlyTest() && !this._readOnlyFullStateLoaded) return;
         if (typeof OverviewPage !== 'undefined' && OverviewPage.chart) {
             OverviewPage.refresh();
         }
@@ -917,6 +968,8 @@ const App = {
 
     // 导航切换
     bindNav() {
+        if (this._navBound) return;
+        this._navBound = true;
         document.querySelectorAll('.nav-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -930,12 +983,23 @@ const App = {
         const item = document.querySelector(`.nav-item[data-page="${pageId}"]`);
         const sec = pageId ? document.getElementById(pageId) : null;
         if (!item || !sec) return;
+        const navigation = this._navigation = (this._navigation || 0) + 1;
+        if (this._syncReady === false) { this._pendingPage = pageId; return; }
+        if (this.isReadOnlyTest() && !['page-decision','page-maintenance'].includes(pageId) && !this._readOnlyFullStateLoaded) {
+            this.showToast('正在按需读取主机历史数据…', 'info');
+            return this.ensureReadOnlyHistory().then(() => {
+                if (navigation === this._navigation) this.goToPage(pageId);
+            }).catch(error => {
+                if (navigation === this._navigation) this.showToast('历史数据读取失败：' + error.message + '；核心页面仍可使用。', 'error');
+            });
+        }
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
         item.classList.add('active');
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
         sec.classList.add('active');
+        if (typeof CoreWorkspace !== 'undefined') CoreWorkspace.pageChanged(pageId);
         // 延迟初始化或刷新图表
-        setTimeout(() => this.initPage(pageId), 50);
+        setTimeout(() => { if (sec.classList.contains('active')) this.initPage(pageId); }, 50);
     },
 
     // 按需初始化页面
@@ -1088,6 +1152,7 @@ const App = {
 
     // 检查告警（从实际 store 数据动态计算）
     checkAlerts() {
+        if (this.isReadOnlyTest() && !this._readOnlyFullStateLoaded) { this.renderAlerts(); return; }
         this.store.alerts = [];
         const target = 8.50;
         const threshold = 0.15;

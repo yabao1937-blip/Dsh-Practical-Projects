@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="css/decision-evidence.css?v=1">
     <link rel="stylesheet" href="css/manual-measurements.css?v=2">
     <link rel="stylesheet" href="css/gpt-expert9.css?v=1">
+    <link rel="stylesheet" href="css/core-workspace.css?v=1">
     <!-- 无外部依赖，图表使用纯Canvas 2D绘制 -->
     <script src="js/xlsx-lite.js?v=8"></script>
     <script src="js/chart-lite.js?v=7"></script>
@@ -50,6 +51,7 @@
                 <a href="#" class="nav-item" data-page="page-history">
                     <span class="nav-icon">&#9744;</span>历史数据查询
                 </a>
+                <a href="#" class="nav-item" data-page="page-maintenance" id="maintenance-nav" hidden>系统维护</a>
             </nav>
         </div>
         <div class="top-bar-right">
@@ -79,6 +81,18 @@
 
     <!-- 主内容区 -->
     <main class="main-content">
+
+        <section class="page" id="page-maintenance" hidden aria-labelledby="maintenance-title">
+            <div class="page-header"><div><h2 id="maintenance-title">系统维护</h2><p>采集配置、模型与历史工具</p></div><div id="maintenance-refresh"></div></div>
+            <p class="maintenance-note">测试服使用笔记本代码，只读主机数据。补录、配置和模型保存请在主机生产页面操作。</p>
+            <div class="maintenance-actions">
+                <button type="button" class="btn" id="maintenance-sources">查看决策点位配置</button>
+                <button type="button" class="btn" id="maintenance-backup">业务数据备份与恢复</button>
+                <button type="button" class="btn" id="maintenance-diagnostics">刷新运行诊断</button>
+            </div>
+            <nav class="maintenance-pages" id="maintenance-pages" aria-label="维护工具"></nav>
+            <section class="panel maintenance-diagnostics"><div class="panel-header"><h3>运行诊断</h3></div><div class="panel-body"><dl id="maintenance-status"></dl><p class="measurement-help">此处复用运行状态快照；完整数据库备份和故障日志仍使用主机维护脚本。</p></div></section>
+        </section>
 
         <section class="page" id="page-decision" aria-labelledby="decision-title">
             <div class="decision-foreground">
@@ -382,53 +396,7 @@
             </div>
 
             <div class="panel" id="manual-measurements-panel">
-                <div class="panel-header">
-                    <h3>业务指标补录</h3>
-                    <button type="button" class="btn btn-sm" id="measurement-refresh">刷新补录记录</button>
-                </div>
-                <div class="panel-body">
-                    <form id="measurement-form">
-                        <fieldset id="measurement-fields" class="measurement-fields">
-                            <div class="form-group">
-                                <label for="measurement-time">时间（北京时间，可留空）</label>
-                                <input type="datetime-local" id="measurement-time" step="1">
-                                <p class="measurement-help">留空时使用提交时的服务器当前时间。</p>
-                            </div>
-                            <div class="form-group">
-                                <label for="measurement-metric">补录信息名</label>
-                                <select id="measurement-metric" required><option value="">正在加载补录信息…</option></select>
-                                <p id="measurement-purpose" class="measurement-help" hidden></p>
-                            </div>
-                            <div class="form-group">
-                                <label for="measurement-value">值 <span id="measurement-unit"></span></label>
-                                <input type="number" id="measurement-value" min="0" step="any" required placeholder="请输入数值">
-                            </div>
-                        </fieldset>
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-primary" id="measurement-submit" disabled>保存补录</button>
-                            <button type="button" class="btn" id="measurement-reset">重置</button>
-                        </div>
-                        <p id="measurement-message" class="measurement-message" role="status" aria-live="polite"></p>
-                    </form>
-                    <div class="measurement-history-heading">
-                        <h4>业务指标补录记录</h4>
-                        <label>信息名 <select id="measurement-filter"><option value="">全部信息</option></select></label>
-                    </div>
-                    <p class="measurement-help">按录入顺序显示，最新补录在前。</p>
-                    <div class="table-scroll measurement-history-scroll">
-                        <table class="data-table">
-                            <thead><tr><th>时间（北京时间）</th><th>补录信息名</th><th>值</th><th>单位</th><th>录入时间</th></tr></thead>
-                            <tbody id="measurement-history"><tr><td colspan="5">尚未加载补录记录</td></tr></tbody>
-                        </table>
-                    </div>
-                    <div class="measurement-pagination">
-                        <span id="measurement-count" aria-live="polite"></span>
-                        <div>
-                            <button type="button" class="btn btn-sm" id="measurement-prev" disabled>上一页</button>
-                            <button type="button" class="btn btn-sm" id="measurement-next" disabled>下一页</button>
-                        </div>
-                    </div>
-                </div>
+                <!-- Mounted by ManualMeasurementComponent; shared with the independent decision dialog. -->
             </div>
 
             <!-- 上半部分：自动采集健康状态 -->
@@ -1032,6 +1000,7 @@
     <script src="js/brief-feedback.js?v=1"></script>
     <script src="js/history.js?v=2"></script>
     <script src="js/operations.js?v=3"></script>
+    <script src="js/core-workspace.js?v=1"></script>
     <!-- AI 解读助手：按现场要求（2026-09-18）移除界面入口，右下角不再出现悬浮「AI」按钮与聊天面板。
          前端 js/assistant.js、style.css 的 .ai-* 样式与后端 /api/v1/assistant/ask 都保留未动，
          以后要恢复只需把下面两行加回来：

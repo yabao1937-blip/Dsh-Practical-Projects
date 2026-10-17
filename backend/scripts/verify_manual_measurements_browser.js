@@ -1,7 +1,7 @@
 // Isolated backend/database and fresh browsers. Only the new manual POST is allowed.
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), net = require('node:net');
-const {spawn} = require('node:child_process');
+const {spawn,spawnSync} = require('node:child_process');
 const {chromium} = require(process.env.DMCS_PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname,'../..'), backend = path.join(root,'backend');
 const output = path.join(root,'docs/verification/manual-measurements-20261007');
@@ -18,8 +18,11 @@ async function freePort() {
     fs.mkdirSync(output,{recursive:true});
     const database = path.join(output,'browser-test-'+Date.now()+'.db');
     const port = await freePort(), base = 'http://127.0.0.1:'+port;
+    const isolatedEnv={...process.env,DMCS_DATABASE_URL:'sqlite:///'+database.replaceAll('\\','/'),
+        DMCS_ISOLATED_TEST_DB:'1',DMCS_WRITE_AUTH:'off'};
+    delete isolatedEnv.DMCS_REMOTE_READONLY_CONFIG;
     const server = spawn(path.join(backend,'.venv/Scripts/python.exe'), ['-m','uvicorn','app.main:app','--host','127.0.0.1','--port',String(port)], {
-        cwd:backend, windowsHide:true, env:{...process.env,DMCS_DATABASE_URL:'sqlite:///'+database.replaceAll('\\','/'),DMCS_WRITE_AUTH:'off'},
+        cwd:backend, windowsHide:true, env:isolatedEnv,
         stdio:['ignore','ignore','pipe'],
     });
     let stderr = '', browser;
@@ -72,7 +75,7 @@ async function freePort() {
         let records=await (await fetch(base+'/api/v1/manual-measurements')).json();
         assert.equal(records.total,1);assert.equal(records.items[0].value,8.63);
         assert.equal(records.items[0].observed_at,records.items[0].created_at);
-        await submit('coarse_slime_amount',40,'2026-10-07T09:12');
+        await submit('coarse_slime_ash',16.2,'2026-10-07T09:12');
         records=await (await fetch(base+'/api/v1/manual-measurements')).json();
         assert.equal(records.items[0].observed_at,'2026-10-07T01:12:00.000+00:00');
         await submit('raw_coal_slime_content',7.25);
@@ -118,7 +121,7 @@ async function freePort() {
         await submit('raw_coal_slime_content',0);
         assert.equal(await a.page.evaluate(()=>JSON.stringify(App.store)),storeBefore,'The manual form must not change business model inputs');
         await a.page.locator('#manual-measurements-panel').screenshot({path:path.join(output,'manual-form-desktop.png')});
-        await a.page.locator('#measurement-filter').selectOption('coarse_slime_amount');
+        await a.page.locator('#measurement-filter').selectOption('coarse_slime_ash');
         await a.page.waitForFunction(()=>ManualMeasurements.total===1);
         assert.match(await a.page.locator('#measurement-history').innerText(),/09:12:00/);
         await a.page.setViewportSize({width:390,height:1000});
@@ -130,16 +133,34 @@ async function freePort() {
         assert.ok(bounds.mainScroll<=bounds.mainWidth+1,'The collection page must fit a narrow screen');
         assert.ok(bounds.panelScroll<=bounds.panelWidth+1,'The new panel must contain horizontal table scrolling');
         await a.page.locator('#manual-measurements-panel').screenshot({path:path.join(output,'manual-form-mobile.png')});
+        await a.page.setViewportSize({width:1500,height:1100});
+        await a.page.locator('[data-page="page-decision"]').click();
+        await a.page.locator('#decision-manual-open').click();
+        assert.equal(await a.page.locator('#manual-measurements-panel').evaluate(node=>node.closest('.page').id),'page-collect');
+        await a.page.locator('#decision-measurement-metric').selectOption('heavy_clean_coal_ash');
+        await a.page.locator('#decision-measurement-value').fill('8.66');
+        await a.page.locator('#decision-measurement-time').fill('2026-10-17T08:47');
+        await a.page.locator('#decision-manual-dialog header button').click();
+        await a.page.locator('#decision-manual-open').click();
+        assert.equal(await a.page.locator('#decision-measurement-value').inputValue(),'8.66');
+        await a.page.locator('#decision-measurement-submit').click();
+        await a.page.waitForFunction(()=>!ManualMeasurements.busy && document.getElementById('decision-measurement-message').dataset.status==='success');
+        records=await (await fetch(base+'/api/v1/manual-measurements')).json();
+        assert.equal(records.total,7);assert.equal(records.items[0].value,8.66);
+        assert.equal(records.items[0].observed_at,'2026-10-17T00:47:00.000+00:00','actual production time is saved without a two-hour shift');
         assert.deepEqual(errors,[]);
-        const result={passed:true,database,rows:6,metrics:3,defaultServerTime:true,beijingTimeRoundtrip:true,
+        const result={passed:true,database,rows:7,metrics:3,defaultServerTime:true,beijingTimeRoundtrip:true,
             sharedAcrossBrowsersAndReload:true,concurrentMetadataSingleRequest:true,lanRequestIdFallback:true,
             lostResponseRetryNoDuplicate:true,malformedResponsePreservesInputs:true,zeroValuePreserved:true,
+            independentDialogSave:true,actualProductionTime:true,
             modelStoreUnchanged:true,mobileOverflow:false,pageErrors:errors,blockedOtherWritePaths:[...new Set(blocked)]};
         fs.writeFileSync(path.join(output,'browser-result.json'),JSON.stringify(result,null,2)+'\n');
         console.log(JSON.stringify(result));
     } finally {
         if(browser) await browser.close();
-        server.kill();
+        if(server.exitCode===null && process.platform==='win32')
+            spawnSync('taskkill',['/PID',String(server.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'});
+        else server.kill();
         await new Promise(resolve=>{if(server.exitCode!==null)return resolve();server.once('exit',resolve);});
     }
 })().catch(error=>{console.error(error);process.exitCode=1;});
