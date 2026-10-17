@@ -11,8 +11,19 @@ BACKEND = Path(__file__).parents[1]
 def invoke(tmp_path, cfg, database_url, *extra):
     path = tmp_path / "collector.json"
     path.write_text(json.dumps(cfg), encoding="utf-8")
-    env = dict(os.environ, DMCS_DATABASE_URL=database_url, DMCS_WRITE_AUTH="off", PYTHONUTF8="1")
-    return subprocess.run([sys.executable, "collector.py", "--config", str(path), *extra], cwd=BACKEND, env=env, capture_output=True, text=True, encoding="utf-8", timeout=10)
+    env = dict(os.environ, DMCS_DATABASE_URL=database_url, DMCS_WRITE_AUTH="off", PYTHONUTF8="1",
+               DMCS_ISOLATED_TEST_DB="1")
+    env.pop("DMCS_REMOTE_READONLY_CONFIG", None)
+    bootstrap = (
+        "import client_mode,collector,sys; "
+        "original=client_mode.client_url; marker=sys.argv[1]; "
+        "client_mode.client_url=lambda:original(marker); "
+        "sys.argv=['collector.py',*sys.argv[2:]]; "
+        "raise SystemExit(collector.main())"
+    )
+    return subprocess.run([sys.executable, "-c", bootstrap, str(tmp_path / "absent-client-mode.json"),
+                           "--config", str(path), *extra], cwd=BACKEND, env=env, capture_output=True,
+                          text=True, encoding="utf-8", timeout=10)
 
 
 def test_disabled_collector_never_initializes_database(tmp_path):

@@ -63,10 +63,16 @@ def test_ask_validates_input():
     assert r.status_code == 422
 
 
-def test_ask_is_readonly():
+def test_ask_is_readonly(monkeypatch, tmp_path):
     """只读性回归:一次(被拒绝的)ask 前后,三表计数不变。"""
     from sqlalchemy import text as sql
     from app.database import SessionLocal
+    import app.routers.assistant as mod
+
+    for name in ("ASSISTANT_API_KEY", "ZAI_API_KEY", "DEEPSEEK_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(mod, "KEYS_FILE", tmp_path / "nonexistent-llm-keys")
+    monkeypatch.setattr(mod.urllib.request, "urlopen", lambda *args, **kwargs: pytest.fail("External provider forbidden"))
 
     def counts():
         db = SessionLocal()
@@ -78,5 +84,6 @@ def test_ask_is_readonly():
             db.close()
 
     before = counts()
-    client.post("/api/v1/assistant/ask", json={"question": "解释一下"})
+    response = client.post("/api/v1/assistant/ask", json={"question": "解释一下"})
+    assert response.status_code == 503
     assert counts() == before
