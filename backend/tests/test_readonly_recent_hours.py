@@ -1,5 +1,6 @@
 """Default hour-table readers coalesce; explicit historical queries stay exact."""
 from datetime import datetime, timezone
+from contextlib import contextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -11,7 +12,7 @@ from app.routers import decision
 
 def test_recent_hours_producer_uses_one_session_host_clock_and_detaches_json(monkeypatch):
     import app.database
-    import app.decision_hourly.ash_settlement
+    import app.remote_readonly.settled_hours
 
     stamp = datetime(2026, 10, 17, 3, 20, tzinfo=timezone.utc)
     calls, results = [], {'generated_at': stamp.isoformat(), 'items': [{'value': 8.5}]}
@@ -30,6 +31,13 @@ def test_recent_hours_producer_uses_one_session_host_clock_and_detaches_json(mon
     database = Database()
     monkeypatch.setattr(app.database, 'SessionLocal', lambda: database)
 
+    @contextmanager
+    def admission(kind):
+        assert kind == 'display', 'Projected hours must not queue behind the model calculation'
+        yield
+
+    monkeypatch.setattr(runtime, 'read_window', admission)
+
     def host_clock(db):
         assert db is database
         calls.append('clock')
@@ -41,7 +49,7 @@ def test_recent_hours_producer_uses_one_session_host_clock_and_detaches_json(mon
         return results
 
     monkeypatch.setattr(runtime, 'host_now', host_clock)
-    monkeypatch.setattr(app.decision_hourly.ash_settlement, 'read_settled_hours', hours)
+    monkeypatch.setattr(app.remote_readonly.settled_hours, 'read_settled_hours', hours)
     result = runtime._build_recent_hours()
     assert calls == ['open', 'BEGIN', 'clock', 'hours', 'close']
     assert result == results

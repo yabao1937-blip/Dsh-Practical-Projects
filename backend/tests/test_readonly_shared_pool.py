@@ -36,7 +36,7 @@ def test_three_browsers_and_compatibility_views_fit_one_three_connection_pool(mo
         # Deliberately hold each actual pool connection while every other caller
         # arrives. A waiter doing its own SELECT would exhaust this real pool.
         def build():
-            lane = 'display' if name in ('operations', 'startup') else 'calculation'
+            lane = 'display' if name in ('operations', 'startup', 'hours') else 'calculation'
             with runtime.read_window(lane), engine.connect() as db:
                 assert db.execute(text('SELECT 1')).scalar_one() == 1
                 with lock:

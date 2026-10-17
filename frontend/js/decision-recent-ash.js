@@ -30,7 +30,10 @@ const DecisionRecentAsh = {
     async update(page,force=false) {
         if(!this.enabled(page) || !page.active() || this.inFlight) return;
         const end=this.latestEnd(), now=this.clock();
-        const delay=this.error?30000:this.rows()[0]?.status==='missing'?15000:60000;
+        // A late assay can revise an already populated row. The test server's
+        // shared, bounded read is cheap enough to check those revisions too.
+        const readOnly=typeof Api!=='undefined' && Api.isReadOnlyTest?.();
+        const delay=this.error?30000:readOnly?10000:this.rows()[0]?.status==='missing'?15000:60000;
         if(!force && end===this.lastAttemptEnd && now-this.lastAttempt<delay) return;
         this.lastAttempt=now; this.lastAttemptEnd=end;
         this.inFlight=(async()=>{

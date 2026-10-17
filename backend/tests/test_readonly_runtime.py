@@ -289,12 +289,13 @@ def test_published_hour_windows_use_the_production_clock_in_readonly_mode(remote
     execute_runtime(remote_runtime, """
         from datetime import datetime, timezone
         from app.decision_hourly import ash_settlement
-        from app.remote_readonly import runtime
+        from app.remote_readonly import runtime, settled_hours
         expected = datetime(2026, 10, 17, 0, 59, 50, tzinfo=timezone.utc)
         runtime.host_now = lambda db: expected
         def settled(db, start=None, end=None, now=None):
             assert now == expected
             return {'checked_at': now.isoformat()}
+        settled_hours.read_settled_hours = settled
         ash_settlement.read_settled_hours = settled
         ash_settlement.read_settled_interval = settled
         with TestClient(app, client=('127.0.0.1', 12345)) as client:

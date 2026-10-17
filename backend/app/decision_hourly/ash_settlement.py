@@ -36,20 +36,23 @@ def latest_end(now):
     return (now.astimezone(LOCAL)-DELAY).replace(minute=0, second=0, microsecond=0)
 
 
+def settlement_snapshot(snapshot):
+    """Select chemistry evidence before expanding hot or archived references."""
+    return {**{k:snapshot[k] for k in ('storage_version', 'evidence_policy', 'sources',
+        'coarse_ash', 'heavy_amount', 'total_ash') if k in snapshot},
+        'cells':{k:v for k,v in snapshot.get('cells', {}).items() if k in
+                 ('belt501', 'belt502', 'float_ash', 'float_amount', 'coarse_amount')}}
+
+
 def load_rows(db, start):
     end = start+timedelta(hours=1)
-    rows = {r['slot']: SimpleNamespace(**r) for r in archived_rows(db, iso_time(start))}
+    rows = {r['slot']: SimpleNamespace(**r) for r in archived_rows(db, iso_time(start),
+        project_snapshot=settlement_snapshot)}
     hot = list(db.scalars(select(DecisionCycleSample).where(DecisionCycleSample.sampled_at >= iso_time(start),
         DecisionCycleSample.sampled_at < iso_time(end)).order_by(DecisionCycleSample.slot)))
     # Resolve only ash/flow evidence. Models, density channels and other telemetry
     # are not replayed and need not be hydrated for retrospective ash settlement.
-    snapshots = []
-    for row in hot:
-        s = row.snapshot
-        snapshots.append({**{k:s[k] for k in ('storage_version', 'evidence_policy', 'sources',
-            'coarse_ash', 'heavy_amount', 'total_ash') if k in s},
-            'cells':{k:v for k,v in s.get('cells', {}).items() if k in
-                     ('belt501', 'belt502', 'float_ash', 'float_amount', 'coarse_amount')}})
+    snapshots = [settlement_snapshot(row.snapshot) for row in hot]
     resolved = resolve_snapshots(db, snapshots)
     rows.update({r.slot: SimpleNamespace(slot=r.slot, sampled_at=r.sampled_at,
         fingerprint=r.fingerprint, snapshot=s) for r,s in zip(hot, resolved)})

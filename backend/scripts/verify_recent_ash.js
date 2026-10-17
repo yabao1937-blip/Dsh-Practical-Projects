@@ -43,6 +43,35 @@ async function main(){
         items:[{start:'2026-10-14T08:00:00+08:00',end:'2026-10-14T09:00:00+08:00',status:'partial',value:8.9}]});
     await savedAgain;
     assert.equal(recent.result.items[0].value,8.9);
-    console.log('Recent ash: attribution clock, estimates, rollover, midnight and in-flight save refresh passed.');
+    // A late result can revise a populated hour; read-only testing must not
+    // leave that change hidden behind the production page's one-minute cadence.
+    let readOnly=true;
+    context.Api={isReadOnlyTest:()=>readOnly,getTotalAshHours:async()=>{
+        requests++;
+        return {generated_at:'2026-10-14T10:45:00+08:00',latest_end:'2026-10-14T09:00:00+08:00',
+            items:[{start:'2026-10-14T08:00:00+08:00',end:'2026-10-14T09:00:00+08:00',
+                status:'partial',value:9.1}]};
+    }};
+    context.DecisionHourly={result:null,clockBaseAt:0};
+    recent.lastAttempt=elapsed; recent.lastAttemptEnd=recent.latestEnd();
+    elapsed+=9999;
+    await recent.update(page);
+    assert.equal(requests,3,'read-only poll stays bounded before ten seconds');
+    elapsed++;
+    await recent.update(page);
+    assert.equal(requests,4,'read-only checks populated rows every ten seconds');
+    assert.equal(recent.rows()[0].value,9.1,'late revision replaces the populated row');
+    readOnly=false;
+    elapsed+=10000;
+    await recent.update(page);
+    assert.equal(requests,4,'production keeps its existing populated-row cadence');
+    elapsed+=50000;
+    await recent.update(page);
+    assert.equal(requests,5,'production still refreshes at one minute');
+    recent.error='host unavailable'; readOnly=true;
+    elapsed+=10000;
+    await recent.update(page);
+    assert.equal(requests,5,'failed host reads retain the thirty-second backoff');
+    console.log('Recent ash: attribution, late revision cadence, production cadence, backoff and save refresh passed.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

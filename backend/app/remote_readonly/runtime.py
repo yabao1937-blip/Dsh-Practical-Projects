@@ -16,8 +16,9 @@ from sqlalchemy import text
 
 
 # Limit cache producers before they acquire a pooled connection. Short display
-# reads keep an independent lane while calculation/history reads serialize; the
-# third pool connection remains available to explicit, uncached queries.
+# reads (including the projected hour table) keep an independent lane from the
+# current/hourly calculation. The third connection remains available to
+# explicit, uncached queries.
 _READ_LANES = {name: threading.BoundedSemaphore(1) for name in ('display', 'calculation')}
 
 
@@ -136,9 +137,9 @@ _decisions = SingleFlightBundle(_build_bundle)
 def _build_recent_hours():
     """Only the default published-hour table shares a bounded read snapshot."""
     from ..database import SessionLocal
-    from ..decision_hourly.ash_settlement import read_settled_hours
+    from .settled_hours import read_settled_hours
 
-    with read_window('calculation'), SessionLocal() as db:
+    with read_window('display'), SessionLocal() as db:
         db.execute(text('BEGIN'))
         result = read_settled_hours(db, now=host_now(db))
         return json.loads(json.dumps(result, allow_nan=False))

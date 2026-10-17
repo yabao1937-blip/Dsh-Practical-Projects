@@ -94,7 +94,13 @@ def read_sample(db, slot):
     return found
 
 
-def archived_rows(db, start):
+def archived_rows(db, start, *, project_snapshot=None):
+    """Verify the full archive, then optionally hydrate only caller-needed fields.
+
+    The projection receives the stored, still-packed snapshot. This keeps default
+    forensic readback lossless while avoiding unrelated authoritative lookups for
+    retrospective statistics. Integrity always covers the original full payload.
+    """
     saved=db.get(DecisionEvidenceArchive,start)
     if not saved:
         return []
@@ -102,5 +108,8 @@ def archived_rows(db, start):
     if hashlib.sha256(raw).hexdigest()!=saved.checksum:
         raise ValueError('逐次证据归档校验失败')
     rows = json.loads(raw)
-    snapshots = resolve_snapshots(db,[r['snapshot'] for r in rows])
+    snapshots = [r['snapshot'] for r in rows]
+    if project_snapshot is not None:
+        snapshots = [project_snapshot(s) for s in snapshots]
+    snapshots = resolve_snapshots(db, snapshots)
     return [dict(r,snapshot=s) for r,s in zip(rows,snapshots)]
