@@ -272,11 +272,11 @@ def test_remote_disconnect_reports_unavailable_without_local_fallback(remote_run
 def test_telemetry_freshness_uses_the_production_clock_in_readonly_mode(remote_runtime):
     execute_runtime(remote_runtime, """
         from datetime import datetime, timezone
-        from app.routers import telemetry
-        from app.remote_readonly import runtime
+        from app.telemetry import repository
+        from app.remote_readonly import operations
         expected = datetime(2026, 10, 17, 1, 0, tzinfo=timezone.utc)
-        runtime.host_now = lambda db: expected
-        telemetry.latest_view = lambda db, source_id, now=None: {'checked_at': now.isoformat()}
+        operations.host_now = lambda db: expected
+        repository.latest_view = lambda db, source_id=None, now=None: {'checked_at': now.isoformat()}
         with TestClient(app, client=('127.0.0.1', 12345)) as client:
             response = client.get('/api/v1/telemetry/latest')
             assert response.status_code == 200, response.text
@@ -292,7 +292,7 @@ def test_published_hour_windows_use_the_production_clock_in_readonly_mode(remote
         from app.remote_readonly import runtime
         expected = datetime(2026, 10, 17, 0, 59, 50, tzinfo=timezone.utc)
         runtime.host_now = lambda db: expected
-        def settled(db, start, end, now=None):
+        def settled(db, start=None, end=None, now=None):
             assert now == expected
             return {'checked_at': now.isoformat()}
         ash_settlement.read_settled_hours = settled

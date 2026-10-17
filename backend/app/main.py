@@ -26,6 +26,7 @@ from .routers import (assistant, health, import_api, inputs, manual_entries, man
 from .schema_upgrade import upgrade_schema
 from .telemetry.views import ensure_sqlite_views
 from .remote_readonly.server import router as readonly_db_router, close_default_manager
+from .remote_readonly.operations import router as readonly_operations_router
 
 if not REMOTE_READONLY:
     Base.metadata.create_all(bind=engine)
@@ -81,6 +82,8 @@ app.include_router(state.router, prefix="/api/v1")
 app.include_router(import_api.router, prefix="/api/v1")
 app.include_router(training.router, prefix="/api/v1")
 app.include_router(telemetry.router, prefix="/api/v1")
+if REMOTE_READONLY:
+    app.include_router(readonly_operations_router, prefix='/api/v1')
 if not REMOTE_READONLY:
     app.include_router(readonly_db_router,prefix='/api/v1')
 

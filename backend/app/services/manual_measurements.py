@@ -68,11 +68,11 @@ def request_hash(metric, value, observed_at):
     return hashlib.sha256(json.dumps(content, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 
-def latest_points(db):
+def latest_points(db, now=None):
     """One stable display point per metric, ordered by measurement time."""
     from ..models import ManualMeasurement
 
-    now = timestamp_now()
+    now = (now.isoformat(timespec='milliseconds') if isinstance(now, datetime) else now) or timestamp_now()
     items = []
     for metric, definition in POINT_METRICS.items():
         record = latest_measurement(db, metric, now)

@@ -25,6 +25,9 @@ def reconnect():
 
 @router.get("/latest")
 def latest(source_id: str | None = Query(None, max_length=64), db: Session = Depends(get_db)):
+    if REMOTE_READONLY and source_id is None:
+        from ..remote_readonly.operations import operations_view
+        return operations_view('telemetry')
     if db.bind.dialect.name == "sqlite":
         db.execute(text("BEGIN"))
     if REMOTE_READONLY:

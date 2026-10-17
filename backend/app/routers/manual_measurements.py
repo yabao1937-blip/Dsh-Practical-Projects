@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..auth import require_write
+from ..config import REMOTE_READONLY
 from ..database import get_db
 from ..models import ManualMeasurement
 from ..schemas import ManualMeasurementIn, ManualMeasurementList, ManualMeasurementOut, ManualMetric
@@ -40,6 +41,9 @@ def metrics():
 
 @router.get("/latest")
 def latest_measurements(db: Session = Depends(get_db)):
+    if REMOTE_READONLY:
+        from ..remote_readonly.operations import operations_view
+        return operations_view('manual_measurements')
     if db.bind.dialect.name == "sqlite":
         db.execute(text("BEGIN"))
     return latest_points(db)

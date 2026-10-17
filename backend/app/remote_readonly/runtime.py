@@ -4,6 +4,7 @@ Only JSON responses are held in memory for five seconds.  Production routes do
 not use this cache, and an expired response is never a fallback for a failed host.
 """
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
 import json
@@ -12,6 +13,18 @@ import time
 
 from fastapi import HTTPException
 from sqlalchemy import text
+
+
+# Limit cache producers before they acquire a pooled connection. Short display
+# reads keep an independent lane while calculation/history reads serialize; the
+# third pool connection remains available to explicit, uncached queries.
+_READ_LANES = {name: threading.BoundedSemaphore(1) for name in ('display', 'calculation')}
+
+
+@contextmanager
+def read_window(kind):
+    with _READ_LANES[kind]:
+        yield
 
 
 class ReadOnlyRuntimeUnavailable(Exception):
@@ -105,7 +118,7 @@ def _build_bundle():
     from ..decision_hourly.service import read_hour
     from ..gpt_runtime.decision_store import load_decision_store
 
-    with SessionLocal() as db:
+    with read_window('calculation'), SessionLocal() as db:
         db.execute(text('BEGIN'))
         # SQLite evaluates this on the host, so laptop clock skew does not make
         # production inputs appear expired or select a different published hour.
@@ -118,6 +131,30 @@ def _build_bundle():
 
 
 _decisions = SingleFlightBundle(_build_bundle)
+
+
+def _build_recent_hours():
+    """Only the default published-hour table shares a bounded read snapshot."""
+    from ..database import SessionLocal
+    from ..decision_hourly.ash_settlement import read_settled_hours
+
+    with read_window('calculation'), SessionLocal() as db:
+        db.execute(text('BEGIN'))
+        result = read_settled_hours(db, now=host_now(db))
+        return json.loads(json.dumps(result, allow_nan=False))
+
+
+_recent_hours = SingleFlightBundle(_build_recent_hours, failure_seconds=1)
+
+
+def recent_hours_view():
+    try:
+        return _recent_hours.get()
+    except ReadOnlyRuntimeUnavailable:
+        raise HTTPException(503, detail={
+            'error_code': 'readonly_recent_hours_busy',
+            'message': '测试服正在读取主机小时灰分，请稍后重试',
+        }) from None
 
 
 def decision_view(kind):

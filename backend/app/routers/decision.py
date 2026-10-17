@@ -88,6 +88,9 @@ class SourcesPatch(BaseModel):
 
 @router.get('/sources')
 def sources(db: Session = Depends(get_db)):
+    if REMOTE_READONLY:
+        from ..remote_readonly.startup import startup_view
+        return startup_view('sources')
     return config_view(db)
 
 
@@ -152,6 +155,10 @@ def hourly_decision(db: Session = Depends(get_db)):
 
 @router.get('/total-ash-hours')
 def total_ash_hours(start: datetime | None = None, end: datetime | None = None, db: Session = Depends(get_db)):
+    if REMOTE_READONLY and start is None and end is None:
+        # Waiters share detached JSON and never check out a remote connection.
+        from ..remote_readonly.runtime import recent_hours_view
+        return recent_hours_view()
     from ..decision_hourly.ash_settlement import read_settled_hours
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))

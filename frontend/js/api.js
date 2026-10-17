@@ -130,6 +130,43 @@ window.Api = {
         return value;
     },
 
+    getReadOnlyOperations() {
+        if (!this.isReadOnlyTest()) return Promise.reject(new Error('只读运行状态仅用于测试服'));
+        if (this._readOnlyOperationsInFlight) return this._readOnlyOperationsInFlight;
+        this._readOnlyOperationsInFlight = (async () => {
+            const response = await fetch(this.base + '/readonly-runtime/operations', {
+                signal: AbortSignal.timeout(10000), cache: 'no-store',
+            });
+            if (!response.ok) throw new Error('只读运行状态暂不可用');
+            const value = await response.json();
+            const sectionError = key => value?.errors?.[key] &&
+                typeof value.errors[key].error_code === 'string' && value.errors[key].error_code.length > 0;
+            const telemetry = value?.telemetry, manual = value?.manual_measurements;
+            const manualValid = Array.isArray(manual?.items) && manual.items.length > 0 && manual.items.every(item =>
+                item.source_id === 'manual-measurements' && item.kind === 'manual_measurement' &&
+                typeof item.key === 'string' && typeof item.unit === 'string' &&
+                (!item.available || (Number.isFinite(item.sample?.value) && Number.isInteger(item.sample?.record_id) &&
+                    Number.isFinite(Date.parse(item.sample?.observed_at)) && Number.isFinite(Date.parse(item.sample?.created_at)))));
+            if (value?.schema_version !== 1 || typeof value.generated_at !== 'string' || !Number.isFinite(Date.parse(value.generated_at)) ||
+                typeof value.health?.ok !== 'boolean' || typeof value.health?.status !== 'string' ||
+                !Object.prototype.hasOwnProperty.call(value, 'telemetry') || !Object.prototype.hasOwnProperty.call(value, 'manual_measurements') ||
+                !(sectionError('telemetry') || (Array.isArray(telemetry?.sources) && Array.isArray(telemetry?.items))) ||
+                !(sectionError('manual_measurements') || manualValid) ||
+                (value.errors?.telemetry && !sectionError('telemetry')) ||
+                (value.errors?.manual_measurements && !sectionError('manual_measurements'))) {
+                throw new Error('只读运行状态响应格式异常');
+            }
+            return value;
+        })().finally(() => { this._readOnlyOperationsInFlight = null; });
+        return this._readOnlyOperationsInFlight;
+    },
+
+    async getHealthLive() {
+        const response = await fetch(this.base + '/health/live', {signal: AbortSignal.timeout(2000), cache: 'no-store'});
+        const value = await response.json().catch(() => null);
+        return {...(value || {}), ok:response.ok && value?.status === 'ok'};
+    },
+
     async calculateDecision(body) {
         const response = await fetch(this.base + '/decision/snapshots', {method:'POST',
             headers:{'Content-Type':'application/json'}, body:JSON.stringify(body),

@@ -3,11 +3,11 @@ import json
 import logging
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import inspect, text
 
-from ..config import APP_VERSION
+from ..config import APP_VERSION, REMOTE_READONLY
 from ..database import engine
 from ..observability import readonly_failure_details
 from ..telemetry.domain import iso_time, utc_now
@@ -28,6 +28,21 @@ async def live():
 @router.get("/health/ready")
 @router.get("/health")
 def health():
+    if REMOTE_READONLY:
+        from ..remote_readonly.operations import operations_view
+        try:
+            result = operations_view('health')
+        except HTTPException as error:
+            if error.status_code != 503:
+                raise
+            # Preserve the public readiness schema even if the shared snapshot
+            # cannot begin. Do not open a second connection to check it again.
+            result = {'status': 'unavailable', 'modules': ['coal-records', 'telemetry'],
+                      'version': APP_VERSION, 'checked_at': iso_time(utc_now()),
+                      'uptime_seconds': round(time.monotonic() - started, 1),
+                      'checks': {'database': {'status': 'unavailable', 'error_code': 'database_unavailable'}}}
+        result = {key: value for key, value in result.items() if key != 'ok'}
+        return JSONResponse(result, status_code=200 if result['status'] == 'ok' else 503)
     status, code = "ok", None
     try:
         with engine.connect() as connection:

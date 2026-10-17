@@ -43,7 +43,9 @@ window.Operations = {
             if (this._timer) { clearTimeout(this._timer); this._timer = null; }
             if (document.visibilityState !== 'hidden') this.refresh();
         });
-        window.addEventListener('online', () => this.refresh());
+        window.addEventListener('online', () => {
+            if (!window.Api?.isReadOnlyTest?.() || document.visibilityState !== 'hidden') this.refresh();
+        });
     },
 
     installReconnectControl() {
@@ -123,6 +125,18 @@ window.Operations = {
     refreshManualMeasurements() {
         if (!window.location.protocol.startsWith('http')) return Promise.resolve();
         if (this._manualInFlight) return this._manualInFlight;
+        if (window.Api?.isReadOnlyTest?.()) {
+            this._manualInFlight = window.Api.getReadOnlyOperations().then(result => {
+                this.manualMeasurementsFailed = !!result.errors?.manual_measurements;
+                if (!this.manualMeasurementsFailed) this.manualMeasurements = result.manual_measurements;
+            }).catch(() => {
+                this.manualMeasurementsFailed = true;
+            }).finally(() => {
+                this._manualInFlight = null;
+                if (typeof DecisionOverviewPage !== 'undefined') DecisionOverviewPage.telemetryUpdated();
+            });
+            return this._manualInFlight;
+        }
         this._manualInFlight = window.Api.getManualMeasurementPoints().then(result => {
             this.manualMeasurements = result;
             this.manualMeasurementsFailed = false;
@@ -145,6 +159,7 @@ window.Operations = {
         if (!window.location.protocol.startsWith('http')) { this.render(); return Promise.resolve(); }
         if (this._inFlight) return this._inFlight;
         if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+        if (window.Api?.isReadOnlyTest?.()) return this.refreshReadOnly();
         this.refreshManualMeasurements();
         this._inFlight = Promise.allSettled([window.Api.getHealth(), window.Api.getTelemetry()]).then(results => {
             const [health, telemetry] = results;
@@ -164,6 +179,38 @@ window.Operations = {
         }).finally(() => {
             this._inFlight = null;
             if (document.visibilityState !== 'hidden') this._timer = setTimeout(() => this.refresh(), 5000);
+        });
+        return this._inFlight;
+    },
+
+    refreshReadOnly() {
+        this._inFlight = window.Api.getReadOnlyOperations().then(result => {
+            this.health = result.health;
+            this.serverState = this.health.status === 'busy' ? 'busy' :
+                this.health.ok && this.health.status === 'ok' ? 'online' : 'unavailable';
+            this.telemetryFailed = !!result.errors?.telemetry;
+            if (!this.telemetryFailed) this.telemetry = result.telemetry;
+            this.manualMeasurementsFailed = !!result.errors?.manual_measurements;
+            if (!this.manualMeasurementsFailed) this.manualMeasurements = result.manual_measurements;
+        }).catch(async () => {
+            this.telemetryFailed = true;
+            this.manualMeasurementsFailed = true;
+            try {
+                const live = await window.Api.getHealthLive();
+                this.serverState = live.ok ? 'busy' : 'offline';
+                this.health = {ok:false, status:this.serverState === 'busy' ? 'busy' : 'unavailable', live};
+            } catch (_) {
+                this.serverState = 'offline';
+                this.health = {ok:false, status:'unavailable'};
+            }
+        }).finally(() => {
+            this.checkedAt = Date.now();
+            this._inFlight = null;
+            try {
+                this.render();
+            } finally {
+                if (document.visibilityState !== 'hidden') this._timer = setTimeout(() => this.refresh(), 5000);
+            }
         });
         return this._inFlight;
     },

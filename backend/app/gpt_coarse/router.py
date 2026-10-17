@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from ..config import REMOTE_READONLY
 from ..database import get_db
 from .repository import active
 
@@ -10,4 +11,7 @@ router = APIRouter(prefix='/gpt-coarse', tags=['GPT专家模型'])
 
 @router.get('/current')
 def current(db: Session = Depends(get_db)):
+    if REMOTE_READONLY:
+        from ..remote_readonly.startup import startup_view
+        return startup_view('model')
     return dict(model=active(db, include_analysis=True))
