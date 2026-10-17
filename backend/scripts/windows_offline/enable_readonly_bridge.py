@@ -160,12 +160,15 @@ def apply(package, root, manifest, access_file, report=lambda stage, message: No
             target = source_path(root, name)
             target.parent.mkdir(parents=True, exist_ok=True)
             temporary = target.with_name(target.name + '.readonly-update.tmp')
+            temporary_created = False
             try:
                 with temporary.open('xb') as stream:
+                    temporary_created = True
                     stream.write(source_path(package / 'payload', name).read_bytes())
                 temporary.replace(target)
             finally:
-                temporary.unlink(missing_ok=True)
+                if temporary_created:
+                    temporary.unlink(missing_ok=True)
             clear_bytecode(target)
         target = access_path(root)
         target.parent.mkdir(parents=True, exist_ok=True)
