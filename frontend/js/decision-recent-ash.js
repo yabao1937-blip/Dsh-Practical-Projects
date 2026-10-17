@@ -24,6 +24,7 @@ const DecisionRecentAsh = {
                 ['complete','partial'].includes(item.status) && Number.isFinite(item.value) && item.value>=0 && item.value<=100;
             return {start,end:start+this.hourMs,value:valid?item.value:null,
                 status:valid?item.status:'missing',coverage:valid?item.coverage:null,
+                origin:item?.calculation_origin,
                 reason:item?.reason || '该小时尚无已保存的统计记录'};
         });
     },
@@ -33,7 +34,7 @@ const DecisionRecentAsh = {
         // A late assay can revise an already populated row. The test server's
         // shared, bounded read is cheap enough to check those revisions too.
         const readOnly=typeof Api!=='undefined' && Api.isReadOnlyTest?.();
-        const delay=this.error?30000:readOnly?10000:this.rows()[0]?.status==='missing'?15000:60000;
+        const delay=this.error?30000:readOnly?5000:this.rows()[0]?.status==='missing'?15000:60000;
         if(!force && end===this.lastAttemptEnd && now-this.lastAttempt<delay) return;
         this.lastAttempt=now; this.lastAttemptEnd=end;
         this.inFlight=(async()=>{
@@ -78,7 +79,8 @@ const DecisionRecentAsh = {
         const rows=this.rows(), html=rows.map(row=>{
             const [date,start]=this.parts(row.start), [endDate,end]=this.parts(row.end);
             const coverage=Number.isFinite(row.coverage)?` · 有效覆盖 ${(row.coverage*100).toFixed(1)}%`:'';
-            const title=`${this.error?this.error+' · ':''}${date} ${start} — ${endDate} ${end} · ${row.reason}${coverage}`;
+            const origin=row.origin==='readonly-local-replay'?' · 测试服只读回算，未写入主机':'';
+            const title=`${this.error?this.error+' · ':''}${date} ${start} — ${endDate} ${end} · ${row.reason}${coverage}${origin}`;
             return `<tr data-decision-key="recent-ash-${row.start}" class="is-${row.status}" title="${page.escape(title)}"><td>${start}–${end}</td><td>${page.number(row.value,2)}</td></tr>`;
         }).join('');
         return `<section class="decision-recent-ash" data-decision-key="recent-ash" aria-label="近10小时平均灰分" aria-busy="${!!this.inFlight}" style="left:${anchor.x}px;top:0;width:${anchor.w}px;height:${anchor.y-22}px"><table aria-label="按重介采样归属更新的最近10小时平均总灰分（%）"><colgroup><col style="width:62%"><col></colgroup><tbody>${html || `<tr><td colspan="2" class="decision-recent-ash-empty" title="${page.escape(this.error || (this.enabled(page)?'正在读取':'请通过服务地址查看'))}">—</td></tr>`}</tbody></table></section>`;

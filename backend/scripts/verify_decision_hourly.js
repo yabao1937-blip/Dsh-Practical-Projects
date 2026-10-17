@@ -276,6 +276,10 @@ const badSwitches={switches:{systems:{'401':null,'402':null,A:null,B:null}}};
         apply_end:'2026-10-12T09:00:00Z',label:'10-12 15:00–16:00'}});await pending;
     assert(h.ashSummary(page).includes('15:00–16:00') && h.ashSummary(page).includes('<strong>8.76<small>'),
         'At 16:30 Beijing time show the completed 15:00–16:00 hour');
+    h.result.advice_inputs={ash:{calculation_origin:'readonly-local-replay'}};
+    assert(h.summary(page,root).includes('测试服只读回算，未写入主机'));
+    delete h.result.advice_inputs.ash.calculation_origin;
+    assert(!h.summary(page,root).includes('测试服只读回算，未写入主机'));
     page.view='production'; await h.update(page,true);
     assert.equal(h.inFlight,null); assert.equal(h.summary(page,root),'','DS does not request or display the hourly summary');
     assert.equal(h.ashSummary(page),'','DS has no hourly ash toolbar');

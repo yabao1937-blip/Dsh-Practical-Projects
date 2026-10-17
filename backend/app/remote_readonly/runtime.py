@@ -1,7 +1,8 @@
 """Coalesce local test-server decisions without holding waiting DB sessions.
 
-Only JSON responses are held in memory for five seconds.  Production routes do
-not use this cache, and an expired response is never a fallback for a failed host.
+Decision responses expire after five seconds; hour tables after one. A bounded evidence cache
+supports local retrospective replay without database writes. Production routes
+do not use either cache; expired responses never mask a failed host.
 """
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from contextlib import contextmanager
@@ -113,6 +114,20 @@ def host_now(db):
     return observed
 
 
+_settlement_replay = None
+_replay_lock = threading.Lock()
+
+
+def settlement_replay():
+    """Lazy, bounded derived evidence only; never a second database or writer."""
+    global _settlement_replay
+    with _replay_lock:
+        if _settlement_replay is None:
+            from .settlement_replay import SettlementReplay
+            _settlement_replay = SettlementReplay()
+        return _settlement_replay
+
+
 def _build_bundle():
     from ..database import SessionLocal
     from ..services.decision_sources import shared_snapshot
@@ -126,7 +141,8 @@ def _build_bundle():
         observed = host_now(db)
         current = shared_snapshot(db, when=observed, live=True, store_loader=load_decision_store)
         hourly = read_hour(db, now=observed, live=current, defer_missing=True,
-                           store_loader=load_decision_store)
+                           store_loader=load_decision_store,
+                           settlement_reader=settlement_replay().get)
         # Cache detached JSON only, never ORM objects, connections or raw tables.
         return json.loads(json.dumps({'current': current, 'hourly': hourly}, allow_nan=False))
 
@@ -142,10 +158,22 @@ def _build_recent_hours():
     with read_window('display'), SessionLocal() as db:
         db.execute(text('BEGIN'))
         result = read_settled_hours(db, now=host_now(db))
+    if not any(item.get('pending') for item in result.get('items', [])[-10:]):
         return json.loads(json.dumps(result, allow_nan=False))
+    # Release the short display lane and its snapshot before a cold replay. It
+    # shares the calculation lane with hourly advice, leaving health reads free
+    # and avoiding duplicate hydrations or a DB checkout waiting on the cache.
+    with read_window('calculation'), SessionLocal() as db:
+        db.execute(text('BEGIN'))
+        result = read_settled_hours(db, now=host_now(db),
+                                   settlement_reader=settlement_replay().replay)
+    return json.loads(json.dumps(result, allow_nan=False))
 
 
-_recent_hours = SingleFlightBundle(_build_recent_hours, failure_seconds=1)
+# The page checks every 5–10 seconds. Keep only one second of result reuse so
+# an assay arriving just after a response does not lose another five seconds
+# before a cold ten-hour replay; immutable evidence has its own bounded cache.
+_recent_hours = SingleFlightBundle(_build_recent_hours, ttl_seconds=1, failure_seconds=1)
 
 
 def recent_hours_view():

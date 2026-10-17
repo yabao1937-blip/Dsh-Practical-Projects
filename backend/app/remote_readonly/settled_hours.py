@@ -1,8 +1,9 @@
 """Batch the read-only hourly table without loading replay contributions.
 
 Production settlement and explicit historical replay keep their original reader.
-This projection has the same deferred-result policy as ``read_settled_hours``:
-stale or absent settlements are pending, and GET never recalculates or writes.
+Without an injected reader, stale or absent settlements are pending. Only the
+test-server producer can inject its bounded in-memory replay for the last ten
+hours; neither path writes a settlement to the host.
 """
 from copy import deepcopy
 from datetime import timedelta
@@ -43,7 +44,7 @@ def _sources(db, starts):
     return sources
 
 
-def read_settled_hours(db, start=None, end=None, now=None):
+def read_settled_hours(db, start=None, end=None, now=None, *, settlement_reader=None):
     """Return the existing 24-hour JSON using at most five bounded SELECTs."""
     now = now or utc_now()
     start, end = hour_range(start, end, now-DELAY)
@@ -70,6 +71,9 @@ def read_settled_hours(db, start=None, end=None, now=None):
         if guard == revision(basis, sources[iso_time(stamp)]):
             item = deepcopy(cached_item)
             item.update(frozen=False, cached=True)
+        elif settlement_reader is not None and stamp >= end-timedelta(hours=10):
+            item = settlement_reader(db, stamp, now, basis=basis,
+                                     source=sources[iso_time(stamp)])['item']
         else:
             item = contribution_item([], stamp, stop)
             item.update(status='pending', pending=True, frozen=False, cached=False,

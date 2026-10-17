@@ -200,7 +200,7 @@ def tick(now=None, sessions=SessionLocal):
     maintenance_tick(observation_tick(now,sessions),sessions)
 
 
-def read_hour(db, now=None, live=None, defer_missing=False, *, store_loader=None):
+def read_hour(db, now=None, live=None, defer_missing=False, *, store_loader=None, settlement_reader=None):
     now = now or utc_now()
     start,end = window(now)
     saved = db.get(DecisionCycleHour,iso_time(start))
@@ -218,4 +218,7 @@ def read_hour(db, now=None, live=None, defer_missing=False, *, store_loader=None
         else shared_snapshot(db, store_loader=store_loader))
     loader = load_store if store_loader is None else store_loader
     store = loader(db)
-    return apply_quality_advice(db, result, now, current, store, context_definition(current, store))
+    if settlement_reader is None:
+        return apply_quality_advice(db, result, now, current, store, context_definition(current, store))
+    return apply_quality_advice(db, result, now, current, store, context_definition(current, store),
+                               settlement_reader=settlement_reader)

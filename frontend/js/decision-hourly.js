@@ -190,7 +190,8 @@ const DecisionHourly = {
         const updatedAt=new Date(shown.applyStart || '');
         const updatedTime=Number.isFinite(updatedAt.getTime())?updatedAt.toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}):'—';
         const statusClass=this.gapClass(gap) || (r && !available?' is-hourly-warning':'');
-        const title=shown.reason;
+        const local=available && !shown.retained && r?.advice_inputs?.ash?.calculation_origin==='readonly-local-replay';
+        const title=shown.reason+(local?' · 测试服只读回算，未写入主机':'');
           const height=root.summaryHeight??201, spacing=root.summaryGap??24;
           return `<section class="decision-node decision-hourly-summary${statusClass}" data-decision-key="hourly-summary" aria-label="本小时建议密度" title="${page.escape(title)}" aria-busy="${this.pending()}" style="left:${root.x}px;top:${root.y-height-spacing}px;width:${root.w}px;height:${height}px"><span class="decision-node-heading">本小时建议密度</span><span class="decision-node-value${Number.isFinite(value)?'':' decision-value-empty'}">${Number.isFinite(value)?page.number(value,3):'暂无有效值'} <span class="decision-root-unit">g/cm³</span></span><span class="decision-node-source">更新于 ${page.escape(updatedTime)}</span></section>`;
     },

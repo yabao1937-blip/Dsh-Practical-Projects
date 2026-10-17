@@ -128,9 +128,10 @@ def test_bundle_uses_one_transaction_host_clock_and_passes_current_to_hourly(mon
         calls.append(('current', when))
         return {'generated_at': when.isoformat(), 'policy': 'local-code'}
 
-    def hourly(database, *, now, live, defer_missing, store_loader):
+    def hourly(database, *, now, live, defer_missing, store_loader, settlement_reader):
         assert database is db and not db.closed and defer_missing is True
         assert store_loader is load_decision_store
+        assert settlement_reader == runtime.settlement_replay().get
         assert live == {'generated_at': now.isoformat(), 'policy': 'local-code'}
         calls.append(('hourly', now))
         return {'checked_at': now.isoformat()}

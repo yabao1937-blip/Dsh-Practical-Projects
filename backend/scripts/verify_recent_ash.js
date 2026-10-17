@@ -54,12 +54,12 @@ async function main(){
     }};
     context.DecisionHourly={result:null,clockBaseAt:0};
     recent.lastAttempt=elapsed; recent.lastAttemptEnd=recent.latestEnd();
-    elapsed+=9999;
+    elapsed+=4999;
     await recent.update(page);
-    assert.equal(requests,3,'read-only poll stays bounded before ten seconds');
+    assert.equal(requests,3,'read-only poll stays bounded before five seconds');
     elapsed++;
     await recent.update(page);
-    assert.equal(requests,4,'read-only checks populated rows every ten seconds');
+    assert.equal(requests,4,'read-only checks populated rows every five seconds');
     assert.equal(recent.rows()[0].value,9.1,'late revision replaces the populated row');
     readOnly=false;
     elapsed+=10000;
@@ -72,6 +72,10 @@ async function main(){
     elapsed+=10000;
     await recent.update(page);
     assert.equal(requests,5,'failed host reads retain the thirty-second backoff');
+    recent.error='';
+    recent.result.items[0].calculation_origin='readonly-local-replay';
+    assert(recent.markup({...page,escape:x=>x,number:x=>x===null?'—':x.toFixed(2)},
+        {x:1,y:400,w:200}).includes('测试服只读回算，未写入主机'));
     console.log('Recent ash: attribution, late revision cadence, production cadence, backoff and save refresh passed.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

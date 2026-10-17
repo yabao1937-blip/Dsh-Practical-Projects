@@ -155,14 +155,15 @@ def current_problem(cell, key, now):
     return None
 
 
-def apply_quality_advice(db, result, now, current, store, current_definition):
+def apply_quality_advice(db, result, now, current, store, current_definition, *, settlement_reader=None):
     # read_hour gives us a private copy; stored snapshots keep their original goal.
     result['statistical_target'] = deepcopy(result['target'])
     result['target'] = deepcopy(current['target'])
     result['advice_sources'] = deepcopy(current['sources'])
     ash_end = latest_end(now)
     ash_start = ash_end-timedelta(hours=1)
-    settlement = get_settlement(db, ash_start, now, defer_missing=True)
+    reader = get_settlement if settlement_reader is None else settlement_reader
+    settlement = reader(db, ash_start, now, defer_missing=True)
     item = settlement['item']
     if item.get('pending'):
         return dict(status='pending', advice_pending=True, advice_policy=POLICY,
@@ -171,6 +172,8 @@ def apply_quality_advice(db, result, now, current, store, current_definition):
         ('value', 'coverage', 'valid_seconds', 'sample_count', 'provisional', 'aggregation', 'reason',
          'coverage_policy', 'stopped_seconds', 'expected_production_seconds', 'wall_coverage')},
         'revision':settlement['revision'], 'unit':'%'}
+    if item.get('calculation_origin'):
+        ash['calculation_origin'] = item['calculation_origin']
     density = read_anchor(db, now)
     reasons = []
     blockers = []

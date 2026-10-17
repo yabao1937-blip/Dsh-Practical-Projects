@@ -172,11 +172,11 @@ def contribution_item(contributions, start, end, stopped=()):
                '旧口径样本均值' if legacy else '原时段无有效灰分与实际产量配对记录')
 
 
-def build_settlement(db, start, now=None, basis=None, source=None):
+def build_settlement(db, start, now=None, basis=None, source=None, *, rows=None, stopped=None):
     end = start+timedelta(hours=1)
     basis = manual_basis(db, start, end, now) if basis is None else basis
     source = source_revision(db, start) if source is None else source
-    rows = load_rows(db, start)
+    rows = load_rows(db, start) if rows is None else rows
     w, contributions, excluded, replaced = weights(rows, end), [], Counter(), 0
     seen_legacy = set()
     for row in rows:
@@ -207,13 +207,16 @@ def build_settlement(db, start, now=None, basis=None, source=None):
             manual_applied=use_manual))
     choices = {json.dumps(r.snapshot.get('sources', {}).get('resolved_choices', {}), sort_keys=True) for r in rows}
     sources = rows[0].snapshot.get('sources') if rows else None
-    saved = db.get(DecisionAshSettlement, iso_time(start))
-    prior = saved.snapshot if saved else {}
-    # Late assays change chemistry, not the original hour's production evidence.
-    if prior.get('policy') == POLICY and prior.get('production_source_revision') == source:
-        stopped = deepcopy(prior.get('stopped_intervals', []))
+    if stopped is None:
+        saved = db.get(DecisionAshSettlement, iso_time(start))
+        prior = saved.snapshot if saved else {}
+        # Late assays change chemistry, not the original hour's production evidence.
+        if prior.get('policy') == POLICY and prior.get('production_source_revision') == source:
+            stopped = deepcopy(prior.get('stopped_intervals', []))
+        else:
+            stopped = stopped_intervals(db, start, end, sources) if len(choices) <= 1 else []
     else:
-        stopped = stopped_intervals(db, start, end, sources) if len(choices) <= 1 else []
+        stopped = deepcopy(stopped)
     item = contribution_item(contributions, start, end, stopped)
     item['legacy_reference'] = any(c.get('legacy_reference') for c in contributions)
     # A frozen mean with no details remains a reference, never a reconstructed result.
