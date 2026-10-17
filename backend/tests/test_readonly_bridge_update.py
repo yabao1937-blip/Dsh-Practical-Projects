@@ -121,6 +121,22 @@ def test_restart_failure_restores_source_and_config_but_retains_fresh_rows(prepa
         assert db.execute('SELECT * FROM evidence').fetchall() == [(1,), (2,)]
 
 
+def test_existing_temporary_file_is_retained_on_update_conflict(prepared):
+    package, root, manifest, access_file, calls = prepared
+    temporary = root / 'backend/app/auth.py.readonly-update.tmp'
+    temporary.write_text('pre-existing update evidence')
+    with pytest.raises(FileExistsError):
+        update.apply(package, root, manifest, access_file)
+    assert temporary.read_text() == 'pre-existing update evidence'
+    assert not (root / update.ACCESS_PATH).exists()
+    for name, info in manifest['files'].items():
+        target = root / name
+        if info['previous_sha256'] is None:
+            assert not target.exists()
+        else:
+            assert target.read_text() == 'old:' + name
+
+
 @pytest.mark.parametrize('data', ['not json', '{"token":"sensitive"}',
     '{"token":"too-short","clients":["10.255.2.6"]}',
     '{"token":"abcdefghijklmnopqrstuvwxyz0123456789","clients":["10.255.2.0/24"]}'])
