@@ -103,14 +103,16 @@ def _build_bundle():
     from ..database import SessionLocal
     from ..services.decision_sources import shared_snapshot
     from ..decision_hourly.service import read_hour
+    from ..gpt_runtime.decision_store import load_decision_store
 
     with SessionLocal() as db:
         db.execute(text('BEGIN'))
         # SQLite evaluates this on the host, so laptop clock skew does not make
         # production inputs appear expired or select a different published hour.
         observed = host_now(db)
-        current = shared_snapshot(db, when=observed, live=True)
-        hourly = read_hour(db, now=observed, live=current, defer_missing=True)
+        current = shared_snapshot(db, when=observed, live=True, store_loader=load_decision_store)
+        hourly = read_hour(db, now=observed, live=current, defer_missing=True,
+                           store_loader=load_decision_store)
         # Cache detached JSON only, never ORM objects, connections or raw tables.
         return json.loads(json.dumps({'current': current, 'hourly': hourly}, allow_nan=False))
 

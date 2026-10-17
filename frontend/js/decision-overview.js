@@ -327,7 +327,60 @@ const DecisionOverviewPage = {
         return reader;
     },
 
+    // Test-server GPT display projection. No history clone or legacy calculation.
+    buildSharedSnapshot() {
+        const result = this.hourMode() ? DecisionHourly.presentation() :
+            typeof DecisionRealtime === 'undefined' ? null : DecisionRealtime.presentation();
+        const cells = result?.cells || {}, captured = result?.inputs || {};
+        const numeric = value => Number.isFinite(value) ? value : null;
+        const cell = key => cells[key] || captured[key] || result?.[key] || {};
+        const value = key => numeric(cell(key).value);
+        const measurement = key => ({source:cell(key).source || '等待主机数据',
+            sampleAt:cell(key).observed_at || null,
+            enteredAt:cell(key).created_at || cell(key).entered_at || null});
+        const manual = key => ({manual:null, sampleAt:cell(key).observed_at || null,
+            manualAt:cell(key).created_at || cell(key).entered_at || null});
+        const featureMap = new Map((result?.features || []).map(feature => [feature.key,feature]));
+        const members = {sysA:['systems','A'],sysB:['systems','B'],sys401:['systems','401'],sys402:['systems','402'],
+            desliming473:['desliming','473'],desliming474:['desliming','474']};
+        // All ten display keys are needed by the unchanged card layout, including
+        // reference-only raw ash when the server's EXPERT8 feature list omits it.
+        const inputs = App.MLR_FEATURES.map(key => {
+            const feature = featureMap.get(key), member = members[key];
+            const memberValue = member ? cell(member[0]).value?.[member[1]] : null;
+            const rawValue = feature?.raw ?? captured[key]?.value ?? cells[key]?.value ?? memberValue;
+            const raw = typeof rawValue === 'boolean' ? Number(rawValue) : numeric(rawValue);
+            return {key,raw,used:numeric(feature?.used),missing:raw===null,clipped:feature?.clipped===true};
+        });
+        const store = {amountInputs:{},instrumentInputs:{},coarseCalc:{},calcLogs:[],
+            coarseAshInput:manual('coarse_ash'),floatAshInput:manual('float_ash')};
+        const reader = {FEATURE_LABELS:App.FEATURE_LABELS,_manualValid:() => false,
+            ashMeasurementInfo:kind => measurement(kind==='heavy'?'heavy_ash':'total_ash'),
+            floatAshLayer:() => cell('float_ash').status==='manual'?'手动':'共享输入',
+            coarseAshLayer:() => cell('coarse_ash').status==='manual'?'手动':'共享预测',
+            coarseAmountLayer:() => cell('coarse_amount').source || '等待主机数据'};
+        const model = result?.model || null, advice = cell('suggested_density');
+        const sourceGuide = result?.guidance || {};
+        const guide = {...sourceGuide,scheme:'total',rhoCur:numeric(sourceGuide.rhoCur) ?? value('density'),
+            rhoNew:numeric(advice.value),maxStep:numeric(sourceGuide.maxStep),deadband:numeric(sourceGuide.deadband),
+            direction:sourceGuide.direction || 'hold',hold:advice.status==='held',
+            reason:advice.reason || '等待主机数据'};
+        const showAdvice = guide.rhoNew!==null && !['missing','invalid','held'].includes(advice.status);
+        const floating = result ? {timestamp:cell('float_ash').observed_at || null,
+            ash_content:value('float_ash'),coal_amount:value('float_amount'),filter_press_running:null} : null;
+        const coarse = result ? {timestamp:cell('coarse_ash').observed_at || result.generated_at || null,ash_content:null} : null;
+        const amounts = {heavy:value('heavy_amount'),float:value('float_amount'),coarse:value('coarse_amount')};
+        const sum = Object.values(amounts).every(Number.isFinite) ? amounts.heavy+amounts.float+amounts.coarse : null;
+        return {reader,store,guide,total:{...cell('total_ash'),value:value('total_ash'),source:'shared'},
+            productionEngine:'gpt',engineLabel:'GPT',modelGroup:model ? {...model,production:model.method,trainedAt:model.trained_at} : null,
+            model,coarse,floating,amounts,ashes:{heavy:value('heavy_ash'),float:value('float_ash'),coarse:value('coarse_ash')},sum,
+            formula:value('total_ash'),componentFeeds:true,showAdvice,ashOk:showAdvice && guide.direction==='hold',
+            prediction:value('coarse_ash'),inputs,previewOnly:false,
+            target:{min:numeric(result?.target?.min),max:numeric(result?.target?.max)}};
+    },
+
     buildSnapshot(view = this.view) {
+        if(window.Api?.isReadOnlyTest?.() && view==='gpt' && this.sharedSources()) return this.buildSharedSnapshot();
         const reader = this.readFacade(), store = reader.store;
         const guide = reader.computeDensityGuidance();
         const total = reader.resolveTotalAshEx();
@@ -974,10 +1027,12 @@ const DecisionOverviewPage = {
             return;
         }
         const participates=this.liveMode() && !['float-press','float-unmodeled','coarse-slime'].includes(node.id);
+        const sharedDetails=window.Api?.isReadOnlyTest?.() && this.view==='gpt' && this.sharedSources() && display.shared;
+        const shownDetails=participates || sharedDetails;
         const pairs = display.manual ? [['卡片显示值',display.value + (display.held ? '（待刷新）' : display.available ? '' : '（不可用）')],
             ['数据来源','SQLite · 手工补录'],['测量时间',this.time(display.sampleAt)],['录入时间',this.time(display.enteredAt)],
             ['状态',display.shared ? display.available?'已读取补录':'补录不可用' : display.item ? this.telemetryState(display.item) : '补录点位尚未返回'],['读取规则','按测量时间取最新；同一时间取最后录入']] :
-            [[participates?'当前采用值':'当前业务值',participates?display.value:node.value + (node.id === 'density' ? ' g/cm³' : '')],['当前来源',participates?display.source:node.source],['采样 / 记录时间',this.time(participates?display.sampleAt:node.sampleAt)],['人工录入时间',this.time(participates?display.enteredAt:node.enteredAt)],['化验结果可用时间','未记录（不由采样时刻推断）'],['实时业务绑定',participates?'参与本次实时计算':'尚未接入']];
+            [[participates?'当前采用值':'当前业务值',shownDetails?display.value:node.value + (node.id === 'density' ? ' g/cm³' : '')],['当前来源',shownDetails?display.source:node.source],['采样 / 记录时间',this.time(shownDetails?display.sampleAt:node.sampleAt)],['人工录入时间',this.time(shownDetails?display.enteredAt:node.enteredAt)],['化验结果可用时间','未记录（不由采样时刻推断）'],['实时业务绑定',participates?'参与本次实时计算':'尚未接入']];
         if (display.shared && !display.manual) pairs.unshift(['卡片显示值',display.value],['数据状态',display.badge],['单位',display.components?'运行状态 · 无单位':display.unit || '未配置']);
         else if (display.bound && !display.manual) pairs.unshift([node.id === 'density' ? '采集对照值' : '卡片显示值',display.value + (display.held ? '（沿用上次有效值）' : display.available ? '' : '（不可用）')],
             ['卡片状态',display.stopped ? '设备停机' : display.held ? '采集异常 · 沿用历史值' : display.available ? '实时采集' : '不可用'],

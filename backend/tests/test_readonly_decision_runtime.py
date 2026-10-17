@@ -112,6 +112,7 @@ def test_bundle_uses_one_transaction_host_clock_and_passes_current_to_hourly(mon
     import app.database
     import app.services.decision_sources
     import app.decision_hourly.service
+    from app.gpt_runtime.decision_store import load_decision_store
 
     db = SessionStub()
     sessions, calls = [], []
@@ -120,14 +121,16 @@ def test_bundle_uses_one_transaction_host_clock_and_passes_current_to_hourly(mon
         sessions.append(db)
         return db
 
-    def current(database, *, when, live):
+    def current(database, *, when, live, store_loader):
         assert database is db and live is True and not db.closed
+        assert store_loader is load_decision_store
         assert when == datetime(2026, 10, 17, 1, 0, 0, 123000, tzinfo=timezone.utc)
         calls.append(('current', when))
         return {'generated_at': when.isoformat(), 'policy': 'local-code'}
 
-    def hourly(database, *, now, live, defer_missing):
+    def hourly(database, *, now, live, defer_missing, store_loader):
         assert database is db and not db.closed and defer_missing is True
+        assert store_loader is load_decision_store
         assert live == {'generated_at': now.isoformat(), 'policy': 'local-code'}
         calls.append(('hourly', now))
         return {'checked_at': now.isoformat()}
