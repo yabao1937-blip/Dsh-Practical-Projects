@@ -57,8 +57,17 @@ Chrome 打开 `127.0.0.1:8000/#decision`，确认只读测试横幅、18 个主�
 
 笔记本服务只监听 `127.0.0.1:8000`；使用原启动脚本启动，mode 为 `readonly-test`。旧笔记本数据库保持 1637724160 字节，mtime 为 `2026-10-16T07:02:07.156Z`，未更新。
 
-## 并发读取待核查
+## 并发读取复查与安全诊断
 
 浏览器验收发现：部分首轮接口出现快速 OperationalError，且后续轮询偶有 QueuePool 3 秒等待超时；请求恢复后核心计算和表格正常。顺序 health／telemetry／manual 读取均 200 且约 0.1–0.2 秒，但不能据此宣称并发稳定。
 
-当前正在核查该只读传输／并发边界，不能把 500 全部归因于缓存、网络或本次模型输入投影。最终排查结论另行补充。
+补充安全诊断后，10:52:22 的同轮 health／telemetry／manual／小时表失败明确记录 `readonly_pool_timeout: true`，确认是笔记本本地 QueuePool 等待超过 3 秒；同轮其他请求约 3.9 秒后返回 200。更早的快速 OperationalError 没有足够诊断信息，不能追溯认定为远端 429、过期快照或网络故障。
+
+诊断仅在只读测试模式输出白名单远端错误码、HTTP 状态及本地池超时标记；不输出异常文本、SQL、参数、令牌，不改变生产日志或 HTTP 响应规则。没有增加连接池容量、自动重试或修改生产主机。
+
+```text
+python -X utf8 -m pytest tests/test_readonly_error_diagnostics.py tests/test_remote_sqlite.py tests/test_health_liveness.py -q --tb=short
+30 passed
+```
+
+加上前述 125 项，本批共 155 项后端回归通过。最新浏览器主图和小时表持续可读，current／hourly 样本约 3.1–3.6 秒，但后续同时轮询仍能触发池等待。因此第一批的结果一致性及查询削减已验证，并发稳定性仍是后续统一读取／请求合并需要解决的问题；未宣称已修复全部偶发繁忙或达到 P95 目标。

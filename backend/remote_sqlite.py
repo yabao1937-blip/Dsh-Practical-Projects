@@ -20,6 +20,15 @@ TOKEN_HEADER = 'X-DMCS-Read-Token'
 _PREFIX = '/api/v1/readonly-db'
 _LEADING = re.compile(r'\A(?:\s+|--[^\n]*(?:\n|$)|/\*[\s\S]*?\*/)*')
 _READONLY = 'Remote database is read-only; production data was not changed.'
+_ERROR_CODES = frozenset({
+    'readonly_auth_required', 'readonly_unavailable', 'readonly_transaction_limit',
+    'readonly_database_unavailable', 'readonly_transaction_expired',
+    'readonly_query_timeout', 'readonly_result_type_rejected', 'readonly_result_limit',
+    'readonly_sql_limit', 'readonly_parameters_rejected', 'readonly_parameter_limit',
+    'readonly_cursor_limit', 'readonly_query_rejected', 'readonly_cursor_expired',
+    'readonly_disabled', 'readonly_request_limit', 'readonly_request_rejected',
+    'readonly_request_failed', 'readonly_invalid_response', 'readonly_transport_unavailable',
+})
 
 
 def _encode(value):
@@ -52,9 +61,10 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 class _RemoteError(sqlite3.OperationalError):
-    def __init__(self, message, status=None):
+    def __init__(self, message, status=None, *, error_code=None):
         super().__init__(message)
-        self.status = status
+        self.status = status if type(status) is int and 100 <= status <= 599 else None
+        self.error_code = error_code if error_code in _ERROR_CODES else 'readonly_request_failed'
 
 
 class RemoteConnection:
@@ -122,13 +132,16 @@ class RemoteConnection:
             self._failed = True
             # Only known identifier-shaped codes are surfaced, never SQL, tokens,
             # query parameters, response HTML, or the remote authentication URL.
-            code = code if isinstance(code, str) and re.fullmatch(r'readonly_[a-z_]+', code) else 'readonly_request_failed'
-            raise _RemoteError(f'Read-only host rejected the request: {code} (HTTP {error.code}).', error.code) from None
+            code = code if isinstance(code, str) and code in _ERROR_CODES else 'readonly_request_failed'
+            raise _RemoteError(f'Read-only host rejected the request: {code} (HTTP {error.code}).',
+                error.code, error_code=code) from None
         except (URLError, OSError, ValueError) as error:
             self._failed = True
             if isinstance(error, ValueError):
-                raise _RemoteError('Invalid response from read-only host; no local database was used.') from None
-            raise _RemoteError('Read-only host is unavailable; no local database was used.') from None
+                raise _RemoteError('Invalid response from read-only host; no local database was used.',
+                    error_code='readonly_invalid_response') from None
+            raise _RemoteError('Read-only host is unavailable; no local database was used.',
+                error_code='readonly_transport_unavailable') from None
 
     def _begin(self):
         self._check()

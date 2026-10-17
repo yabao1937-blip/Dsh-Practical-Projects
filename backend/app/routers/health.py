@@ -1,4 +1,5 @@
 """存活与就绪分开：就绪实际检查 DB 和运行所需的表。"""
+import json
 import logging
 import time
 
@@ -8,6 +9,7 @@ from sqlalchemy import inspect, text
 
 from ..config import APP_VERSION
 from ..database import engine
+from ..observability import readonly_failure_details
 from ..telemetry.domain import iso_time, utc_now
 
 router = APIRouter(tags=["系统"])
@@ -34,7 +36,9 @@ def health():
                 status, code = "unavailable", "schema_not_ready"
     except Exception as exc:
         status, code = "unavailable", "database_unavailable"
-        log.warning("database_health_failed code=%s", type(exc).__name__)
+        details = readonly_failure_details(exc)
+        suffix = ' diagnostics=' + json.dumps(details, sort_keys=True) if details else ''
+        log.warning("database_health_failed code=%s%s", type(exc).__name__, suffix)
     return JSONResponse({"status": status, "modules": ["coal-records", "telemetry"],
         "version": APP_VERSION, "checked_at": iso_time(utc_now()),
         "uptime_seconds": round(time.monotonic() - started, 1),

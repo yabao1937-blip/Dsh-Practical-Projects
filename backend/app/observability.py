@@ -7,7 +7,34 @@ import uuid
 
 from fastapi.responses import JSONResponse
 
+from .config import REMOTE_READONLY
+
 log = logging.getLogger("dmcs.http")
+
+
+def readonly_failure_details(exc):
+    """Bounded, value-free diagnostics; production exception logging is unchanged."""
+    if not REMOTE_READONLY:
+        return {}
+    from remote_sqlite import _RemoteError
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+
+    details, pending, seen = {}, [exc], set()
+    while pending and len(seen) < 12:
+        current = pending.pop(0)
+        if not isinstance(current, BaseException) or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, _RemoteError):
+            details.setdefault('readonly_error_code', current.error_code)
+            if current.status is not None:
+                details.setdefault('readonly_http_status', current.status)
+        if isinstance(current, PoolTimeout):
+            details['readonly_pool_timeout'] = True
+        pending.extend([getattr(current, 'orig', None), current.__cause__, current.__context__])
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions[:12])
+    return details
 
 
 def install_observability(app):
@@ -22,8 +49,10 @@ def install_observability(app):
         try:
             response = await call_next(request)
         except Exception as exc:
-            # 仅异常类型可进日志；SQL 参数/路径/密钥不能随异常文本回显。
-            log.error("request_failed request_id=%s code=%s", request_id, type(exc).__name__)
+            # Never stringify exceptions: ORM errors include SQL and parameters.
+            details = readonly_failure_details(exc)
+            suffix = ' diagnostics=' + json.dumps(details, sort_keys=True) if details else ''
+            log.error("request_failed request_id=%s code=%s%s", request_id, type(exc).__name__, suffix)
             response = JSONResponse({"detail": {"error": "服务器内部错误，请使用请求编号排查"},
                 "request_id": request_id}, status_code=500)
         response.headers["X-Request-ID"] = request_id
