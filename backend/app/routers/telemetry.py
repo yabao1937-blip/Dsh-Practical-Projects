@@ -5,6 +5,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..config import REMOTE_READONLY
 from ..auth import require_write
 from ..telemetry.control import CollectorStartError, ensure_collector_started
 from ..telemetry.models import TelemetryReading
@@ -26,6 +27,11 @@ def reconnect():
 def latest(source_id: str | None = Query(None, max_length=64), db: Session = Depends(get_db)):
     if db.bind.dialect.name == "sqlite":
         db.execute(text("BEGIN"))
+    if REMOTE_READONLY:
+        # Freshness belongs to the computer recording the samples. A laptop
+        # clock offset must not turn valid production samples into stale data.
+        from ..remote_readonly.runtime import host_now
+        return latest_view(db, source_id, now=host_now(db))
     return latest_view(db, source_id)
 
 

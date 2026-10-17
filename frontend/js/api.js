@@ -156,7 +156,7 @@ window.Api = {
         return result;
     },
     async getDecisionCurrent() {
-        const response = await fetch(this.base + '/decision/current', {signal:AbortSignal.timeout(8000),cache:'no-store'});
+        const response = await fetch(this.base + '/decision/current', {signal:AbortSignal.timeout(this.isReadOnlyTest()?30000:8000),cache:'no-store'});
         if (!response.ok) throw new Error('共享决策计算暂不可用');
         const result = await response.json();
         if (result.policy !== 'decision-live-v1' || !result.cells || !result.sources) throw new Error('共享决策计算响应异常');
@@ -186,7 +186,7 @@ window.Api = {
     },
 
     async getDecisionHourly() {
-        const response=await fetch(this.base+'/decision/hourly',{signal:AbortSignal.timeout(8000),cache:'no-store'});
+        const response=await fetch(this.base+'/decision/hourly',{signal:AbortSignal.timeout(this.isReadOnlyTest()?30000:8000),cache:'no-store'});
         if(!response.ok) throw new Error('小时统计暂不可用，请重试');
         const result=await response.json();
         if(result?.status==='pending' && Number.isFinite(Date.parse(result.checked_at)) &&

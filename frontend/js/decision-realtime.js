@@ -1,6 +1,7 @@
 /* Decision-only live input orchestration. The server evaluates one immutable input snapshot. */
 const DecisionRealtime = {
     result:null, resultKey:null, currentKey:null, inFlight:null, lastAttempt:0, error:'', previousResult:null, completedAt:0, previewUntil:0,
+    readOnlyNextAt:0, readOnlyEpoch:null, readOnlyForce:false,
     pending() { return !this.result && !!this.inFlight && !this.error; },
     presentation() {
         if(this.result) return this.result;
@@ -98,10 +99,17 @@ const DecisionRealtime = {
             }
         })();
     },
-    updateShared(page) {
-        if(this.inFlight || DecisionSources.saving || Date.now()-this.lastAttempt<4500) return;
+    updateShared(page,force=false) {
+        const readOnly=!!window.Api?.isReadOnlyTest?.(), epoch=DecisionSources.epoch;
+        if(this.inFlight) {
+            if(readOnly && (force || epoch!==this.readOnlyEpoch)) this.readOnlyForce=true;
+            return;
+        }
+        if(DecisionSources.saving || (readOnly
+            ? !force && epoch===this.readOnlyEpoch && Date.now()<this.readOnlyNextAt
+            : Date.now()-this.lastAttempt<4500)) return;
+        if(readOnly) this.readOnlyEpoch=epoch;
         this.lastAttempt=Date.now();
-        const epoch=DecisionSources.epoch;
         this.inFlight=(async()=>{
             try {
                 await DecisionSources.ensure(page);
@@ -116,9 +124,12 @@ const DecisionRealtime = {
                 this.result=null; this.previousResult=null; this.error=error.message;
             } finally {
                 this.inFlight=null;
+                if(readOnly) this.readOnlyNextAt=Date.now()+30000;
                 if(page.active() && this.active(page)) {
                     page.renderGraph(); page.renderContext(); page.renderInspector();
-                    if(epoch!==DecisionSources.epoch) {this.lastAttempt=0; this.updateShared(page);}
+                    if(readOnly && (this.readOnlyForce || epoch!==DecisionSources.epoch)) {
+                        this.readOnlyForce=false; this.updateShared(page,true);
+                    } else if(epoch!==DecisionSources.epoch) {this.lastAttempt=0; this.updateShared(page);}
                 }
             }
         })();

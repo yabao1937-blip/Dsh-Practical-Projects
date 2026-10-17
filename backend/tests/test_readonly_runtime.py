@@ -269,6 +269,43 @@ def test_remote_disconnect_reports_unavailable_without_local_fallback(remote_run
     """)
 
 
+def test_telemetry_freshness_uses_the_production_clock_in_readonly_mode(remote_runtime):
+    execute_runtime(remote_runtime, """
+        from datetime import datetime, timezone
+        from app.routers import telemetry
+        from app.remote_readonly import runtime
+        expected = datetime(2026, 10, 17, 1, 0, tzinfo=timezone.utc)
+        runtime.host_now = lambda db: expected
+        telemetry.latest_view = lambda db, source_id, now=None: {'checked_at': now.isoformat()}
+        with TestClient(app, client=('127.0.0.1', 12345)) as client:
+            response = client.get('/api/v1/telemetry/latest')
+            assert response.status_code == 200, response.text
+            assert response.json()['checked_at'] == expected.isoformat()
+        cleanup()
+    """)
+
+
+def test_published_hour_windows_use_the_production_clock_in_readonly_mode(remote_runtime):
+    execute_runtime(remote_runtime, """
+        from datetime import datetime, timezone
+        from app.decision_hourly import ash_settlement
+        from app.remote_readonly import runtime
+        expected = datetime(2026, 10, 17, 0, 59, 50, tzinfo=timezone.utc)
+        runtime.host_now = lambda db: expected
+        def settled(db, start, end, now=None):
+            assert now == expected
+            return {'checked_at': now.isoformat()}
+        ash_settlement.read_settled_hours = settled
+        ash_settlement.read_settled_interval = settled
+        with TestClient(app, client=('127.0.0.1', 12345)) as client:
+            for path in ('/api/v1/decision/total-ash-hours', '/api/v1/decision/total-ash-interval'):
+                response = client.get(path)
+                assert response.status_code == 200, response.text
+                assert response.json()['checked_at'] == expected.isoformat()
+        cleanup()
+    """)
+
+
 def test_pool_checkin_closes_remote_snapshot_and_reuse_opens_a_fresh_one(remote_runtime):
     execute_runtime(remote_runtime, """
         from sqlalchemy import text

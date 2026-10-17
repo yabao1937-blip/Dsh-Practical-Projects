@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, text
 
 from ..database import get_db
+from ..config import REMOTE_READONLY
 from ..services.decision_live import calculate, LABELS
 from ..services.state import load_store
 from ..auth import require_write
@@ -130,6 +131,9 @@ def patch_sources(body: SourcesPatch, db: Session = Depends(get_db)):
 
 @router.get('/current')
 def current_decision(db: Session = Depends(get_db)):
+    if REMOTE_READONLY:
+        from ..remote_readonly.runtime import decision_view
+        return decision_view('current')
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))
     return shared_snapshot(db)
@@ -137,6 +141,9 @@ def current_decision(db: Session = Depends(get_db)):
 
 @router.get('/hourly')
 def hourly_decision(db: Session = Depends(get_db)):
+    if REMOTE_READONLY:
+        from ..remote_readonly.runtime import decision_view
+        return decision_view('hourly')
     from ..decision_hourly.service import read_hour
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))
@@ -149,6 +156,9 @@ def total_ash_hours(start: datetime | None = None, end: datetime | None = None, 
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))
     try:
+        if REMOTE_READONLY:
+            from ..remote_readonly.runtime import host_now
+            return read_settled_hours(db, start, end, now=host_now(db))
         return read_settled_hours(db, start, end)
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
@@ -160,6 +170,9 @@ def total_ash_interval(start: datetime | None = None, end: datetime | None = Non
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))
     try:
+        if REMOTE_READONLY:
+            from ..remote_readonly.runtime import host_now
+            return read_settled_interval(db, start, end, now=host_now(db))
         return read_settled_interval(db,start,end)
     except ValueError as error:
         raise HTTPException(422,str(error)) from error

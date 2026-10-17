@@ -11,12 +11,12 @@ function fixture(readOnly, failState = false) {
         rawSlime:[], manualEntries:[{id:'host-entry'}], _revision:'host'};
     const pending = JSON.stringify({wall:1,stamp:'old-pending',body:JSON.stringify(oldStore)});
     const storage = new Map([['dmcs_store',JSON.stringify(oldStore)], ['dmcs_mirror_pending',pending], ['theme','dark']]);
-    const writes = [], requests = [], timers = [], toasts = [];
+    const writes = [], requests = [], timers = [], toasts = [], timeouts = [];
     const elements = {'status-sync':{}, 'main-content':{hidden:false},
         'dmcs-readonly-status':{textContent:'测试服 · 本地前后端代码 · 主机数据只读：http://host.invalid/'}};
     const events = {};
     const ctx = vm.createContext({console, Blob, URLSearchParams,
-        AbortSignal:{timeout(){return undefined;}},
+        AbortSignal:{timeout(value){timeouts.push(value);return undefined;}},
         setTimeout(callback){timers.push(callback);return timers.length;},clearTimeout(){},
         window:{location:{protocol:'http:',hash:''},addEventListener(name,callback){events[name]=callback;}},
         document:{visibilityState:'visible',
@@ -43,7 +43,33 @@ function fixture(readOnly, failState = false) {
     App.showToast = (message,kind)=>toasts.push({message,kind});
     for (const name of ['_syncGuideSchemeBtn','_syncTotalAshBtn','bindNav','startClock','checkAlerts',
         'initPage','_onExternalInput','refreshAllPages']) App[name]=()=>{};
-    return {App,Api:ctx.window.Api,ops:ctx.window.Operations,ctx,host,storage,writes,requests,timers,toasts,elements,events,pending};
+    return {App,Api:ctx.window.Api,ops:ctx.window.Operations,ctx,host,storage,writes,requests,timers,toasts,timeouts,elements,events,pending};
+}
+
+async function pollingFixture(readOnly, name) {
+    let now=100000;
+    const pending=[];
+    const ctx=vm.createContext({console,
+        Date:class extends Date {static now(){return now;}},
+        DecisionDensityDisplay:{remember(){}},
+        DecisionSources:{epoch:0,saving:false,config:{resolved_choices:{}},ensure:async()=>({}),apply:()=>true},
+    });
+    ctx.Api={isReadOnlyTest:()=>readOnly}; ctx.window={Api:ctx.Api};
+    ctx.Api[name==='DecisionRealtime'?'getDecisionCurrent':'getDecisionHourly']=()=>new Promise((resolve,reject)=>pending.push({resolve,reject}));
+    vm.runInContext(fs.readFileSync(path.join(__dirname,'../../frontend/js/'+
+        (name==='DecisionRealtime'?'decision-realtime.js':'decision-hourly.js')),'utf8'),ctx);
+    const controller=vm.runInContext(name,ctx);
+    const page={view:'gpt',active:()=>true,hourMode:()=>false,renderGraph(){},renderContext(){},renderInspector(){}};
+    const update=force=>name==='DecisionRealtime'?controller.updateShared(page,force):controller.update(page,force);
+    const tick=async()=>{for(let i=0;i<6;i++)await Promise.resolve();};
+    const finish=async(fail=false)=>{
+        const flight=controller.inFlight;
+        const next=pending.at(-1);
+        if(fail)next.reject(new Error('slow host read failed'));
+        else next.resolve(name==='DecisionRealtime'?{cells:{},sources:{}}:{status:'pending',reason:'calculating'});
+        await flight;await tick();
+    };
+    return {ctx,controller,pending,update,tick,finish,advance:ms=>{now+=ms;}};
 }
 
 (async()=>{
@@ -117,5 +143,49 @@ function fixture(readOnly, failState = false) {
     assert.equal(production.requests[0].options.method,'PUT','no meta retains real mirror path');
     assert.equal(production.App.store._revision,'saved');
     assert.equal(production.App._readPendingSlot(),null,'normal successful write clears its own pending slot');
+
+    for(const f of [readOnly,production]) {
+        f.ctx.fetch=async url=>({ok:true,json:async()=>url.endsWith('/decision/current')
+            ?{policy:'decision-live-v1',cells:{},sources:{}}
+            :{policy:'decision-hourly-v2',cells:{},period:{},coverage:{}}});
+        await f.Api.getDecisionCurrent(); await f.Api.getDecisionHourly();
+        assert.deepEqual(f.timeouts.slice(-2),f.Api.isReadOnlyTest()?[30000,30000]:[8000,8000],
+            'only read-only mode extends current/hourly timeouts');
+    }
+    for(const name of ['DecisionRealtime','DecisionHourly']) {
+        const poll=await pollingFixture(true,name);
+        poll.update();poll.update();await poll.tick();
+        assert.equal(poll.pending.length,1,name+' coalesces in-flight polling');
+        poll.advance(15000);await poll.finish();
+        poll.advance(29999);poll.update();await poll.tick();
+        assert.equal(poll.pending.length,1,name+' waits 30 seconds after slow completion');
+        poll.advance(1);poll.update();await poll.tick();
+        assert.equal(poll.pending.length,2);
+        poll.advance(15000);await poll.finish(true);
+        poll.advance(29999);poll.update();await poll.tick();
+        assert.equal(poll.pending.length,2,name+' also throttles failed reads after completion');
+        poll.update(true);await poll.tick();
+        assert.equal(poll.pending.length,3,name+' explicit refresh bypasses cooldown');
+        poll.update(true);poll.update(true);await poll.tick();
+        assert.equal(poll.pending.length,3,name+' force requests never overlap an existing flight');
+        await poll.finish();
+        assert.equal(poll.pending.length,4,name+' merges queued force refreshes into one follow-up');
+        poll.ctx.DecisionSources.epoch++;
+        poll.update();poll.update();await poll.tick();
+        assert.equal(poll.pending.length,4,name+' epoch changes also wait for the old flight');
+        await poll.finish();
+        assert.equal(poll.pending.length,5,name+' new epoch refresh is not lost to the cooldown');
+        await poll.finish();
+        poll.ctx.DecisionSources.epoch++;
+        poll.update();await poll.tick();
+        assert.equal(poll.pending.length,6,name+' new epoch bypasses cooldown without a flight');
+        await poll.finish();
+
+        const normal=await pollingFixture(false,name);
+        normal.update();await normal.tick();normal.advance(15000);await normal.finish();
+        normal.update();await normal.tick();
+        assert.equal(normal.pending.length,2,name+' production keeps its original 4.5-second start-based interval');
+        await normal.finish();
+    }
     console.log('Read-only frontend: host-only initialization, offline empty failure, zero automatic writes, explicit mutation rejection, and normal production mirrors passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

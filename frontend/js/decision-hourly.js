@@ -1,6 +1,7 @@
 /* Previous completed natural hour. Read-only server summaries; never changes App.store. */
 const DecisionHourly = {
     result:null, inFlight:null, lastAttempt:0, error:'', clockBaseAt:0, resultEpoch:0, sourceKeyAtRequest:'',
+    readOnlyNextAt:0, readOnlyEpoch:null, readOnlyForce:false,
     keys:{'raw-ash':'raw_ash','coal-rate':'coal_amount','tail-level':'level','system-switches':'systems',
         desliming:'desliming','heavy-ash':'heavy_ash','heavy-amount':'heavy_amount','float-ash':'float_ash',
         'float-amount':'float_amount','float-press':'float_press','float-unmodeled':'reagent',
@@ -194,9 +195,17 @@ const DecisionHourly = {
           return `<section class="decision-node decision-hourly-summary${statusClass}" data-decision-key="hourly-summary" aria-label="本小时建议密度" title="${page.escape(title)}" aria-busy="${this.pending()}" style="left:${root.x}px;top:${root.y-height-spacing}px;width:${root.w}px;height:${height}px"><span class="decision-node-heading">本小时建议密度</span><span class="decision-node-value${Number.isFinite(value)?'':' decision-value-empty'}">${Number.isFinite(value)?page.number(value,3):'暂无有效值'} <span class="decision-root-unit">g/cm³</span></span><span class="decision-node-source">更新于 ${page.escape(updatedTime)}</span></section>`;
     },
     async update(page,force=false) {
-        if(!this.enabled(page) || this.inFlight || (typeof DecisionSources!=='undefined' && DecisionSources.saving) ||
-            (!force && Date.now()-this.lastAttempt<4500)) return;
+        const readOnly=typeof Api!=='undefined' && !!Api.isReadOnlyTest?.();
+        if(!this.enabled(page)) return;
+        if(this.inFlight) {
+            if(readOnly && (force || this.epoch()!==this.readOnlyEpoch)) this.readOnlyForce=true;
+            return;
+        }
+        if((typeof DecisionSources!=='undefined' && DecisionSources.saving) ||
+            (!force && (readOnly ? this.epoch()===this.readOnlyEpoch && Date.now()<this.readOnlyNextAt
+                : Date.now()-this.lastAttempt<4500))) return;
         const epoch=this.epoch(), requestedAt=this.clock(), sourceKey=this.sourceKey();
+        if(readOnly) this.readOnlyEpoch=epoch;
         this.lastAttempt=Date.now(); this.error='';
         const work=(async()=>{
             try {
@@ -215,10 +224,13 @@ const DecisionHourly = {
         this.inFlight=work;
         await work;
         this.inFlight=null;
+        if(readOnly) this.readOnlyNextAt=Date.now()+30000;
         if(page.active() && this.enabled(page)) {
             page.renderGraph();
             if(page.hourMode()) { page.renderContext(); page.renderInspector(); }
-            if(epoch!==this.epoch()) this.update(page,true);
+            if(readOnly && (this.readOnlyForce || epoch!==this.epoch())) {
+                this.readOnlyForce=false; this.update(page,true);
+            } else if(epoch!==this.epoch()) this.update(page,true);
         }
     },
     display(page,node) {

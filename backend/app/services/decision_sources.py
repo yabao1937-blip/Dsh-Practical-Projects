@@ -151,8 +151,8 @@ def collect_shared(inputs, config):
     return cells
 
 
-def shared_snapshot(db, when=None):
-    live = when is None
+def shared_snapshot(db, when=None, *, live=None):
+    live = when is None if live is None else live
     when = when or utc_now()
     inputs = Inputs(db, when, live=live, authoritative=True)
     config = config_view(db, when, inputs)
