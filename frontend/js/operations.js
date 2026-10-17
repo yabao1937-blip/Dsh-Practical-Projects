@@ -67,13 +67,15 @@ window.Operations = {
         const button = document.getElementById('telemetry-reconnect');
         if (!button) return;
         const local = !window.location.protocol.startsWith('http');
-        button.disabled = local || this._reconnectBusy;
+        const readOnly = window.Api?.isReadOnlyTest?.();
+        button.disabled = local || readOnly || this._reconnectBusy;
         button.textContent = this._reconnectBusy ? '连接中…' : '重新连接';
-        button.title = local ? '通过服务器地址打开页面后可重新连接。' : '启动或恢复后台只读采集，关闭页面后继续运行。';
+        button.title = readOnly ? window.Api.readOnlyMessage : local ? '通过服务器地址打开页面后可重新连接。' : '启动或恢复后台只读采集，关闭页面后继续运行。';
         button.setAttribute('aria-busy', String(this._reconnectBusy));
     },
 
     reconnect() {
+        if (window.Api?.isReadOnlyTest?.()) { App.showToast(window.Api.readOnlyMessage, 'warning'); return Promise.resolve(false); }
         if (this._reconnectTask) return this._reconnectTask;
         if (!window.location.protocol.startsWith('http')) return Promise.resolve(false);
         this._reconnectBusy = true;
@@ -184,6 +186,13 @@ window.Operations = {
     },
 
     renderSync() {
+        if (window.Api?.isReadOnlyTest?.()) {
+            const error = App._readOnlyLoadError;
+            this.text('status-sync', error ? '主机数据读取失败' : '只读主机数据', error ? 'error' : 'good');
+            const el = document.getElementById('status-sync');
+            if (el) el.title = error || '笔记本代码运行；生产数据来自主机，不发送整库镜像或补录。';
+            return;
+        }
         if (this.serverState === 'local') { this.text('status-sync', '单机存储', ''); return; }
         const state = App.mirrorStatus;
         let label = '服务器尚未确认', kind = 'warn';

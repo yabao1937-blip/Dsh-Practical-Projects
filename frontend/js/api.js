@@ -23,7 +23,18 @@
 window.Api = {
     base: '/api/v1',
 
+    isReadOnlyTest() {
+        return document.querySelector?.('meta[name="dmcs-readonly"]')?.content === 'true';
+    },
+
+    readOnlyMessage: '笔记本测试服只读主机数据，不能保存补录、配置或模型；请在主机生产页面操作。',
+
+    requireWritable() {
+        if (this.isReadOnlyTest()) throw new Error(this.readOnlyMessage);
+    },
+
     async manualMeasurementsRequest(path = '', body, timeoutMs = 20000) {
+        if (body !== undefined) this.requireWritable();
         const headers = {};
         if (body !== undefined) {
             headers['Content-Type'] = 'application/json';
@@ -130,6 +141,7 @@ window.Api = {
     },
 
     async decisionSources(body) {
+        if (body) this.requireWritable();
         const headers = {};
         if (body) {
             headers['Content-Type'] = 'application/json';
@@ -184,6 +196,7 @@ window.Api = {
     },
 
     async decisionEvidence(path,body) {
+        if (body) this.requireWritable();
         const token=this.writeToken(),headers=body?{'Content-Type':'application/json'}:{};
         if(body && token) headers['X-DMCS-Token']=token;
         const response=await fetch(this.base+'/decision/evidence'+path,{method:body?'POST':'GET',headers,
@@ -197,6 +210,7 @@ window.Api = {
     },
 
     async reconnectTelemetry() {
+        this.requireWritable();
         const token = this.writeToken();
         const response = await fetch(this.base + '/telemetry/reconnect', {
             method: 'POST',
@@ -233,6 +247,7 @@ window.Api = {
     },
 
     putStateBody(body, opts) {
+        if (this.isReadOnlyTest()) return Promise.resolve({ok:false, denied:true, readOnly:true, reason:this.readOnlyMessage});
         const o = opts || {};
         const url = this.base + '/state' + (o.force ? '?force=true' : '');
         const headers = { 'Content-Type': 'application/json' };
@@ -290,6 +305,7 @@ window.Api = {
     },
 
     async syncHeavySample(sample) {
+        this.requireWritable();
         const token = this.writeToken();
         const r = await fetch(this.base + '/samples/heavy-ash', {
             method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? {'X-DMCS-Token': token} : {}) },
@@ -312,6 +328,7 @@ window.Api = {
     },
 
     async retrainCoarseModel(range, revision, engine = 'ds') {        // 后端训练 MLR+PLS 粗灰模型；返回 { coarseModel(全量), history, production, ... }
+        this.requireWritable();
         const tk = this.writeToken();
         const r = await fetch(this.base + '/training/coarse-model?range=' + encodeURIComponent(range || 'jun_jul') + '&engine=' + encodeURIComponent(engine), {
             headers: {...(tk ? { 'X-DMCS-Token': tk } : {}), ...(revision ? {'X-DMCS-Revision': revision} : {})},

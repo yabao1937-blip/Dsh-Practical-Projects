@@ -30,6 +30,7 @@ def serve(output):
         raise ValueError('Compatibility update must stay inside the configured output directory')
     project_update = (output/'extras'/'ProjectUpdate.zip').resolve()
     diagnostics = (output/'extras'/'ProjectDiagnostics.zip').resolve()
+    readonly_bridge = (output/'extras'/'ReadOnlyBridge.zip').resolve()
     prefix = '/'+settings['token']
     allowed = {settings['client'], settings['bind'], '127.0.0.1'}
 
@@ -49,6 +50,11 @@ def serve(output):
                 self.send_header('Location', prefix+'/')
                 self.end_headers()
             elif path in (prefix, prefix+'/'):
+                readonly = (f'<h2>笔记本测试服 · 主机只读数据接入</h2>'
+                    f'<p><a href="{prefix}/readonly-bridge.zip">下载只读数据接入包</a></p>'
+                    f'<p>在主机全部解压到新文件夹，双击 <b>EnableReadOnlyTest.cmd</b>。'
+                    f'仅短暂重启网页服务，保留数据库、采集、模型与原配置。</p><hr>'
+                    if readonly_bridge.is_file() else '')
                 project = (f'<h2>已有主机：本次项目更新</h2>'
                     f'<p><a href="{prefix}/project-update.zip">下载本次项目更新包（保留主机数据库）</a></p>'
                     f'<p>右键 ZIP → 全部解压，进入文件夹，双击 <b>UpdateProject.cmd</b>。成功后按 Ctrl＋F5。</p>'
@@ -65,7 +71,7 @@ def serve(output):
                     if chrome.is_file() else '')
                 content = (f'<!doctype html><meta charset="utf-8"><title>离线安装</title>'
                     f'<body style="font:22px sans-serif;padding:32px;line-height:1.7">'
-                    f'{project}'+(f'<h2>主机故障诊断</h2><p><a href="{prefix}/diagnostics.zip">下载一键诊断包</a>：全部解压后运行 DiagnoseProject.cmd，不停止服务、不修改数据库。</p><hr>' if diagnostics.is_file() else '')+
+                    f'{readonly}{project}'+(f'<h2>主机故障诊断</h2><p><a href="{prefix}/diagnostics.zip">下载一键诊断包</a>：全部解压后运行 DiagnoseProject.cmd，不停止服务、不修改数据库。</p><hr>' if diagnostics.is_file() else '')+
                     f'<h2>首次安装 · Windows 10 64位 · 重介密控系统</h2>'
                     f'<p><a href="{prefix}/download.zip">下载离线安装包（{bundle.stat().st_size/1048576:.0f} MB）</a></p>'
                     f'<ol><li>下载完成后，右键 ZIP → 全部解压。</li>'
@@ -89,6 +95,8 @@ def serve(output):
                 self.download(project_update, 'application/zip')
             elif path == prefix+'/diagnostics.zip' and diagnostics.is_file():
                 self.download(diagnostics, 'application/zip')
+            elif path == prefix+'/readonly-bridge.zip' and readonly_bridge.is_file():
+                self.download(readonly_bridge, 'application/zip')
             else:
                 self.send_error(404)
 

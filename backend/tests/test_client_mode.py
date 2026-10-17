@@ -31,6 +31,7 @@ def test_python_entry_stops_before_database_or_collection(tmp_path,entry):
     (root/'data').mkdir(parents=True)
     (root/'scripts').mkdir()
     shutil.copy2(BACKEND/'client_mode.py',root/'client_mode.py')
+    shutil.copy2(BACKEND/'remote_mode.py',root/'remote_mode.py')
     shutil.copy2(BACKEND/entry,root/entry)
     (root/'data/client-mode.json').write_text(json.dumps(dict(mode='client',server_url='http://10.255.2.7:8000/')))
     r = subprocess.run([sys.executable,str(root/entry)],cwd=root,capture_output=True,text=True,encoding='utf-8')

@@ -15,7 +15,9 @@ param([int]$IntervalSec = 60)
 
 $ErrorActionPreference = 'Continue'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-if (Test-Path -LiteralPath (Join-Path $repo 'backend\data\client-mode.json')) {
+if ((Test-Path -LiteralPath (Join-Path $repo 'backend\data\client-mode.json')) -and
+    -not (Test-Path Env:DMCS_REMOTE_READONLY_CONFIG) -and
+    -not (Test-Path -LiteralPath (Join-Path $repo 'backend\data\remote-readonly.json'))) {
     Write-Host 'Client mode: local watchdog is disabled.'
     exit 0
 }

@@ -16,6 +16,8 @@ BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BACKEND_DIR))
 
 _TMP_DIR = tempfile.mkdtemp(prefix="dmcs_pytest_")
+os.environ.pop("DMCS_REMOTE_READONLY_CONFIG", None)
+os.environ["DMCS_ISOLATED_TEST_DB"] = "1"
 os.environ["DMCS_DATABASE_URL"] = f"sqlite:///{(Path(_TMP_DIR) / 'test.db').as_posix()}"
 
 from app import models  # noqa: E402

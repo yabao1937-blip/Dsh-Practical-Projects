@@ -1,9 +1,11 @@
 """全局配置：数据库 URL（SQLite dev / 可切 MySQL·PG）、前端静态目录、灰分模型参数路径。"""
 import os
 from pathlib import Path
+from remote_mode import settings as remote_settings
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
 APP_VERSION = "0.3.0"
+REMOTE_READONLY = remote_settings()
 
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)

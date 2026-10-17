@@ -8,6 +8,10 @@ from pathlib import Path
 from pydantic import ValidationError
 
 def main():
+    from remote_mode import settings as remote_settings
+    if remote_settings():
+        print('Read-only test mode: collection and local database writes are disabled.')
+        return 0
     from client_mode import client_url
     if target := client_url():
         print('Client mode: collection belongs to '+target)

@@ -77,8 +77,12 @@ const App = {
     // 初始化
     async init() {
         this._syncReady = false;
-        this._hadLocalStore = this.loadStore();
-        if (this.store.__merged !== 2) {
+        if (this.isReadOnlyTest()) {
+            this._readOnlyDefaults = JSON.parse(JSON.stringify(this.store));
+            this._hadLocalStore = false;
+            await this.refreshReadOnlyState();
+        } else this._hadLocalStore = this.loadStore();
+        if (!this.isReadOnlyTest() && this.store.__merged !== 2) {
             this.applySeedStore();
         }
         // —— 以下启动期默认值补齐/迁移仅写本地(saveStore(true)),不镜像到服务器:
@@ -190,9 +194,9 @@ const App = {
         // DOMContentLoaded —— 只检查 App.store 的脚本可能在 init 之前就开跑，读到空 store。
         this.__ready = true;
         // 补记历史密度决策的灰分响应(页面打开时兜底一次)
-        this._completeDensityDecisionResponses();
+        if (!this.isReadOnlyTest()) this._completeDensityDecisionResponses();
         // 存量 influence_value 一次性重算（旧口径写死 8.50 → 当前口径），__fixes.influence 标记只跑一次
-        this.recomputeInfluenceValues();
+        if (!this.isReadOnlyTest()) this.recomputeInfluenceValues();
 
         this.checkAlerts();
         // 只初始化首页（当前可见页）
@@ -200,10 +204,53 @@ const App = {
         if (window.location.hash === '#decision') this.goToPage('page-decision');
     },
 
+    isReadOnlyTest() {
+        return !!window.Api?.isReadOnlyTest?.();
+    },
+
+    _applyReadOnlyState(st) {
+        if (!st || !Array.isArray(st.coarseCoal)) throw new Error('主机数据返回异常');
+        // Never mix a previous laptop database or unsent samples into host data.
+        const defaults = this._readOnlyDefaults || this.store;
+        this.store = Object.assign(JSON.parse(JSON.stringify(defaults)), st);
+        this._serverStateConfirmed = true;
+        this._readOnlyLoadError = null;
+        this.mirrorStatus.pending = false;
+        this.mirrorStatus.lastError = null;
+        this.mirrorStatus.lastOkAt = Date.now();
+        return true;
+    },
+
+    async refreshReadOnlyState() {
+        try {
+            const applied = this._applyReadOnlyState(await window.Api.getState());
+            this._renderReadOnlyStatus();
+            return applied;
+        } catch (error) {
+            this._readOnlyLoadError = '主机数据读取失败：' + (error.message || '服务不可达');
+            this._renderReadOnlyStatus();
+            this.showToast(this._readOnlyLoadError + '；未加载笔记本历史库或演示数据。', 'error');
+            return false;
+        }
+    },
+
+    _renderReadOnlyStatus() {
+        if (!this.isReadOnlyTest()) return;
+        const main = document.querySelector?.('main.main-content');
+        if (main) main.hidden = !!this._readOnlyLoadError;
+        const banner = document.getElementById('dmcs-readonly-status');
+        if (!banner) return;
+        this._readOnlyStatusText ||= banner.textContent || '测试服 · 本地前后端代码 · 主机数据只读';
+        banner.textContent = this._readOnlyLoadError
+            ? this._readOnlyLoadError + '；业务页面已隐藏，请刷新页面重试。'
+            : this._readOnlyStatusText;
+    },
+
     // 用服务器 state 覆盖本地数据集合(纯本地键保留),供手动/自动两条路径复用
     // __merged / __fixes 必须保留：它们是「本地已执行过的一次性动作」标记，
     // 被服务器数据清掉会导致种子重灌或历史清理重复执行。
     _applyServerState(st, pendingStamp) {
+        if (this.isReadOnlyTest()) return this._applyReadOnlyState(st);
         if (this._mirrorInFlight) return false;
         const localOnly = ['manualEntries', 'importLogs', 'alerts', 'regressionModels',
                            'coarseModelHistory', 'rawSlime', '__merged', '__fixes'];
@@ -248,6 +295,7 @@ const App = {
     // 且总数相等也可能已经回退（一类多、另一类少）。
     // 任一类本地更多 → 不动本地（本地为最新）。
     async autoPullIfStale() {
+        if (this.isReadOnlyTest()) return;
         if (!window.location.protocol.startsWith('http') || !window.Api) return;
         if (this._mirrorInFlight) return;
         try {
@@ -293,6 +341,14 @@ const App = {
     // 双轨架构中 localStorage 为主存储、saveStore 单向镜像 PUT /state；服务器侧产生的
     // 新数据（自动化导入脚本、API 重训练）本地看不到，此入口提供反向同步。
     async pullFromServer() {
+        if (this.isReadOnlyTest()) {
+            if (await this.refreshReadOnlyState()) {
+                this._onExternalInput();
+                this.refreshAllPages();
+                this.showToast('已刷新主机只读数据', 'success');
+            }
+            return;
+        }
         if (!window.location.protocol.startsWith('http') || !window.Api) {
             this.showToast('仅在后端托管(http://)模式下可用', 'warning');
             return;
@@ -324,6 +380,7 @@ const App = {
     // skipMirror=true 仅写本地：用于启动期默认值补齐/种子灌入——旧本地数据
     // 不能借启动流程镜像覆盖服务器上的新数据（服务器侧导入/训练成果）。
     saveStore(skipMirror) {
+        if (this.isReadOnlyTest()) return;
         let body = null;
         let ok = false;
         try {
@@ -464,6 +521,7 @@ const App = {
     _mirrorInFlight: false,
 
     _readPendingSlot() {
+        if (this.isReadOnlyTest()) return null;
         try {
             const raw = localStorage.getItem(this.MIRROR_PENDING_KEY);
             if (!raw) return null;
@@ -472,6 +530,7 @@ const App = {
         } catch (e) { return null; }     // 旧格式(裸 body)或损坏：当作没有
     },
     _writePendingSlot(body, wall, stamp) {
+        if (this.isReadOnlyTest()) return false;
         try {
             const cur = this._readPendingSlot();
             if (cur && cur.wall > wall) return false;    // 已有更新的快照，不覆盖
@@ -481,6 +540,7 @@ const App = {
         } catch (e) { return false; }    // 配额不足等：忽略，内存里仍有一份
     },
     _clearPendingSlot(stamp) {
+        if (this.isReadOnlyTest()) return;
         try {
             const cur = this._readPendingSlot();
             if (!cur) return;
@@ -494,6 +554,7 @@ const App = {
     },
 
     _scheduleMirror(body) {
+        if (this.isReadOnlyTest()) return;
         this._mirrorPending = body;
         this._writePendingSlot(body, Date.now(), Date.now() + '-queued');
         this._mirrorStats.scheduled++;
@@ -506,6 +567,7 @@ const App = {
 
     // immediate=true 表示走"页面隐藏/卸载"路径：能带 keepalive 就带（否则卸载会中断请求）
     _flushMirror(immediate) {
+        if (this.isReadOnlyTest()) return;
         if (this._mirrorTimer) { clearTimeout(this._mirrorTimer); this._mirrorTimer = null; }
         if (this._mirrorInFlight) return this._mirrorRequest;
         if (this._mirrorConflict || this._syncReady === false) return;
@@ -614,6 +676,7 @@ const App = {
     },
 
     async flushMirrorNow() {
+        if (this.isReadOnlyTest()) return {ok:false, readOnly:true, reason:window.Api.readOnlyMessage};
         this.saveStore();
         await this._flushMirror(false);
         while (this._mirrorInFlight) await this._mirrorRequest;
@@ -623,6 +686,7 @@ const App = {
     // 失败后的重试入口（断网恢复 / 切回前台 / 下次保存时都会调用）。
     // 发送中的请求不算"待重试"，否则 online 事件会和正在飞的请求重复发一次整库。
     retryMirrorIfPending() {
+        if (this.isReadOnlyTest()) return;
         this.syncHeavySamples();
         if (this._mirrorInFlight) return;
         const slot = this._readPendingSlot();
@@ -630,6 +694,7 @@ const App = {
     },
 
     async syncHeavySamples() {
+        if (this.isReadOnlyTest()) return;
         if (this._samplesInFlight || !window.Api || !window.location.protocol.startsWith('http')) return;
         this._samplesInFlight = true;
         try {
@@ -654,6 +719,7 @@ const App = {
 
     // 一次性数据迁移：清空旧数据并载入合并系统种子数据（__merged 标记版本）
     applySeedStore() {
+        if (this.isReadOnlyTest()) return;
         const seed = window.DMCS_SEED_STORE;
         if (seed) {
             this.store = JSON.parse(JSON.stringify(seed));
@@ -663,6 +729,7 @@ const App = {
 
     // 持久化：从 localStorage 加载
     loadStore() {
+        if (this.isReadOnlyTest()) return false;
         try {
             const raw = localStorage.getItem('dmcs_store');
             if (raw) {
@@ -977,6 +1044,7 @@ const App = {
 
     // 清除所有数据
     clearData() {
+        if (this.isReadOnlyTest()) { this.showToast(window.Api.readOnlyMessage, 'warning'); return; }
         if (!confirm('确定清除所有数据？此操作不可恢复。')) return;
         localStorage.removeItem('dmcs_store');
         this.store = {

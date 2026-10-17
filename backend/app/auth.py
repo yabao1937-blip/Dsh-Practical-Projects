@@ -27,7 +27,7 @@ from pathlib import Path
 
 from fastapi import HTTPException, Request
 
-from .config import DATA_DIR
+from .config import DATA_DIR, REMOTE_READONLY
 
 TOKEN_FILE = DATA_DIR / "write_token.txt"
 TOKEN_HEADER = "X-DMCS-Token"
@@ -38,6 +38,8 @@ _LOCALHOST_WRITES = os.environ.get("DMCS_ALLOW_LOCALHOST_WRITES", "1") != "0"
 
 
 def _load_or_create_token() -> str | None:
+    if REMOTE_READONLY:
+        return None
     raw = os.environ.get("DMCS_WRITE_TOKEN")
     if raw is not None:
         raw = raw.strip()
@@ -88,6 +90,8 @@ def _presented_token(request: Request) -> str | None:
 
 async def require_write(request: Request) -> None:
     """写接口依赖：校验 token（本机回环可免）。"""
+    if REMOTE_READONLY:
+        raise HTTPException(status_code=403,detail={'error_code':'readonly_test_server','message':'测试服只读主机数据，禁止保存到生产数据库'})
     if not auth_enabled():
         return
     if _LOCALHOST_WRITES and is_loopback(request):

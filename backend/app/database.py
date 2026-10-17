@@ -1,20 +1,29 @@
 """数据库连接与会话管理"""
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import QueuePool
 
-from .config import DATABASE_URL
+from .config import DATABASE_URL, REMOTE_READONLY
 
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 
 # timeout：SQLite 拿不到写锁时等待而不是立刻抛 database is locked（默认只有 5 秒）
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False, "timeout": 15} if _is_sqlite else {},
-)
+if REMOTE_READONLY:
+    from remote_sqlite import connect as remote_connect
+    # Bound laptop concurrency below the host bridge's four-snapshot limit.
+    # Check-in rollback closes the remote snapshot; idle pooled facades hold no data.
+    engine = create_engine('sqlite://', creator=lambda: remote_connect(REMOTE_READONLY),
+                           poolclass=QueuePool, pool_size=3, max_overflow=0,
+                           pool_timeout=3, pool_reset_on_return='rollback')
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False, "timeout": 15} if _is_sqlite else {},
+    )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
-if _is_sqlite:
+if _is_sqlite and not REMOTE_READONLY:
     @event.listens_for(engine, "connect")
     def _sqlite_pragmas(dbapi_conn, _record):
         """SQLite 并发与可靠性设置（2026-09 加入）。

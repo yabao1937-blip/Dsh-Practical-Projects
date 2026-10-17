@@ -16,7 +16,9 @@ import pathlib
 import sys
 
 from client_mode import client_url
-if _client_target := client_url():
+from remote_mode import settings as remote_settings
+_remote_readonly = remote_settings()
+if not _remote_readonly and (_client_target := client_url()):
     print('Client mode: open '+_client_target+'; local database service is disabled.')
     raise SystemExit(0)
 
@@ -42,7 +44,7 @@ except Exception as exc:                                        # 依赖缺失�
     _say("导入 uvicorn 失败：%r" % exc)
     raise
 
-host = os.environ.get("DMCS_HOST", "0.0.0.0")
+host = os.environ.get("DMCS_HOST", "127.0.0.1" if _remote_readonly else "0.0.0.0")
 port = int(os.environ.get("DMCS_PORT", "8000"))
 _say("uvicorn.run('app.main:app', host=%s, port=%d)" % (host, port))
 try:

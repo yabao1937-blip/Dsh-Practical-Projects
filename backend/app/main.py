@@ -2,6 +2,9 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
+from html import escape
 
 from . import auth
 from . import models  # noqa: F401  确保建表前模型已注册
@@ -14,23 +17,39 @@ from .hourly_brief.worker import lifespan as hourly_brief_lifespan
 from .routers.hourly_brief import router as hourly_brief_router
 from .routers.decision import router as decision_router
 from .decision_hourly.router import router as evidence_router
-from .config import APP_VERSION, FRONTEND_DIR
+from .config import APP_VERSION, FRONTEND_DIR, REMOTE_READONLY
 from .database import Base, engine
 from .observability import install_observability
 from .routers import (assistant, health, import_api, inputs, manual_entries, manual_measurements, migration, overview,
                       records, samples, settings, state, telemetry, training)
 
-Base.metadata.create_all(bind=engine)
 from .schema_upgrade import upgrade_schema
-upgrade_schema(engine)
 from .telemetry.views import ensure_sqlite_views
-ensure_sqlite_views(engine)
+from .remote_readonly.server import router as readonly_db_router, close_default_manager
+
+if not REMOTE_READONLY:
+    Base.metadata.create_all(bind=engine)
+    upgrade_schema(engine)
+    ensure_sqlite_views(engine)
+
+
+@asynccontextmanager
+async def application_lifespan(app):
+    if REMOTE_READONLY:
+        # Local Python executes reads/calculations; production alone owns all writers.
+        yield
+    else:
+        try:
+            async with hourly_brief_lifespan(app):
+                yield
+        finally:
+            close_default_manager()
 
 app = FastAPI(
     title="重介密控系统",
     description="前后端分离后端：密度推荐 + 精煤灰分监控（coal_records 统一主表）",
     version=APP_VERSION,
-    lifespan=hourly_brief_lifespan,
+    lifespan=application_lifespan,
 )
 install_observability(app)
 
@@ -62,6 +81,14 @@ app.include_router(state.router, prefix="/api/v1")
 app.include_router(import_api.router, prefix="/api/v1")
 app.include_router(training.router, prefix="/api/v1")
 app.include_router(telemetry.router, prefix="/api/v1")
+if not REMOTE_READONLY:
+    app.include_router(readonly_db_router,prefix='/api/v1')
+
+
+@app.get('/api/v1/runtime-mode')
+def runtime_mode():
+    return dict(mode='readonly-test' if REMOTE_READONLY else 'production',
+                data_server=REMOTE_READONLY['server_url'] if REMOTE_READONLY else None)
 
 # 首页显式注册：**必须放在 mount("/") 之前**才能生效。
 # 作用：把写接口用的 token 作为 <meta> 注入页面，浏览器端零配置即可带上
@@ -75,6 +102,12 @@ def index() -> HTMLResponse:
     if auth.auth_enabled():
         meta = f'<meta name="dmcs-token" content="{auth.WRITE_TOKEN}">'
         html = html.replace("<head>", "<head>\n    " + meta, 1)
+    if REMOTE_READONLY:
+        html = html.replace('<head>','<head><meta name="dmcs-readonly" content="true">',1)
+        banner = ('<div id="dmcs-readonly-status" role="status" style="position:sticky;top:0;z-index:10000;padding:8px;'
+                  'background:#fff1c7;color:#704b00;text-align:center;font-weight:bold">'
+                  '测试服 · 本地前后端代码 · 主机数据只读：'+escape(REMOTE_READONLY['server_url'])+'</div>')
+        html = html.replace('<body>','<body>'+banner,1)
     return HTMLResponse(html)
 
 
@@ -95,6 +128,10 @@ async def no_cache_static_assets(request, call_next):
 
     只作用于静态资源；/api 不在此列（JSON 响应另有语义，且带 no-store 会禁用正常缓存策略）。
     """
+    if (REMOTE_READONLY and request.method not in ('GET','HEAD','OPTIONS')
+            and not (request.method == 'POST' and request.url.path == '/api/v1/decision/snapshots')):
+        return JSONResponse({'detail':{'error_code':'readonly_test_server',
+                             'message':'测试服只读主机数据；补录、设置、导入和采集操作请在生产主机执行'}},status_code=403)
     resp = await call_next(request)
     if not request.url.path.startswith("/api"):
         resp.headers["Cache-Control"] = "no-cache"

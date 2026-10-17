@@ -19,7 +19,21 @@ $log = Join-Path $env:TEMP 'dmcs_server.log'
 $port = 8000
 
 $taskClientConfig = Join-Path $repo 'backend\data\client-mode.json'
-if (Test-Path -LiteralPath $taskClientConfig) {
+$taskReadOnlyConfig = Join-Path $repo 'backend\data\remote-readonly.json'
+if (Test-Path Env:DMCS_REMOTE_READONLY_CONFIG) {
+    $taskReadOnlyConfig = $env:DMCS_REMOTE_READONLY_CONFIG
+    if (-not $taskReadOnlyConfig -or -not (Test-Path -LiteralPath $taskReadOnlyConfig)) {
+        throw 'Read-only configuration is missing. No local service was started.'
+    }
+}
+$taskReadOnly = Test-Path -LiteralPath $taskReadOnlyConfig
+if ($taskReadOnly) {
+    $env:DMCS_REMOTE_READONLY_CONFIG = $taskReadOnlyConfig
+    $env:DMCS_HOST = '127.0.0.1'
+    & $py -X utf8 -c "import sys; sys.path.insert(0,sys.argv[1]); from remote_mode import settings; settings()" $workdir
+    if ($LASTEXITCODE -ne 0) { throw 'Invalid read-only configuration. No local service was started.' }
+}
+if ((Test-Path -LiteralPath $taskClientConfig) -and -not $taskReadOnly) {
     $taskClient = Get-Content -LiteralPath $taskClientConfig -Raw -Encoding UTF8 | ConvertFrom-Json
     $taskClientUri = [Uri]$taskClient.server_url
     if ($taskClient.mode -ne 'client' -or $taskClientUri.Scheme -notin @('http','https') -or
@@ -45,10 +59,11 @@ function Get-LanUrls {
 }
 
 function Wait-Healthy([int]$seconds) {
+    $taskProbePath = if ($taskReadOnly) { '/api/v1/health/live' } else { '/api/v1/health' }
     for ($i = 1; $i -le $seconds; $i++) {
         Start-Sleep -Seconds 1
         try {
-            $code = (Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/v1/health" -UseBasicParsing -TimeoutSec 3).StatusCode
+            $code = (Invoke-WebRequest -Uri "http://127.0.0.1:$port$taskProbePath" -UseBasicParsing -TimeoutSec 3).StatusCode
             if ($code -eq 200) { return $true }
         } catch { }
     }
@@ -60,7 +75,10 @@ function Show-Up([string]$how) {
     $owner = if ($listen) { ($listen | Select-Object -First 1).OwningProcess } else { '?' }
     Write-Host "OK: backend is up ($how; listening PID $owner)." -ForegroundColor Green
     Write-Host "  local : http://127.0.0.1:$port/"
-    foreach ($u in Get-LanUrls) { Write-Host "  LAN   : $u" }
+    if ($taskReadOnly) {
+        Write-Host '  mode  : local test code, read-only host data; loopback only.'
+        Write-Host '  data readiness: /api/v1/health/ready (requires host transport).'
+    } else { foreach ($u in Get-LanUrls) { Write-Host "  LAN   : $u" } }
     Write-Host "  log   : $log"
     Write-Host "Stop it with: backend\scripts\stop_server.ps1 (or the stop .bat)"
     if (-not $NoBrowser) { Start-Process "http://127.0.0.1:$port/" }
@@ -127,7 +145,7 @@ if ($listen) {
     $owner = ($listen | Select-Object -First 1).OwningProcess
     Write-Host "Already running: port $port is listening (PID $owner)." -ForegroundColor Yellow
     Write-Host "  local : http://127.0.0.1:$port/"
-    foreach ($u in Get-LanUrls) { Write-Host "  LAN   : $u" }
+    if (-not $taskReadOnly) { foreach ($u in Get-LanUrls) { Write-Host "  LAN   : $u" } }
     if (-not $NoBrowser) { Start-Process "http://127.0.0.1:$port/" }
     exit 0
 }
