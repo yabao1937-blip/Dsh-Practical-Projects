@@ -50,7 +50,26 @@ const DecisionRecentAsh = {
         })();
         await this.inFlight;
         this.inFlight=null;
-        if(this.enabled(page) && page.active()) page.renderGraph();
+        if(this.enabled(page) && page.active()) {
+            page.renderGraph();
+            if(!this.error) this.refreshReadOnlyAdvice(page);
+        }
+    },
+    refreshReadOnlyAdvice(page) {
+        if(typeof Api==='undefined' || !Api.isReadOnlyTest?.() ||
+            typeof DecisionHourly==='undefined' || !DecisionHourly.enabled?.(page)) return;
+        const end=Date.parse(this.result?.latest_end);
+        const latest=this.result?.items?.find(item=>Date.parse(item.end)===end);
+        const ash=DecisionHourly.result?.advice_inputs?.ash;
+        if(latest && Number.isFinite(latest.value) &&
+            ['complete','partial'].includes(latest.status) &&
+            (Date.parse(ash?.start)!==Date.parse(latest.start) ||
+                ['value','coverage','provisional'].some(key=>ash?.[key]!==latest[key]))) {
+            // External host backfills do not emit this page's save event. The
+            // revised published hour must also reach the advice card without
+            // waiting for its normal thirty-second polling interval.
+            DecisionHourly.update(page,true);
+        }
     },
     async measurementSaved(page) {
         this.lastAttempt=-Infinity;

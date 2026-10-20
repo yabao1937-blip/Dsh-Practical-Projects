@@ -76,6 +76,23 @@ async function main(){
     recent.result.items[0].calculation_origin='readonly-local-replay';
     assert(recent.markup({...page,escape:x=>x,number:x=>x===null?'—':x.toFixed(2)},
         {x:1,y:400,w:200}).includes('测试服只读回算，未写入主机'));
+    let adviceRequests=0;
+    const latest=recent.result.items[0];
+    context.DecisionHourly={enabled:()=>true,result:{advice_inputs:{ash:{...latest,value:8.9}}},
+        update(receivedPage,force){assert.strictEqual(receivedPage,page);assert.equal(force,true);adviceRequests++;}};
+    recent.refreshReadOnlyAdvice(page);
+    assert.equal(adviceRequests,1,'an external host revision refreshes hourly advice');
+    context.DecisionHourly.result.advice_inputs.ash={...latest};
+    recent.refreshReadOnlyAdvice(page);
+    assert.equal(adviceRequests,1,'an unchanged hour does not increase advice polling');
+    context.DecisionHourly.result.advice_inputs.ash.value=8.9;
+    readOnly=false;
+    recent.refreshReadOnlyAdvice(page);
+    assert.equal(adviceRequests,1,'production keeps its existing advice polling');
+    readOnly=true;
+    latest.value=null;
+    recent.refreshReadOnlyAdvice(page);
+    assert.equal(adviceRequests,1,'an unavailable hour cannot trigger a revision refresh');
     console.log('Recent ash: attribution, late revision cadence, production cadence, backoff and save refresh passed.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

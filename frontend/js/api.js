@@ -207,8 +207,11 @@ window.Api = {
 
     async getTotalAshHours(range = {}, signal) {
         const query = new URLSearchParams(range);
+        // A cold ten-hour replay shares the server's bounded producer. Allow it
+        // to finish instead of cancelling at ten seconds and then backing off.
+        const timeoutMs=this.isReadOnlyTest() && !query.toString()?30000:10000;
         const response = await fetch(this.base+'/decision/total-ash-hours?'+query, {
-            signal:signal || AbortSignal.timeout(10000), cache:'no-store'});
+            signal:signal || AbortSignal.timeout(timeoutMs), cache:'no-store'});
         const result = await response.json().catch(()=>null);
         if(!response.ok) throw new Error(typeof result?.detail==='string' ? result.detail : '小时灰分读取失败，请重试');
         if(result?.policy!=='decision-ash-hours-v1' || !Array.isArray(result.items) || !result.summary || !result.period)
