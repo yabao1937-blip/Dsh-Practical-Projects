@@ -1,5 +1,6 @@
 """Instrument projection tests use isolated SQLite and synthetic samples only."""
 import uuid
+from copy import deepcopy
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -49,6 +50,11 @@ def test_metadata_change_keeps_latest_and_existing_sample_definition(tmp_path):
         now = utc_now()
         sample = normalize(point, 1.5, 0, now, now, now)
         repo.persist(cfg, "owner", {"source_id":cfg.source_id, "batch_id":uuid.uuid4().hex, "samples":[sample]})
+        with repo.sessions() as db:
+            persisted = deepcopy(db.get(TelemetryPoint, (cfg.source_id, point.key)).latest)
+            assert all(persisted[key] == value for key, value in sample.items())
+            assert persisted["batch_id"]
+            assert persisted["_display_memory"]
         changed = cfg.model_copy(deep=True)
         changed.points[0].device = "PLC"
         changed.points[0].tag_name = "MD"
@@ -58,7 +64,7 @@ def test_metadata_change_keeps_latest_and_existing_sample_definition(tmp_path):
         repo.acquire(changed, "owner")
         repo.state(changed, "owner", "connected")
         with repo.sessions() as db:
-            assert db.get(TelemetryPoint, (cfg.source_id, point.key)).latest == sample
+            assert db.get(TelemetryPoint, (cfg.source_id, point.key)).latest == persisted
             item = latest_view(db)["items"][0]
             assert item["device"] == "PLC" and item["tag_name"] == "MD" and item["available"]
             assert item["sample"]["value"] == 1.5
