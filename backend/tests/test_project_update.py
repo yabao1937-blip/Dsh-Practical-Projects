@@ -371,3 +371,56 @@ def test_readiness_rejects_connection_only_old_owner_or_nonadvancing_samples(mon
     with pytest.raises(TimeoutError,match='connected state and advancing samples'):
         update.collector_ready(tmp_path,dict(enabled=True,source_id='test',ready_timeout=5),before,lambda *a:None)
     assert clock.elapsed == 5
+
+
+def test_large_snapshot_defers_full_check_until_services_are_live(prepared,monkeypatch,tmp_path):
+    """A >1 GiB snapshot must pass structural checks without a pre-mutation
+    quick_check (which starves the still-running old collector on slow hosts),
+    and the deferred full check runs only after the updated services are up."""
+    package,root,source,target,manifest,calls = prepared
+    # Force the deferred path without building a real 1 GiB database.
+    monkeypatch.setattr(update,'FULL_CHECK_MAX_BYTES',0)
+    full_checks = []
+    real_verify = update.verify_snapshot_content
+    def spying_verify(path,report=lambda *_:None,*,budget):
+        full_checks.append(budget)
+        return real_verify(path,report,budget=budget)
+    monkeypatch.setattr(update,'verify_snapshot_content',spying_verify)
+    backup = update.apply(package,root,manifest)
+    assert target.read_text() == 'new code'
+    # The snapshot itself was taken and structurally verified.
+    assert (backup/'dense_medium.db').is_file()
+    assert len(full_checks) == 1 and full_checks[0] >= update.DEFERRED_CHECK_BASE_SECONDS
+    record = json.loads((root/'source-update.json').read_text(encoding='utf-8'))
+    assert record['snapshot_verification'] == 'deferred'
+    assert record['snapshot_content_check']['passed'] is True
+
+
+def test_deferred_check_failure_does_not_rollback_or_hide_installation(prepared,monkeypatch):
+    package,root,source,target,manifest,calls = prepared
+    monkeypatch.setattr(update,'FULL_CHECK_MAX_BYTES',0)
+    monkeypatch.setattr(update,'verify_snapshot_content',
+        lambda path,report=lambda *_:None,*,budget: False)
+    backup = update.apply(package,root,manifest)
+    # The update stays installed; the failure is recorded, not silently ignored.
+    assert target.read_text() == 'new code'
+    record = json.loads((root/'source-update.json').read_text(encoding='utf-8'))
+    assert record['snapshot_content_check']['passed'] is False
+
+
+def test_structural_mismatch_aborts_before_any_service_change(prepared,monkeypatch):
+    package,root,source,target,manifest,calls = prepared
+    monkeypatch.setattr(update,'FULL_CHECK_MAX_BYTES',0)
+    # Corrupt the finished snapshot after the source fingerprint was taken.
+    real_fingerprint = update.structure_fingerprint
+    seen = []
+    def fingerprint(db):
+        value = real_fingerprint(db)
+        seen.append(value)
+        if len(seen) == 2:
+            return (value[0]+1,value[1],value[2])
+        return value
+    monkeypatch.setattr(update,'structure_fingerprint',fingerprint)
+    with pytest.raises(ValueError,match='structural check failed'):
+        update.apply(package,root,manifest)
+    assert target.read_text() == 'old code' and not calls

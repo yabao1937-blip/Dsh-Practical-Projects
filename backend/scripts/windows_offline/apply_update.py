@@ -167,6 +167,63 @@ def collector_ready(root,configuration,before,report,*,timeout=None):
     raise TimeoutError('Restarted collector did not confirm connected state and advancing samples')
 
 
+# Snapshot verification is staged by size. A full quick_check of a multi-GiB
+# production snapshot on a slow host both exceeds any sane fixed budget and
+# starves the still-running old collector of disk I/O (observed 2026-10-21:
+# 6.25 GiB backup copied in 493s, then the check saturated the disk, the old
+# collector hit its 15s write timeout and dropped OPC). Larger snapshots are
+# structurally verified before any service is touched, and their full content
+# check runs only after the updated collector (spool-backed, contention
+# tolerant) is live.
+FULL_CHECK_MAX_BYTES = 1024**3
+DEFERRED_CHECK_BASE_SECONDS = 300
+DEFERRED_CHECK_SECONDS_PER_BYTE = 6e-7   # ~600s per GiB observed-worst allowance
+DEFERRED_CHECK_CACHE_KIB = 262144        # 256 MiB decode cache for the post-update scan
+
+
+def structure_fingerprint(db):
+    """Cheap structural identity: page counts plus the schema bytes."""
+    digest = hashlib.sha256()
+    for row in db.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY rowid').fetchall():
+        for value in row:
+            digest.update((value if value is not None else '\0').encode('utf-8','surrogatepass'))
+            digest.update(b'\x1f')
+        digest.update(b'\x1e')
+    return (db.execute('PRAGMA page_count').fetchone()[0],
+            db.execute('PRAGMA freelist_count').fetchone()[0],digest.hexdigest())
+
+
+def verify_snapshot_content(path,report=lambda stage,message:None,*,budget):
+    """Full quick_check on the finished snapshot; bounded and interruptible."""
+    started = time.monotonic()
+    last_report = started
+    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as database:
+        database.execute(f'PRAGMA cache_size=-{DEFERRED_CHECK_CACHE_KIB}')
+        def content_progress():
+            nonlocal last_report
+            now = time.monotonic()
+            if now-started >= budget: return 1
+            if now-last_report >= 30:
+                report('verifying',f'Full snapshot content check running, {now-started:.0f}s elapsed.')
+                last_report = now
+            return 0
+        database.set_progress_handler(content_progress,10000)
+        try:
+            result = database.execute('PRAGMA quick_check').fetchone()
+        except sqlite3.OperationalError:
+            if time.monotonic()-started >= budget:
+                report('verifying','Snapshot content check exceeded its time budget; snapshot retained for manual verification.')
+                return False
+            raise
+        finally:
+            database.set_progress_handler(None,0)
+        if result is None or result[0] != 'ok':
+            report('verifying','Snapshot content check reported corruption; production database was untouched by the update.')
+            return False
+    report('verifying',f'Snapshot full content check passed ({time.monotonic()-started:.0f}s).')
+    return True
+
+
 def backup_database(root,backup,report=lambda stage,message:None,*,timeout=1200):
     path = root/'backend/data/dense_medium.db'
     started = time.monotonic()
@@ -188,30 +245,41 @@ def backup_database(root,backup,report=lambda stage,message:None,*,timeout=1200)
         with closing(sqlite3.connect(backup/'dense_medium.db')) as target:
             try:
                 source.backup(target,pages=2048,progress=progress,sleep=.1)
+                # Read from the pinned snapshot so the fingerprint describes the
+                # exact bytes that were copied, not a later state.
+                copied = structure_fingerprint(source)
             finally:
                 source.rollback()
-            report('copying','Database copied; checking backup integrity. Collection remains running.')
-            check_started = time.monotonic()
-            last_check_report = check_started
-            def check_progress():
-                nonlocal last_check_report
-                now = time.monotonic()
-                if now-check_started >= timeout: return 1
-                if now-last_check_report >= 5:
-                    report('copying',f'Checking database backup integrity, {now-check_started:.0f}s elapsed.')
-                    last_check_report = time.monotonic()
-                return 0
-            target.set_progress_handler(check_progress,10000)
-            try:
-                if target.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
-                    raise ValueError('Database backup integrity check failed')
-            except sqlite3.OperationalError as exc:
-                if time.monotonic()-check_started >= timeout:
-                    raise TimeoutError('Backup integrity check timed out; source files and running service were not changed.') from exc
-                raise
-            finally:
-                target.set_progress_handler(None,0)
-    report('copying','Database backup verified. Preparing source update.')
+            size = (backup/'dense_medium.db').stat().st_size
+            if size <= FULL_CHECK_MAX_BYTES:
+                report('copying','Database copied; checking backup integrity. Collection remains running.')
+                check_started = time.monotonic()
+                last_check_report = check_started
+                def check_progress():
+                    nonlocal last_check_report
+                    now = time.monotonic()
+                    if now-check_started >= timeout: return 1
+                    if now-last_check_report >= 5:
+                        report('copying',f'Checking database backup integrity, {now-check_started:.0f}s elapsed.')
+                        last_check_report = time.monotonic()
+                    return 0
+                target.set_progress_handler(check_progress,10000)
+                try:
+                    if target.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
+                        raise ValueError('Database backup integrity check failed')
+                except sqlite3.OperationalError as exc:
+                    if time.monotonic()-check_started >= timeout:
+                        raise TimeoutError('Backup integrity check timed out; source files and running service were not changed.') from exc
+                    raise
+                finally:
+                    target.set_progress_handler(None,0)
+                report('copying','Database backup verified. Preparing source update.')
+                return dict(content_check='full',**dict(zip(('page_count','freelist_count','schema_sha256'),copied)))
+            if structure_fingerprint(target) != copied:
+                raise ValueError('Database backup structural check failed; source files and running service were not changed.')
+            report('copying',f'Database copied ({size/1048576:.0f} MiB); structural check passed. '
+                'Full content check runs after the updated services are live, so this scan cannot starve the running collector.')
+            return dict(content_check='deferred',**dict(zip(('page_count','freelist_count','schema_sha256'),copied)))
 
 
 def powershell(script,*args,cwd):
@@ -241,13 +309,14 @@ def apply(package,root,manifest,report=lambda stage,message:None):
     configuration = collector_configuration(root) if cycle_collector else None
     backup = root/'backups'/('source-update-'+datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
     backup.mkdir(parents=True)
+    snapshot = None
     # Snapshot the live WAL database consistently; the collector can keep running.
     if manifest.get('profile') == 'query-only-hotfix':
         # This allowlisted update cannot alter schema or model/data files.
         # Keep the previously verified full host backup and save old source below.
         report('copying','Query-only hotfix: saving source backup; production database and verified full backup are retained.')
     else:
-        backup_database(root,backup,report)
+        snapshot = backup_database(root,backup,report)
     original = {}
     for name in manifest['files']:
         source = safe_path(root,name)
@@ -285,8 +354,18 @@ def apply(package,root,manifest,report=lambda stage,message:None):
             if data.get('advice_policy') != 'gpt-hourly-reference-v4' and data.get('status') != 'pending':
                 raise RuntimeError('Updated hourly policy was not loaded')
         with urlopen('http://127.0.0.1:8000/',timeout=15) as response:
-            if '实时总精煤灰分' not in response.read().decode('utf-8'):
-                raise RuntimeError('Updated frontend was not loaded')
+                if '实时总精煤灰分' not in response.read().decode('utf-8'):
+                    raise RuntimeError('Updated frontend was not loaded')
+        deferred_check = None
+        if snapshot and snapshot.get('content_check') == 'deferred':
+            # Run the full content check only now: the updated collector (spool
+            # backed, contention tolerant) is live, so this scan can no longer
+            # starve production sampling. The budget scales with snapshot size.
+            snapshot_bytes = (backup/'dense_medium.db').stat().st_size
+            budget = DEFERRED_CHECK_BASE_SECONDS + int(snapshot_bytes*DEFERRED_CHECK_SECONDS_PER_BYTE)
+            report('verifying',f'Running deferred full snapshot content check ({snapshot_bytes/1048576:.0f} MiB, budget {budget}s).')
+            deferred_check = dict(budget_seconds=budget,
+                passed=verify_snapshot_content(backup/'dense_medium.db',report,budget=budget))
     except BaseException as failure:
         report('copying','Update failed; restoring previous source and restarting services. Production database will be retained.')
         recovery_before = {}
@@ -322,6 +401,8 @@ def apply(package,root,manifest,report=lambda stage,message:None):
         installed_at=datetime.now().astimezone().isoformat(),backup=str(backup),
         profile=manifest.get('profile') or 'standard',
         database_snapshot=manifest.get('profile') != 'query-only-hotfix',
+        snapshot_verification=(snapshot or {}).get('content_check'),
+        snapshot_content_check=deferred_check,
         collector_restarted=cycle_collector and configuration['enabled']),indent=2),encoding='utf-8')
     return backup
 
