@@ -32,9 +32,10 @@ async def run(stop):
         while not stop.is_set():
             try:
                 now = await asyncio.to_thread(observation_tick)
-                if requests.full():
-                    requests.get_nowait()
-                requests.put_nowait(now)
+                if now is not None:
+                    if requests.full():
+                        requests.get_nowait()
+                    requests.put_nowait(now)
             except Exception:
                 logger.exception('Hourly decision observation failed; retry on next slot')
             try:

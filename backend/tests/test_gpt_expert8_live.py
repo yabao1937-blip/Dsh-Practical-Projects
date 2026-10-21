@@ -149,7 +149,7 @@ def test_versioned_activation_shared_brief_and_raw_only_fingerprint(sessions, se
         assert context_definition(changed,store) == context
         # Only raw data changes; a second archived slot must not invent new advice coverage.
         monkeypatch.setattr('app.decision_hourly.service.observe',lambda *args:None)
-        monkeypatch.setattr('app.decision_hourly.service.pack_snapshot',lambda db,snapshot,slot:snapshot)
+        monkeypatch.setattr('app.decision_hourly.service.pack_snapshot',lambda db,snapshot,slot,**kwargs:snapshot)
         record(db,HOUR,result=live,store=store)
         changed['generated_at'] = iso_time(HOUR+timedelta(seconds=5))
         changed['inputs']['raw_ash'].update(value=50,observed_at=changed['generated_at'],batch_id='new-raw-only')

@@ -47,7 +47,7 @@ def same(a, b):
     return type(a) is type(b) and a == b
 
 
-def pack_snapshot(db, snapshot, slot):
+def pack_snapshot(db, snapshot, slot, *, pins=None):
     identities = set()
     def gather(value, source=None, point=None):
         if isinstance(value,list):
@@ -100,11 +100,19 @@ def pack_snapshot(db, snapshot, slot):
         if key in packed.get('cells',{}) and c == packed['cells'][key]:
             packed['inputs'][key] = {'$cell':key}
     packed['storage_version'] = VERSION
+    if pins is not None:
+        pins.update(used)
+    else:
+        pin_readings(db, used, slot)
+    return packed
+
+
+def pin_readings(db, used, slot):
+    """Write only the reference identities already verified in a read snapshot."""
     existing = set()
     for ids in chunks(used):
         existing.update(db.scalars(select(DecisionTelemetryPin.reading_id).where(DecisionTelemetryPin.reading_id.in_(ids))))
     db.add_all([DecisionTelemetryPin(reading_id=i,first_slot=slot) for i in used-existing])
-    return packed
 
 
 def resolve_snapshots(db, snapshots):

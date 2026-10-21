@@ -2,8 +2,10 @@
 from copy import deepcopy
 from datetime import timedelta
 from types import SimpleNamespace
+import logging
+import time
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 
 from ..database import SessionLocal
 from ..hourly_brief.inputs import LOCAL, business_time
@@ -17,7 +19,9 @@ from .history import historical_cells
 from .evidence import POLICY, PROVISIONAL, SEGMENT_POLICY, summarize
 from .tracking import density_channels, observe
 from .archive import archive_tick
-from .references import pack_snapshot, hydrate_rows
+from .references import pack_snapshot, hydrate_rows, pin_readings
+
+log = logging.getLogger(__name__)
 
 
 def window(now):
@@ -75,24 +79,20 @@ def context_definition(result, store):
         input_derivations=deepcopy(result.get('input_derivations')))
 
 
-def record(db, now, result=None, store=None):
+def prepare_record(db, now, result=None, store=None):
+    """Prepare detached evidence; no writes or writer reservation are required."""
     slot = int(now.timestamp())//CADENCE
     if db.get(DecisionCycleSample,slot):
-        return False
+        return None
     result = result or shared_snapshot(db)
     # A lock wait/computation crossing an hour cannot assign new inputs to the old hour.
     now = business_time(result['generated_at'])
     slot = int(now.timestamp())//CADENCE
     if db.get(DecisionCycleSample,slot):
-        return False
+        return None
     store = store if store is not None else load_store(db)
     context = context_definition(result,store)
-    from ..gpt_density.hourly_anchor import capture
-    capture(db, now, result, context)
     key = digest(context)
-    if not db.get(DecisionCycleContext,key):
-        db.add(DecisionCycleContext(key=key,definition=context))
-        db.flush()
     cells = {k:compact_cell(c) for k,c in result['cells'].items()}
     identities = {k:{f:c.get(f) for f in ('value','status','observed_at','entered_at','source_id','item_id','batch_id')}
                   for k,c in result['inputs'].items() if result['model'].get('method') != 'expert8' or k != 'raw_ash'}
@@ -107,13 +107,41 @@ def record(db, now, result=None, store=None):
     snapshot['inputs'] = {k:compact_cell(c) for k,c in result['inputs'].items()}
     snapshot['density_channels'] = density_channels(db,now,compact_cell)
     snapshot['protection'] = {k:deepcopy(store.get(k)) for k in ('densityLastMoveAt','densityActionLatch')}
-    row = DecisionCycleSample(slot=slot,sampled_at=iso_time(now),context_key=key,
-        fingerprint=digest([key,identities]),snapshot=snapshot)
+    pins = set()
+    packed = pack_snapshot(db, snapshot, slot, pins=pins)
+    return dict(slot=slot, now=now, result=result, context=context, key=key,
+                fingerprint=digest([key,identities]), snapshot=snapshot, packed=packed, pins=pins)
+
+
+def save_record(db, prepared):
+    """Short serialized commit; historical reads and calculations happen before it."""
+    now, slot, key = prepared['now'], prepared['slot'], prepared['key']
+    if db.get(DecisionCycleSample, slot):
+        return False
+    latest_slot = db.scalar(select(func.max(DecisionCycleSample.slot)))
+    if latest_slot is not None and latest_slot > slot:
+        return False  # A slower concurrent preparation must not rewind observation tracking.
+    current_hour = now.replace(minute=0, second=0, microsecond=0)
+    if db.get(DecisionCycleHour, iso_time(current_hour)):
+        return False
+    from ..gpt_density.hourly_anchor import capture
+    capture(db, now, prepared['result'], prepared['context'])
+    if not db.get(DecisionCycleContext, key):
+        db.add(DecisionCycleContext(key=key, definition=prepared['context']))
+        db.flush()
+    row = DecisionCycleSample(slot=slot, sampled_at=iso_time(now), context_key=key,
+        fingerprint=prepared['fingerprint'], snapshot=prepared['snapshot'])
     db.add(row)
     observe(db,row)
-    row.snapshot = pack_snapshot(db,snapshot,slot)
+    pin_readings(db, prepared['pins'], slot)
+    row.snapshot = prepared['packed']
     db.flush()
     return True
+
+
+def record(db, now, result=None, store=None):
+    prepared = prepare_record(db, now, result, store)
+    return save_record(db, prepared) if prepared is not None else False
 
 
 def build_hour(db, start, end, now):
@@ -157,14 +185,43 @@ def build_hour(db, start, end, now):
 
 
 def observation_tick(now=None, sessions=SessionLocal):
+    from .observation_guard import configuration_revision
+    explicit_time = now is not None
+    started = time.monotonic()
     with sessions() as db:
-        # Serialize duplicate worker ticks; one slot/one hour even during overlapping restarts.
         if db.bind.dialect.name == 'sqlite':
-            db.execute(text('BEGIN IMMEDIATE'))
-        now = now or utc_now()
-        record(db,now)
-        db.commit()
-    return now
+            db.execute(text('BEGIN'))
+        revision = configuration_revision(db)
+        prepared = prepare_record(db, now or utc_now())
+    log.info('decision_observation phase=prepare elapsed_ms=%.2f', (time.monotonic()-started)*1000)
+    if prepared is None:
+        return None
+    started = time.monotonic()
+    acquired, outcome = None, 'failed'
+    try:
+        with sessions() as db:
+            # Serialize duplicate worker ticks; one slot/one hour even during overlapping restarts.
+            if db.bind.dialect.name == 'sqlite':
+                db.execute(text('BEGIN IMMEDIATE'))
+            acquired = time.monotonic()
+            # A discarded preparation must not ask maintenance to freeze its hour.
+            if configuration_revision(db) != revision:
+                outcome = 'configuration_changed'
+                return None
+            if not explicit_time and window(utc_now()) != window(prepared['now']):
+                outcome = 'hour_changed'
+                return None
+            if not save_record(db, prepared):
+                outcome = 'already_saved_or_frozen'
+                return None
+            db.commit()
+            outcome = 'committed'
+    finally:
+        ended = time.monotonic()
+        log.info('decision_observation phase=commit outcome=%s lock_wait_ms=%.2f write_ms=%.2f',
+                 outcome, ((acquired or ended)-started)*1000,
+                 (ended-acquired)*1000 if acquired is not None else 0)
+    return prepared['now']
 
 
 def summary_tick(now, sessions=SessionLocal):
@@ -197,7 +254,9 @@ def maintenance_tick(now, sessions=SessionLocal):
 
 def tick(now=None, sessions=SessionLocal):
     """Synchronous entry point; the worker runs observation and maintenance separately."""
-    maintenance_tick(observation_tick(now,sessions),sessions)
+    observed = observation_tick(now,sessions)
+    if observed is not None:
+        maintenance_tick(observed,sessions)
 
 
 def read_hour(db, now=None, live=None, defer_missing=False, *, store_loader=None, settlement_reader=None):
