@@ -38,7 +38,13 @@
 
 注意:不带参数的 `pytest -q` 会递归收集 `backend/data/baseline-evidence-*/backend/tests/` 里的历史对拍副本,产生同名模块冲突;跑全量请显式 `pytest tests`。
 
-## 主机当前状态(2026-10-21 14:20 实测)
+## 第二次尝试(14:42—14:55)与停服脚本修复
+
+用户 14:42 用新包重跑。备份复制 413s 完成(1,541,769 页,6023 MiB),**结构校验通过,更新前不再有全量扫描**——分级校验按设计工作。随后失败点后移:`StopOwnedWeb.ps1` 停 Web 服务时 120s 超时(紧接 6GiB 备份、页面压力峰值,脚本内**无过滤的 `Get-CimInstance Win32_Process` 全进程枚举**在小内存主机上被换页拖死)。回滚路径完整执行:旧源码恢复、Web 重启、采集以新 owner 重连并推进采样(14:53:35),生产无损。
+
+修复(8083e15):`StopOwnedWeb.ps1` 枚举改为 `-Filter "Name='python.exe' OR Name='pythonw.exe'"`(与 StopOwnedCollector 一致,语义不变、开销降几个量级);新增 `tests/test_stop_owned_web.py` 4 项(进程名过滤断言、他装/无关进程保留、PID 复用防护、未识别安装拒绝),更新器相关 52 项全过。第三次包(486,418 B,sha 28eff2c5,revision 8083e15)已上下载页并核验一致。
+
+## 主机当前状态(2026-10-21 15:05 实测)
 
 - 10.255.2.7:8000 health ok;采集 connected、30/30、样本持续推进(旧代码,待更新)。
 - 主机仍有上次尝试留下的 `backups/source-update-20261021-*/dense_medium.db`(约 6.28 GB,已结构完整但未全检)。本次重跑会新建备份目录;旧目录可留给管理员择期清理(磁盘剩余约 44 GB,建议至少保留最近一份)。
