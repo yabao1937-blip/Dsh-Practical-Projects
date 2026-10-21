@@ -15,7 +15,10 @@ if ($taskListener) {
 }
 # A stalled startup or accept loop may leave an owned Python process without a
 # listener. Stop only this installation's explicit serve.py processes as well.
-$taskOwned = @(Get-CimInstance Win32_Process | Where-Object { Is-OwnedWeb $_ })
+# Filter by process name server-side: an unfiltered Win32_Process sweep pages
+# the whole WMI repository in and can exceed the caller's timeout on a small
+# memory host right after a multi-GiB backup (observed 2026-10-21).
+$taskOwned = @(Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" | Where-Object { Is-OwnedWeb $_ })
 foreach ($taskCandidate in $taskOwned) {
     $taskCurrent = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $taskCandidate.ProcessId)
     if ((Is-OwnedWeb $taskCurrent) -and $taskCurrent.CreationDate -eq $taskCandidate.CreationDate) {
