@@ -1,11 +1,13 @@
 """Verified source-only update. Never replace production databases/config/models."""
 import argparse
 from contextlib import closing
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import json
+import math
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -33,6 +35,16 @@ def safe_path(root,name):
     return path
 
 
+def collector_changed(manifest):
+    """These files are imported by the long-lived collector or define its schema."""
+    return manifest.get('profile') != 'query-only-hotfix' and any(
+        name.startswith(('backend/app/telemetry/','backend/migrations/')) or name in {
+            'backend/collector.py','backend/client_mode.py','backend/scripts/start_collector.py',
+            'backend/app/database.py','backend/app/config.py','backend/app/models.py',
+            'backend/app/schema_upgrade.py','backend/app/decision_hourly/models.py'}
+        for name in manifest['files'])
+
+
 def verify(package,root,manifest):
     if not (root/'offline-install.json').is_file() or not (root/'Start.ps1').is_file():
         raise ValueError('Unrecognized installation; nothing was changed')
@@ -48,10 +60,111 @@ def verify(package,root,manifest):
         payload,target = safe_path(package/'payload',name),safe_path(root,name)
         if not payload.is_file() or digest(payload) != info['sha256']:
             raise ValueError('Incomplete or damaged update: '+name)
-        if target.exists() and digest(target) not in {info['sha256'],info.get('previous_sha256')}:
-            raise ValueError('Installed source differs from update baseline: '+name)
+        accepted = info.get('accepted_previous_sha256',[])
+        if not isinstance(accepted,list) or any(not isinstance(value,str) or not re.fullmatch(r'[0-9a-f]{64}',value) for value in accepted):
+            raise ValueError('Invalid accepted source hashes: '+name)
+        if target.exists():
+            actual = digest(target)
+            if actual not in {info['sha256'],info.get('previous_sha256'),*accepted}:
+                raise ValueError('Installed source differs from update baseline: '+name+' (sha256='+actual+')')
         if not target.exists() and info.get('previous_sha256'):
             raise ValueError('Installed source is missing: '+name)
+    if collector_changed(manifest) and not (package/'StopOwnedCollector.ps1').is_file():
+        raise ValueError('Collector update requires StopOwnedCollector.ps1; nothing was changed')
+
+
+def collector_configuration(root):
+    """Read only the non-secret fields needed for a bounded restart."""
+    try:
+        data = json.loads((root/'backend/config/kepserver.local.json').read_text(encoding='utf-8-sig'))
+        enabled,source_id = data.get('enabled',False),data.get('source_id','kepserver-main')
+        poll,timeout = float(data.get('poll_seconds',5)),float(data.get('timeout_seconds',10))
+        if (not isinstance(enabled,bool) or not isinstance(source_id,str) or
+                not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}',source_id) or
+                not math.isfinite(poll) or not .1 <= poll <= 60 or
+                not math.isfinite(timeout) or not .1 <= timeout <= 30):
+            raise ValueError()
+        return dict(enabled=enabled,source_id=source_id,
+            ready_timeout=max(90,poll*3+timeout*3+5))
+    except (OSError,ValueError,TypeError,AttributeError):
+        raise ValueError('Local collector configuration is missing or invalid; nothing was changed') from None
+
+
+def collector_status(root,source_id):
+    """Never acquire or clear a lease, even during recovery."""
+    path = root/'backend/data/dense_medium.db'
+    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=1)) as database:
+        database.row_factory = sqlite3.Row
+        if not database.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='telemetry_sources'").fetchone():
+            return {}
+        source = database.execute('SELECT owner,lease_until,state,last_sample_at FROM telemetry_sources WHERE source_id=?',(source_id,)).fetchone()
+        return dict(source) if source else {}
+
+
+def utc_timestamp(value):
+    parsed = datetime.fromisoformat(value.replace('Z','+00:00'))
+    if parsed.tzinfo is None: raise ValueError('Collector timestamp lacks a timezone')
+    return parsed.astimezone(timezone.utc)
+
+
+def wait_collector_lease(root,configuration,report,*,timeout=300):
+    started,last_report = time.monotonic(),-float('inf')
+    while True:
+        now = time.monotonic()
+        if now-started >= timeout:
+            raise TimeoutError('Previous collector lease did not expire; its database owner was not changed')
+        try:
+            status = collector_status(root,configuration['source_id'])
+        except sqlite3.OperationalError:
+            status = None
+        if status is not None:
+            lease = status.get('lease_until')
+            remaining = max(0,(utc_timestamp(lease)-datetime.now(timezone.utc)).total_seconds()) if lease and status.get('owner') else 0
+            if remaining == 0:
+                report('copying','Previous collector lease has expired; production database owner was not changed.')
+                return
+            message = f'Waiting for the previous collector lease to expire naturally ({remaining:.0f}s remaining, {now-started:.0f}s elapsed).'
+        else:
+            message = f'Waiting to read the previous collector lease ({now-started:.0f}s elapsed).'
+        if now-last_report >= 5:
+            report('copying',message)
+            last_report = now
+        time.sleep(min(1,max(0,timeout-(time.monotonic()-started))))
+
+
+def collector_ready(root,configuration,before,report,*,timeout=None):
+    if not configuration['enabled']:
+        report('starting','Collector configuration is disabled; collector readiness check skipped.')
+        return
+    started,last_report = time.monotonic(),-float('inf')
+    timeout = configuration['ready_timeout'] if timeout is None else timeout
+    not_before = datetime.now(timezone.utc)
+    previous = utc_timestamp(before['last_sample_at']) if before.get('last_sample_at') else None
+    observed,observed_owner = None,None
+    while time.monotonic()-started < timeout:
+        now = time.monotonic()
+        try:
+            status = collector_status(root,configuration['source_id'])
+        except sqlite3.OperationalError:
+            status = {}
+        owner,sample,lease = status.get('owner'),status.get('last_sample_at'),status.get('lease_until')
+        if (status.get('state') == 'connected' and owner and owner != before.get('owner') and
+                sample and lease and utc_timestamp(lease) > datetime.now(timezone.utc)):
+            sampled_at = utc_timestamp(sample)
+            # Replayed spool batches may advance last_sample_at too. Require
+            # observations captured after this verification began, then growth.
+            if sampled_at > not_before and (previous is None or sampled_at > previous):
+                if observed_owner != owner:
+                    observed,observed_owner = None,owner
+                if observed is not None and sampled_at > observed:
+                    report('starting','Collector connected with a new owner; two committed sample times advanced after restart (latest '+sample+').')
+                    return
+                observed = sampled_at if observed is None else observed
+        if now-last_report >= 5:
+            report('starting',f'Waiting for the restarted collector to connect and advance samples ({now-started:.0f}s elapsed).')
+            last_report = now
+        time.sleep(min(1,max(0,timeout-(time.monotonic()-started))))
+    raise TimeoutError('Restarted collector did not confirm connected state and advancing samples')
 
 
 def backup_database(root,backup,report=lambda stage,message:None,*,timeout=1200):
@@ -124,6 +237,8 @@ def restart(root):
 
 def apply(package,root,manifest,report=lambda stage,message:None):
     verify(package,root,manifest)
+    cycle_collector = collector_changed(manifest)
+    configuration = collector_configuration(root) if cycle_collector else None
     backup = root/'backups'/('source-update-'+datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
     backup.mkdir(parents=True)
     # Snapshot the live WAL database consistently; the collector can keep running.
@@ -142,9 +257,18 @@ def apply(package,root,manifest,report=lambda stage,message:None):
             saved.parent.mkdir(parents=True,exist_ok=True)
             shutil.copy2(source,saved)
     (backup/'files.json').write_text(json.dumps(original,indent=2),encoding='utf-8')
-    report('copying','Backup complete; restarting only the project Web service.')
-    powershell(package/'StopOwnedWeb.ps1','-InstallDir',str(root),cwd=root)
+    report('copying','Backup complete; preparing the project service update.')
+    before = collector_status(root,configuration['source_id']) if cycle_collector and configuration['enabled'] else {}
+    services_stopped = False
     try:
+        # Enter recovery before stopping either process. A failed stop or expired
+        # wait must still restore the previous sources and bring Web back up.
+        services_stopped = True
+        powershell(package/'StopOwnedWeb.ps1','-InstallDir',str(root),cwd=root)
+        if cycle_collector:
+            report('copying','Stopping only this installation\'s collector; spool files and SQLite transactions are retained.')
+            powershell(package/'StopOwnedCollector.ps1','-InstallDir',str(root),cwd=root)
+            if configuration['enabled']: wait_collector_lease(root,configuration,report)
         report('copying','Installing verified source files.')
         for name in manifest['files']:
             target = safe_path(root,name)
@@ -153,8 +277,9 @@ def apply(package,root,manifest,report=lambda stage,message:None):
             shutil.copy2(safe_path(package/'payload',name),temporary)
             temporary.replace(target)
             clear_bytecode(target)
-        report('starting','Starting updated Web service and checking health.')
+        report('starting','Starting updated services and checking health.')
         restart(root)
+        if cycle_collector: collector_ready(root,configuration,before,report)
         with urlopen('http://127.0.0.1:8000/api/v1/decision/hourly',timeout=45) as response:
             data = json.load(response)
             if data.get('advice_policy') != 'gpt-hourly-reference-v4' and data.get('status') != 'pending':
@@ -162,20 +287,42 @@ def apply(package,root,manifest,report=lambda stage,message:None):
         with urlopen('http://127.0.0.1:8000/',timeout=15) as response:
             if '实时总精煤灰分' not in response.read().decode('utf-8'):
                 raise RuntimeError('Updated frontend was not loaded')
-    except BaseException:
-        report('copying','Update failed; restoring previous source and restarting Web. Production database will be retained.')
-        powershell(package/'StopOwnedWeb.ps1','-InstallDir',str(root),cwd=root)
+    except BaseException as failure:
+        report('copying','Update failed; restoring previous source and restarting services. Production database will be retained.')
+        recovery_before = {}
+        recovery_error = None
+        if services_stopped:
+            try:
+                powershell(package/'StopOwnedWeb.ps1','-InstallDir',str(root),cwd=root)
+                if cycle_collector:
+                    if configuration['enabled']: recovery_before = collector_status(root,configuration['source_id'])
+                    powershell(package/'StopOwnedCollector.ps1','-InstallDir',str(root),cwd=root)
+            except Exception as exc:
+                recovery_error = exc
         for name,existed in original.items():
             target = safe_path(root,name)
             if existed: shutil.copy2(backup/'source'/name,target)
             else: target.unlink(missing_ok=True)
             clear_bytecode(target)
-        restart(root)
+        if cycle_collector and configuration['enabled'] and recovery_error is None:
+            try: wait_collector_lease(root,configuration,report)
+            except Exception as exc: recovery_error = exc
+        # Even a lease which exceeds the bounded wait must not leave Web down.
+        # Start.ps1 respects an existing lease; no owner is forcibly reclaimed.
+        try:
+            restart(root)
+            if cycle_collector and recovery_error is None:
+                collector_ready(root,configuration,recovery_before,report)
+        except Exception as exc:
+            recovery_error = exc
+        if recovery_error is not None:
+            raise RuntimeError('Update failed; previous source was restored, but service recovery could not be verified: '+str(recovery_error)) from failure
         raise
     (root/'source-update.json').write_text(json.dumps(dict(revision=manifest['revision'],
         installed_at=datetime.now().astimezone().isoformat(),backup=str(backup),
         profile=manifest.get('profile') or 'standard',
-        database_snapshot=manifest.get('profile') != 'query-only-hotfix'),indent=2),encoding='utf-8')
+        database_snapshot=manifest.get('profile') != 'query-only-hotfix',
+        collector_restarted=cycle_collector and configuration['enabled']),indent=2),encoding='utf-8')
     return backup
 
 

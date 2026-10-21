@@ -4,6 +4,8 @@ import io
 import json
 from pathlib import Path
 import sqlite3
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +13,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('project_update',BACKEND/'scripts/windows_offline/apply_update.py')
 update = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(update)
+COLLECTOR_READY = update.collector_ready
 
 
 @pytest.fixture
@@ -51,6 +54,27 @@ def test_modified_host_or_damaged_package_stops_before_mutation(prepared):
     assert target.read_text() == 'host custom code' and not calls
     source.write_text('damaged payload')
     with pytest.raises(ValueError,match='damaged'): update.apply(package,root,manifest)
+    assert not calls and not (root/'backups').exists()
+
+
+def test_explicit_known_hash_is_accepted_but_unknown_edits_are_rejected(prepared):
+    package,root,_,target,manifest,calls = prepared
+    target.write_text('another previously released source')
+    info = next(iter(manifest['files'].values()))
+    info['accepted_previous_sha256'] = [update.digest(target)]
+    update.verify(package,root,manifest)
+    target.write_text('unpublished host customization')
+    with pytest.raises(ValueError,match='differs.*sha256='):
+        update.apply(package,root,manifest)
+    assert not calls and not (root/'backups').exists()
+
+
+def test_known_hash_does_not_allow_a_missing_original_file(prepared):
+    package,root,_,target,manifest,calls = prepared
+    next(iter(manifest['files'].values()))['accepted_previous_sha256'] = [update.digest(target)]
+    target.unlink()
+    with pytest.raises(ValueError,match='source is missing'):
+        update.apply(package,root,manifest)
     assert not calls and not (root/'backups').exists()
 
 
@@ -153,3 +177,197 @@ def test_allowlisted_query_hotfix_preserves_database_without_full_scan(prepared,
     assert not (backup/'dense_medium.db').exists()
     with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
         assert db.execute('SELECT * FROM evidence').fetchall() == [(1,)]
+    assert all('collector' not in str(call).lower() for call in calls)
+
+
+@pytest.fixture
+def collector_prepared(prepared,monkeypatch):
+    package,root,_,_,manifest,calls = prepared
+    name = 'backend/app/telemetry/worker.py'
+    payload,target = package/'payload'/name,root/name
+    for path in (payload,target): path.parent.mkdir(parents=True,exist_ok=True)
+    payload.write_text('new collector code')
+    target.write_text('old collector code')
+    manifest['files'] = {name:dict(sha256=update.digest(payload),previous_sha256=update.digest(target))}
+    (package/'StopOwnedCollector.ps1').write_text('fixture helper')
+    config = root/'backend/config/kepserver.local.json'
+    config.parent.mkdir()
+    config.write_text(json.dumps(dict(enabled=True,source_id='test-source')))
+    before = dict(owner='old-owner',last_sample_at='2026-01-01T00:00:00+00:00')
+    monkeypatch.setattr(update,'collector_status',lambda *args:before)
+    events = []
+    original_backup = update.backup_database
+    def backup(*args):
+        result = original_backup(*args)
+        events.append('backup-complete')
+        return result
+    monkeypatch.setattr(update,'backup_database',backup)
+    monkeypatch.setattr(update,'powershell',lambda script,*args,**kw:events.append(script.name))
+    monkeypatch.setattr(update,'wait_collector_lease',lambda *a,**kw:events.append('lease-expired'))
+    monkeypatch.setattr(update,'restart',lambda root:events.append('restart:'+target.read_text()))
+    monkeypatch.setattr(update,'collector_ready',lambda *a,**kw:events.append('ready:'+target.read_text()))
+    return package,root,target,manifest,events
+
+
+@pytest.mark.parametrize('name',[
+    'backend/collector.py','backend/app/telemetry/worker.py','backend/app/database.py',
+    'backend/app/config.py','backend/app/models.py','backend/app/decision_hourly/models.py',
+    'backend/migrations/versions/schema.py','backend/scripts/start_collector.py'])
+def test_collector_dependency_changes_require_restart(name):
+    assert update.collector_changed({'files':{name:{}}})
+
+
+def test_frontend_query_and_business_changes_keep_collector_running():
+    assert not update.collector_changed({'files':{'frontend/js/operations.js':{}}})
+    assert not update.collector_changed({'files':{'backend/app/routers/manual_measurements.py':{}}})
+    assert not update.collector_changed({'profile':'query-only-hotfix','files':{'backend/app/telemetry/worker.py':{}}})
+
+
+def test_missing_collector_helper_fails_before_backup_or_stopping(collector_prepared):
+    package,root,target,manifest,events = collector_prepared
+    (package/'StopOwnedCollector.ps1').unlink()
+    with pytest.raises(ValueError,match='requires StopOwnedCollector'):
+        update.apply(package,root,manifest)
+    assert not events and target.read_text() == 'old collector code'
+    assert not (root/'backups').exists()
+
+
+def test_collector_restart_follows_verified_backup_and_expired_lease(collector_prepared):
+    package,root,target,manifest,events = collector_prepared
+    backup = update.apply(package,root,manifest)
+    assert (backup/'dense_medium.db').is_file()
+    assert events == ['backup-complete','StopOwnedWeb.ps1','StopOwnedCollector.ps1',
+        'lease-expired','restart:new collector code','ready:new collector code']
+    assert json.loads((root/'source-update.json').read_text())['collector_restarted'] is True
+
+
+def test_failed_new_collector_restores_old_code_and_verifies_old_collector(collector_prepared,monkeypatch):
+    package,root,target,manifest,events = collector_prepared
+    count = 0
+    def ready(*args):
+        nonlocal count
+        count += 1
+        events.append('ready:'+target.read_text())
+        if count == 1:
+            with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
+                db.execute('INSERT INTO evidence VALUES(2)')
+            raise TimeoutError('new collector did not sample')
+    monkeypatch.setattr(update,'collector_ready',ready)
+    with pytest.raises(TimeoutError,match='did not sample'):
+        update.apply(package,root,manifest)
+    assert target.read_text() == 'old collector code'
+    assert events[-5:] == ['StopOwnedWeb.ps1','StopOwnedCollector.ps1','lease-expired',
+        'restart:old collector code','ready:old collector code']
+    with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
+        assert db.execute('SELECT * FROM evidence').fetchall() == [(1,),(2,)]
+    assert not (root/'source-update.json').exists()
+
+
+def test_lease_timeout_restores_old_collector_without_installing_new_code(collector_prepared,monkeypatch):
+    package,root,target,manifest,events = collector_prepared
+    count = 0
+    def wait(*args):
+        nonlocal count
+        count += 1
+        events.append('lease-wait')
+        if count == 1: raise TimeoutError('lease did not expire')
+    monkeypatch.setattr(update,'wait_collector_lease',wait)
+    with pytest.raises(TimeoutError,match='lease did not expire'):
+        update.apply(package,root,manifest)
+    assert count == 2 and target.read_text() == 'old collector code'
+    assert 'restart:new collector code' not in events
+    assert events[-2:] == ['restart:old collector code','ready:old collector code']
+
+
+def test_permanently_invalid_lease_still_restores_source_and_attempts_web(collector_prepared,monkeypatch):
+    package,root,target,manifest,events = collector_prepared
+    monkeypatch.setattr(update,'wait_collector_lease',lambda *a:(_ for _ in ()).throw(TimeoutError('lease exceeded wait')))
+    with pytest.raises(RuntimeError,match='previous source was restored.*recovery could not be verified'):
+        update.apply(package,root,manifest)
+    assert target.read_text() == 'old collector code' and events[-1] == 'restart:old collector code'
+    assert not (root/'source-update.json').exists()
+
+
+def test_disabled_collector_skips_lease_and_readiness(collector_prepared,monkeypatch):
+    package,root,target,manifest,events = collector_prepared
+    (root/'backend/config/kepserver.local.json').write_text('{"enabled":false}')
+    monkeypatch.setattr(update,'wait_collector_lease',lambda *a:pytest.fail('disabled lease wait'))
+    monkeypatch.setattr(update,'collector_status',lambda *a:pytest.fail('disabled status read'))
+    monkeypatch.setattr(update,'collector_ready',COLLECTOR_READY)
+    backup = update.apply(package,root,manifest)
+    assert backup.is_dir() and target.read_text() == 'new collector code'
+    assert json.loads((root/'source-update.json').read_text())['collector_restarted'] is False
+
+
+class Clock:
+    def __init__(self,monkeypatch):
+        self.elapsed = 0
+        self.stamp = datetime(2026,10,21,tzinfo=timezone.utc)
+        clock = self
+        class FakeDateTime(datetime):
+            @classmethod
+            def now(cls,tz=None):
+                current = clock.stamp+timedelta(seconds=clock.elapsed)
+                return current.astimezone(tz) if tz else current.replace(tzinfo=None)
+        monkeypatch.setattr(update,'datetime',FakeDateTime)
+        monkeypatch.setattr(update,'time',SimpleNamespace(monotonic=lambda:self.elapsed,sleep=self.sleep))
+    def sleep(self,seconds): self.elapsed += seconds
+
+
+def test_lease_wait_uses_readonly_sqlite_until_natural_expiry(prepared,monkeypatch):
+    _,root,*_ = prepared
+    clock = Clock(monkeypatch)
+    database = root/'backend/data/dense_medium.db'
+    with sqlite3.connect(database) as db:
+        db.execute('CREATE TABLE telemetry_sources (source_id TEXT,owner TEXT,lease_until TEXT,state TEXT,last_sample_at TEXT)')
+        db.execute('INSERT INTO telemetry_sources VALUES(?,?,?,?,?)',('test','unchanged-owner',
+            (clock.stamp+timedelta(seconds=2)).isoformat(),'connected',None))
+    real_connect,uris = sqlite3.connect,[]
+    def connect(path,*args,**kwargs):
+        uris.append((path,kwargs.get('uri')))
+        return real_connect(path,*args,**kwargs)
+    monkeypatch.setattr(update.sqlite3,'connect',connect)
+    reports = []
+    update.wait_collector_lease(root,dict(source_id='test'),lambda *a:reports.append(a),timeout=5)
+    assert clock.elapsed == 2 and reports
+    assert all('?mode=ro' in str(path) and uri for path,uri in uris)
+    with real_connect(database) as db:
+        assert db.execute('SELECT owner FROM telemetry_sources').fetchone() == ('unchanged-owner',)
+
+
+def test_lease_wait_is_bounded_and_reports_progress(prepared,monkeypatch):
+    _,root,*_ = prepared
+    clock = Clock(monkeypatch)
+    monkeypatch.setattr(update,'collector_status',lambda *a:dict(owner='owner',
+        lease_until=(clock.stamp+timedelta(hours=1)).isoformat()))
+    reports = []
+    with pytest.raises(TimeoutError,match='owner was not changed'):
+        update.wait_collector_lease(root,dict(source_id='test'),lambda *a:reports.append(a),timeout=7)
+    assert clock.elapsed == 7 and len(reports) == 2
+
+
+def test_readiness_requires_new_owner_fresh_committed_samples_and_connected(monkeypatch,tmp_path):
+    clock = Clock(monkeypatch)
+    before = dict(owner='old',last_sample_at=(clock.stamp-timedelta(seconds=10)).isoformat())
+    def status(*args):
+        age = clock.elapsed
+        return dict(owner='old' if age == 0 else 'new',state='connecting' if age == 1 else 'connected',
+            last_sample_at=(clock.stamp+timedelta(seconds=age-3)).isoformat(),
+            lease_until=(clock.stamp+timedelta(minutes=2)).isoformat())
+    monkeypatch.setattr(update,'collector_status',status)
+    reports = []
+    update.collector_ready(tmp_path,dict(enabled=True,source_id='test',ready_timeout=8),before,
+        lambda *a:reports.append(a))
+    assert clock.elapsed == 5 and 'two committed sample times advanced' in reports[-1][1]
+
+
+@pytest.mark.parametrize('state,owner,advance',[('retrying','new',True),('connected','old',True),('connected','new',False)])
+def test_readiness_rejects_connection_only_old_owner_or_nonadvancing_samples(monkeypatch,tmp_path,state,owner,advance):
+    clock = Clock(monkeypatch)
+    before = dict(owner='old',last_sample_at=(clock.stamp-timedelta(seconds=1)).isoformat())
+    monkeypatch.setattr(update,'collector_status',lambda *args:dict(owner=owner,state=state,
+        last_sample_at=(clock.stamp+timedelta(seconds=clock.elapsed if advance else -2)).isoformat(),
+        lease_until=(clock.stamp+timedelta(minutes=2)).isoformat()))
+    with pytest.raises(TimeoutError,match='connected state and advancing samples'):
+        update.collector_ready(tmp_path,dict(enabled=True,source_id='test',ready_timeout=5),before,lambda *a:None)
+    assert clock.elapsed == 5
