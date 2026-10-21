@@ -179,6 +179,7 @@ FULL_CHECK_MAX_BYTES = 1024**3
 DEFERRED_CHECK_BASE_SECONDS = 300
 DEFERRED_CHECK_SECONDS_PER_BYTE = 6e-7   # ~600s per GiB observed-worst allowance
 DEFERRED_CHECK_CACHE_KIB = 262144        # 256 MiB decode cache for the post-update scan
+DEFERRED_CHECK_YIELD_SECONDS = 0.05      # 50ms sleep each second: keeps page queries responsive
 
 
 def structure_fingerprint(db):
@@ -194,15 +195,25 @@ def structure_fingerprint(db):
 
 
 def verify_snapshot_content(path,report=lambda stage,message:None,*,budget):
-    """Full quick_check on the finished snapshot; bounded and interruptible."""
+    """Full quick_check on the finished snapshot; bounded and interruptible.
+
+    The scan yields briefly every second: an unthrottled random-read stream
+    saturates the host disk for the whole check and pushes page queries past
+    their 30s timeouts (observed 2026-10-21: HTTP 500s for ~40 minutes while
+    production sampling stayed healthy). Sampling stays valid either way; the
+    throttle keeps the *interactive* pages responsive during the scan."""
     started = time.monotonic()
     last_report = started
+    last_yield = started
     with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as database:
         database.execute(f'PRAGMA cache_size=-{DEFERRED_CHECK_CACHE_KIB}')
         def content_progress():
-            nonlocal last_report
+            nonlocal last_report,last_yield
             now = time.monotonic()
             if now-started >= budget: return 1
+            if now-last_yield >= 1:
+                time.sleep(DEFERRED_CHECK_YIELD_SECONDS)
+                last_yield = time.monotonic()
             if now-last_report >= 30:
                 report('verifying',f'Full snapshot content check running, {now-started:.0f}s elapsed.')
                 last_report = now
