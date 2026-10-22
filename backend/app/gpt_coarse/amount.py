@@ -3,8 +3,8 @@ from copy import deepcopy
 from datetime import datetime
 from math import isfinite
 
-POLICY = dict(version='wash-coarse-ratio-v1', input='coal_amount', divisor=40)
-FORMULA = '入洗原煤量 ÷ 40'
+POLICY = dict(version='wash-coarse-ratio-v2', input='coal_amount', divisor=24)
+FORMULA = '入洗原煤量 ÷ 24'
 
 
 def from_wash(coal, now):
@@ -30,5 +30,5 @@ def from_wash(coal, now):
                   status='missing' if reason else 'stopped' if stopped else 'held' if status == 'held' else 'calculated',
                   source='计算 · ' + FORMULA, derivation=deepcopy(POLICY),
                   reason=reason or ('设备停机 · 按入洗量沿用值计算，仅供观察' if stopped else
-                                    '入洗量沿用值计算，仅供观察' if status == 'held' else '入洗：粗精 = 40：1'))
+                                    '入洗量沿用值计算，仅供观察' if status == 'held' else '入洗：粗精 = 24：1'))
     return result

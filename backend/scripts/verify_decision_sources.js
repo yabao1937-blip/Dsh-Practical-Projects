@@ -43,14 +43,14 @@ async function verify(){
     assert.equal(sources.display(page,{id:'tail-level'}).available,false);
     assert.equal(sources.display(page,{id:'tail-level'}).value,'—');
     live.result={cells:{coal_amount:{value:800,status:'good',unit:'t/h'},
-        coarse_amount:{value:20,status:'calculated',source:'计算 · 入洗原煤量 ÷ 40',unit:'t/h'}}};
+        coarse_amount:{value:800/24,status:'calculated',source:'计算 · 入洗原煤量 ÷ 24',unit:'t/h'}}};
     let derived=page.pointDisplay({id:'coarse-amount'});
-    assert.equal(derived.numericValue,20);assert.equal(derived.calculated,true);
-    assert.equal(derived.inputs[0].display.numericValue,800);assert.equal(derived.formula,'入洗原煤量 ÷ 40');
+    assert.equal(derived.numericValue,800/24);assert.equal(derived.calculated,true);
+    assert.equal(derived.inputs[0].display.numericValue,800);assert.equal(derived.formula,'入洗原煤量 ÷ 24');
     assert.equal(page.sourceLocked('coarse-amount'),true);assert.equal(page.sourceBadge({id:'coarse-amount'},derived),'计算');
     live.result.cells.coarse_amount.status='stopped';
     derived=page.pointDisplay({id:'coarse-amount'});
-    assert.equal(derived.available,false);assert.equal(derived.numericValue,20);assert.equal(page.sourceBadge({id:'coarse-amount'},derived),'设备停机');
+    assert.equal(derived.available,false);assert.equal(derived.numericValue,800/24);assert.equal(page.sourceBadge({id:'coarse-amount'},derived),'设备停机');
     live.result.cells.coarse_amount={value:null,status:'missing'};
     assert.equal(page.pointDisplay({id:'coarse-amount'}).value,'—');
     page.view='production';assert.equal(page.sourceLocked('coarse-amount'),false);page.view='gpt';

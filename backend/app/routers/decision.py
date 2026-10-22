@@ -70,7 +70,7 @@ class SourcesPatch(BaseModel):
     def check_choices(self):
         for node, choice in self.choices.items():
             if node == 'coarse-amount' and choice:
-                raise ValueError('粗精煤泥量固定按入洗原煤量 ÷ 40 计算，无需选择点位')
+                raise ValueError('粗精煤泥量固定按入洗原煤量 ÷ 24 计算，无需选择点位')
             if node not in NODE_CELLS or len(choice) > 160:
                 raise ValueError('未知业务节点或来源过长')
             if choice == '':

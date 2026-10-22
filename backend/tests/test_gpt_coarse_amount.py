@@ -21,7 +21,7 @@ from test_decision_sources import seeded, client
 def test_ratio_replaces_manual_and_drives_balance_without_mutation(inputs):
     cells, store = inputs
     original = deepcopy(cells)
-    for feed, coarse in [(600, 15), (800, 20), (692.31, 17.30775)]:
+    for feed, coarse in [(600, 25), (800, 100/3), (692.31, 28.846250)]:
         cells['coal_amount']['value'] = feed
         cells['coarse_amount'].update(value=999, status='manual')
         result = calculate(cells, store, now=NOW)
@@ -49,7 +49,7 @@ def test_stopped_feed_keeps_ratio_for_observation_and_blocks_advice(inputs):
     cells, store = inputs
     cells['coal_amount'].update(value=800, raw_value=0, status='held')
     result = calculate(cells, store, now=NOW)
-    assert result['inputs']['coarse_amount']['value'] == 20
+    assert result['inputs']['coarse_amount']['value'] == pytest.approx(800/24)
     assert result['inputs']['coarse_amount']['status'] == 'stopped'
     assert result['total_ash']['status'] == 'held'
     assert result['suggested_density']['value'] is None
@@ -62,7 +62,7 @@ def test_obsolete_binding_cannot_override_ratio_and_new_binding_rejected(session
     with sessions() as db:
         result = shared_snapshot(db)
         assert result['sources']['resolved_choices']['coarse-amount'] == ''
-        assert result['cells']['coarse_amount']['value'] == 15
+        assert result['cells']['coarse_amount']['value'] == 25
     revision = client.get('/api/v1/decision/sources').json()['revision']
     response = client.patch('/api/v1/decision/sources',json={'revision':revision,
         'choices':{'coarse-amount':identity('manual-measurements','coarse_slime_amount')}})
@@ -88,7 +88,7 @@ def test_reference_roundtrip_and_hour_mean_keep_derived_values(sessions, seeded)
             rows.append(SimpleNamespace(snapshot=snapshot,sampled_at=row.sampled_at,fingerprint=row.fingerprint))
     with sessions() as db:
         output, _, _ = historical_cells(db,HOUR,HOUR+timedelta(hours=1),rows)
-        assert output['coarse_amount']['value'] == 17.5
+        assert output['coarse_amount']['value'] == pytest.approx((600+800)/2/24)
         assert output['coarse_amount']['sample_count'] == 2
         legacy = deepcopy(rows)
         legacy[0].snapshot['cells']['coarse_amount'].pop('derivation')

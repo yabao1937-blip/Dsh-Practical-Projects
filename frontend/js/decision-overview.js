@@ -164,11 +164,11 @@ const DecisionOverviewPage = {
             if(node.id==='coarse-amount') {
                 const input=this.pointDisplay(this.nodes.find(n=>n.id==='coal-rate'));
                 const valid=Number.isFinite(input.numericValue) && input.numericValue>=0 && input.unit==='t/h' && (this.displayAvailable(input) || input.held);
-                const value=valid?input.numericValue/40:null;
-                return {calculated:true,formula:'入洗原煤量 ÷ 40',bound:false,value:this.number(value,2,'t/h'),
+                const value=valid?input.numericValue/24:null;
+                return {calculated:true,formula:'入洗原煤量 ÷ 24',bound:false,value:this.number(value,2,'t/h'),
                     numericValue:value,unit:'t/h',available:valid && !input.held && !input.stopped,held:input.held,stopped:input.stopped,
-                    badge:input.stopped?'设备停机':valid?'计算':'不可用',source:'计算 · 入洗原煤量 ÷ 40',sampleAt:input.sampleAt,
-                    reason:valid?'入洗：粗精 = 40：1':'入洗原煤量不可用',inputs:[{node:{title:'入洗原煤量'},display:input}]};
+                    badge:input.stopped?'设备停机':valid?'计算':'不可用',source:'计算 · 入洗原煤量 ÷ 24',sampleAt:input.sampleAt,
+                    reason:valid?'入洗：粗精 = 24：1':'入洗原煤量不可用',inputs:[{node:{title:'入洗原煤量'},display:input}]};
             }
             if (node.id === 'density-current') {
                 const matches=this.displayPoints().filter(p=>p.item_id==='TIA_4_1.TIA_4_1.A304/MD');
@@ -803,7 +803,7 @@ const DecisionOverviewPage = {
             feature('desliming','脱粉系统状态',['desliming473','desliming474'],370,flags),
             feature('tail-level','精磁尾液位',['level'],485),
             n('coarse-amount','粗精煤泥量',rate(s.amounts.coarse),s.reader.coarseAmountLayer() === '计算' ? '315 筛量 − 筛下水量' : s.reader.coarseAmountLayer(),
-                this.liveMode()?'自动采用同次入洗原煤量 ÷ 40，入洗：粗精 = 40：1；缺数与停机状态跟随入洗量。':`量的计算：315 筛量 ${rate(s.store.coarseCalc?.screen315)} − 筛下水量 ${rate(s.store.coarseCalc?.waterUnder)}。这是组分产量，与“入洗原煤量”模型因素不同。`,
+                this.liveMode()?'自动采用同次入洗原煤量 ÷ 24，入洗：粗精 = 24：1；缺数与停机状态跟随入洗量。':`量的计算：315 筛量 ${rate(s.store.coarseCalc?.screen315)} − 筛下水量 ${rate(s.store.coarseCalc?.waterUnder)}。这是组分产量，与“入洗原煤量”模型因素不同。`,
                 {...family('coarse',1260,600),parent:'coarse',unit:'t/h',numericValue:s.amounts.coarse,...amountInfo('coarseAmount','coarse')}),
             n('coarse-slime','原煤煤泥含量','待补充','工艺因素 · 尚未进入模型','目前的粗精模型使用 10 个输入因素；原煤煤泥含量尚无独立输入字段，也未进入模型。后续需要人工采样或可验证的测量来源。',
                 {...family('coarse',1260,715),parent:'coarse',reference:true}),

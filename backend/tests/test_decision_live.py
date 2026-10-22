@@ -43,9 +43,9 @@ def test_same_snapshot_and_purity(inputs):
     before = deepcopy(inputs)
     r = calculate(cells,store,now=NOW)
     assert r['coarse_ash']['value'] == pytest.approx(9.2)
-    assert r['inputs']['coarse_amount']['value'] == 15
-    assert r['heavy_amount']['value'] == 445
-    assert r['total_ash']['value'] == pytest.approx((8.5*445+9*40+9.2*15)/500)
+    assert r['inputs']['coarse_amount']['value'] == 25
+    assert r['heavy_amount']['value'] == 435
+    assert r['total_ash']['value'] == pytest.approx((8.5*435+9*40+9.2*25)/500)
     assert r['suggested_density']['value'] == 1.48
     assert r['guidance']['direction'] == 'stable'
     assert inputs == before

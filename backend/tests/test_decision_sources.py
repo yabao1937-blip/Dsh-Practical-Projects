@@ -69,10 +69,10 @@ def test_live_and_hour_use_identical_gpt_inputs_and_results(sessions, seeded, cl
         assert live['density_label'] == hourly['density_label'] == 'A304'
         assert live['cells']['density']['value'] == 1.48  # Not the former 1.45 mean.
         assert live['coarse_ash']['value'] == pytest.approx(9.2)
-        assert live['cells']['coarse_amount']['value'] == 15
+        assert live['cells']['coarse_amount']['value'] == 25
         assert live['cells']['coarse_amount']['status'] == 'calculated'
-        assert live['heavy_amount']['value'] == 445
-        assert live['total_ash']['value'] == pytest.approx(8.561)
+        assert live['heavy_amount']['value'] == 435
+        assert live['total_ash']['value'] == pytest.approx((8.5*435+9*40+9.2*25)/500)
         assert live['suggested_density']['value'] == 1.48
         for key, c in hourly['cells'].items():
             assert c == live['cells'][key]

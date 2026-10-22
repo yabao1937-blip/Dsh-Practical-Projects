@@ -100,11 +100,11 @@ const DecisionSources = {
         const c=DecisionRealtime.result?.cells?.[key];
         if(node.id==='coarse-amount') {
             const input=this.display(page,{id:'coal-rate'});
-            return {bound:false,shared:true,calculated:true,formula:'入洗原煤量 ÷ 40',
+            return {bound:false,shared:true,calculated:true,formula:'入洗原煤量 ÷ 24',
                 value:page.number(c?.value,2,'t/h'),numericValue:c?.value ?? null,unit:'t/h',
                 available:c?.status==='calculated' && Number.isFinite(c?.value),held:c?.status==='held',
                 stopped:c?.status==='stopped',badge:c?.status==='stopped'?'设备停机':c?.status==='calculated'?'计算':'不可用',
-                source:c?.source || '计算 · 入洗原煤量 ÷ 40',reason:c?.reason || '等待入洗原煤量',sampleAt:c?.observed_at,
+                source:c?.source || '计算 · 入洗原煤量 ÷ 24',reason:c?.reason || '等待入洗原煤量',sampleAt:c?.observed_at,
                 inputs:[{node:{title:'入洗原煤量'},display:input}]};
         }
         const choice=this.config?.resolved_choices[node.id];
