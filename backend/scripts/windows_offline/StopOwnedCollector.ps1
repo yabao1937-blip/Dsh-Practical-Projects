@@ -49,7 +49,10 @@ foreach ($taskCandidate in $taskOwned) {
         $taskRemaining = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $taskCandidate.ProcessId)
         if ((Is-OwnedCollector $taskRemaining) -and $taskRemaining.CreationDate -eq $taskCandidate.CreationDate) { throw }
     }
-    $taskDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    # 2026-10-22：磁盘被 6.6GiB 备份打满时，Stop-Process -Force 后进程真正退出
+    # 可远超 15 秒（实测 26 秒才消亡）；15 秒死线曾把一次健康的更新打成失败回滚。
+    # 放宽到 60 秒——覆盖备份写入的尾随 I/O，仍短于 powershell() 调用方的 120 秒上限。
+    $taskDeadline = [DateTime]::UtcNow.AddSeconds(60)
     do {
         $taskRemaining = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $taskCandidate.ProcessId)
         if (-not $taskRemaining -or $taskRemaining.CreationDate -ne $taskCandidate.CreationDate) { break }
