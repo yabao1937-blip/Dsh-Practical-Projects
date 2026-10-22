@@ -354,3 +354,93 @@ def test_state_revision_catches_up_after_stale_connected_write(tmp_path):
     assert "retrying" in repo.states
     assert repo.states.index("retrying") > repo.states.index("connected")
     assert repo.states[-1] == "stopped" and stats["connects"] == 2
+
+
+def test_bare_wrapped_exception_is_transient_and_reconnects(tmp_path):
+    """回归（2026-10-22 生产断采根因）：asyncua ua_client.send_request 在 socket
+    仍打开时把发送异常（含 wait_for 超时）包成裸 Exception 重抛。旧逻辑对它
+    isinstance 白名单全失配 → 判 fatal → 采集进程退出不自愈。新逻辑必须按
+    瞬态处理：进入 retrying 并重连成功。"""
+    from app.telemetry.worker import transient_error
+
+    cfg = config()
+    cfg.retry_min_seconds = cfg.retry_max_seconds = .1
+    repo = Repository()
+    stats = {"connects": 0, "reads": 0}
+    failed_read = asyncio.Event()
+
+    # 复刻 asyncua ua_client.py:221 的包装方式：wait_for 超时被包成裸 Exception 重抛
+    async def failing_send():
+        try:
+            await asyncio.wait_for(asyncio.sleep(2), timeout=0.05)
+        except asyncio.TimeoutError as exc:
+            raise Exception("Unhandled exception while sending request to OPC UA server") from exc
+
+    async def scenario():
+        stop = asyncio.Event()
+
+        class Reader:
+            async def __aenter__(self):
+                stats["connects"] += 1
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+            async def read(self):
+                stats["reads"] += 1
+                if stats["reads"] == 2:
+                    failed_read.set()
+                    raise await failing_send()
+                if stats["reads"] >= 3:
+                    stop.set()
+                now = utc_now()
+                return [normalize(cfg.points[0], 1.5, 0, now, now, now)]
+
+        # 判定函数本身：包装异常必须判瞬态
+        wrapped = None
+        try:
+            await failing_send()
+        except Exception as exc:
+            wrapped = exc
+        assert transient_error(wrapped) is True
+        assert transient_error(asyncio.TimeoutError()) is True
+        assert transient_error(Exception("AsyncioTimeoutError cause", asyncio.TimeoutError())) is True
+
+        task = asyncio.create_task(run_collector(cfg, repo, DurableSpool(tmp_path, cfg.source_id),
+                                               stop=stop, reader_factory=lambda _: Reader()))
+        while not failed_read.is_set():
+            await asyncio.sleep(.005)
+        assert await asyncio.wait_for(task, 4) == 0
+
+    asyncio.run(scenario())
+    assert "retrying" in repo.states, "包装异常必须判瞬态进入重试，而不是 fatal 退出"
+    assert repo.states.index("retrying") > repo.states.index("connected")
+    assert repo.states[-1] == "stopped" and stats["connects"] == 2
+
+
+def test_permanent_error_chain_precedence_keeps_fault_classification():
+    """链条判定不能放宽致命分类：认证/证书/配置类异常（即使被包装）仍必须 fatal。"""
+    from app.telemetry.worker import permanent_error, transient_error
+
+    class BadIdentityTokenRejected(Exception):
+        pass
+
+    try:
+        raise BadIdentityTokenRejected("synthetic auth rejection")
+    except BadIdentityTokenRejected as cause:
+        try:
+            raise Exception("wrapped transport noise") from cause
+        except Exception as exc:
+            wrapped_auth = exc
+    assert permanent_error(wrapped_auth) is True
+
+    from app.telemetry.opcua import ConfigurationError
+    try:
+        raise ConfigurationError("client certificate invalid")
+    except ConfigurationError as cause:
+        try:
+            raise RuntimeError("lib wrapper") from cause
+        except RuntimeError as exc:
+            wrapped_cfg = exc
+    assert permanent_error(wrapped_cfg) is True and transient_error(wrapped_cfg) is False

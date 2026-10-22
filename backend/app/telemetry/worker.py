@@ -20,13 +20,54 @@ def retry_delay(attempt: int, minimum: float, maximum: float) -> float:
     return random.uniform(minimum, cap)
 
 
+TRANSIENT_ERROR_NAMES = {
+    "BadConnectionClosed", "BadSessionClosed", "BadSessionIdInvalid", "BadSecureChannelClosed",
+    "BadTimeout", "BadServerHalted", "BadCommunicationError", "BadNotConnected",
+}
+
+
+def exception_chain(exc):
+    """还原异常链：库会把传输异常包成新异常重抛（raise ... from ex）。"""
+    chain, seen = [], set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        chain.append(exc)
+        exc = exc.__cause__ if exc.__cause__ is not None else exc.__context__
+    return chain
+
+
+def transient_error(exc):
+    """瞬态（可重试）判定：异常本身或链条任一环属于传输类失败即瞬态。
+
+    asyncua ua_client.send_request 会在 socket 仍打开时把发送异常（含 wait_for
+    超时）包成裸 Exception 重抛；裸 Exception 不匹配 isinstance 白名单曾被判
+    fatal 导致采集进程退出（2026-10-22 生产断采根因）。本仓库代码从不 raise
+    裸 Exception，因此裸 Exception 只可能来自库传输层包装，按瞬态重试。已知
+    致命错误（配置/认证/证书等）由 permanent_error 优先判定，不受此影响。
+    """
+    for error in exception_chain(exc):
+        if isinstance(error, (OSError, asyncio.TimeoutError, ConnectionError)):
+            return True
+        if type(error).__name__ in TRANSIENT_ERROR_NAMES:
+            return True
+        if type(error) is Exception:
+            return True
+    return False
+
+
 def permanent_error(exc):
-    return isinstance(exc, (ConfigurationError, ValueError, ImportError, SpoolError, LeaseLost)) or type(exc).__name__ in {
+    """致命判定沿异常链检查：库包装（raise ... from）不得掩盖底层配置/认证/证书错误。"""
+    names = {
         "BadUserAccessDenied", "BadIdentityTokenInvalid", "BadIdentityTokenRejected",
         "BadSecurityChecksFailed", "BadCertificateInvalid", "BadCertificateUntrusted",
         "BadCertificateTimeInvalid", "BadCertificateUriInvalid", "BadSecurityPolicyRejected",
         "BadCertificateUseNotAllowed", "BadCertificateRevoked", "BadCertificateHostNameInvalid",
     }
+    return any(
+        isinstance(error, (ConfigurationError, ValueError, ImportError, SpoolError, LeaseLost))
+        or type(error).__name__ in names
+        for error in exception_chain(exc)
+    )
 
 
 async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader_factory=OpcUaReader):
@@ -137,10 +178,7 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
                 except Exception as exc:
                     code = type(exc).__name__
                     last_error = code
-                    transient = isinstance(exc, (OSError, asyncio.TimeoutError, ConnectionError)) or code in {
-                        "BadConnectionClosed", "BadSessionClosed", "BadSessionIdInvalid", "BadSecureChannelClosed",
-                        "BadTimeout", "BadServerHalted", "BadCommunicationError", "BadNotConnected",
-                    }
+                    transient = transient_error(exc)
                     fatal = permanent_error(exc) or not transient or once
                     delay = 0 if fatal else retry_delay(attempt, cfg.retry_min_seconds, cfg.retry_max_seconds)
                     log.warning("collector_failure source=%s code=%s retry_seconds=%.2f", cfg.source_id, code, delay)
