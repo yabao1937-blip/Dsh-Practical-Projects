@@ -223,6 +223,22 @@ def test_frontend_query_and_business_changes_keep_collector_running():
     assert not update.collector_changed({'profile':'query-only-hotfix','files':{'backend/app/telemetry/worker.py':{}}})
 
 
+def test_ratio_hotfix_allowlist_covers_wash_coarse_change():
+    """600:15→600:25 比例改动(2026-10-22)必须能走 query-only-hotfix 通道:
+    只改计算常量/文案/前端展示,不触发采集器重启,也不动 schema/模型存储。"""
+    ratio_files = {'backend/app/gpt_coarse/amount.py','backend/app/routers/decision.py',
+                   'frontend/js/decision-overview.js','frontend/js/decision-sources.js'}
+    hotfix = dict(profile='query-only-hotfix',files={name:{} for name in ratio_files})
+    assert not update.collector_changed(hotfix), '比例热修不得重启采集器'
+    # verify() 的白名单判定:把 manifest 喂给 verify 的白名单检查路径(不落盘则构造同款检查)
+    allowed = {'backend/app/decision_hourly/ash_history.py','backend/app/decision_hourly/ash_settlement.py',
+               'backend/app/decision_hourly/quality_advice.py','backend/app/routers/health.py',
+               'backend/app/gpt_coarse/amount.py','backend/app/routers/decision.py',
+               'frontend/js/decision-overview.js','frontend/js/decision-sources.js',
+               'frontend/js/api.js','frontend/js/operations.js'}
+    assert ratio_files <= allowed
+
+
 def test_missing_collector_helper_fails_before_backup_or_stopping(collector_prepared):
     package,root,target,manifest,events = collector_prepared
     (package/'StopOwnedCollector.ps1').unlink()

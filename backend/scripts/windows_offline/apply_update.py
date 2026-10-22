@@ -54,6 +54,8 @@ def verify(package,root,manifest):
     if profile == 'query-only-hotfix' and not set(manifest['files']).issubset({
             'backend/app/decision_hourly/ash_history.py','backend/app/decision_hourly/ash_settlement.py',
             'backend/app/decision_hourly/quality_advice.py','backend/app/routers/health.py',
+            'backend/app/gpt_coarse/amount.py','backend/app/routers/decision.py',
+            'frontend/js/decision-overview.js','frontend/js/decision-sources.js',
             'frontend/js/api.js','frontend/js/operations.js'}):
         raise ValueError('Query hotfix cannot change schema, model, storage or startup code')
     for name,info in manifest['files'].items():
