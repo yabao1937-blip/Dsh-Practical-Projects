@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.database import get_db
+from app.decision_hourly import models as _decision_hourly_models  # noqa: F401  (register tables before create_all)
 from app.models import AutoState, Setting, DecisionSourceRevision, CoarseModel
 from app.routers.decision import router
 from app.services.decision_sources import shared_snapshot, identity, config_view
@@ -59,6 +60,41 @@ def client(sessions):
     app.dependency_overrides[get_db] = database
     with TestClient(app) as client:
         yield client
+
+
+def test_shared_snapshot_never_computes_the_unused_density_mean(sessions, seeded, monkeypatch):
+    from app.hourly_brief.inputs import Inputs
+
+    def explode(self):
+        raise AssertionError("共享快照不应无条件计算 A303/A304 平均")
+
+    monkeypatch.setattr(Inputs, "density", explode)
+    with sessions() as db:
+        live = shared_snapshot(db)
+    assert live["density_label"] == "A304"
+    assert live["cells"]["density"]["value"] == 1.48
+
+
+def test_inputs_collect_keeps_density_for_full_callers(sessions, seeded):
+    from app.hourly_brief.inputs import Inputs
+    with sessions() as db:
+        cells = Inputs(db, HOUR, live=True, authoritative=True).collect()
+    assert cells["density"]["value"] == 1.45
+
+
+def test_snapshot_survives_a_retired_density_channel(sessions, seeded):
+    from app.telemetry.models import TelemetryPoint
+    from app.telemetry.repository import latest_view
+    with sessions.begin() as db:
+        assert db.get(TelemetryPoint, ("kepserver-main", "point3")) is not None
+        db.delete(db.get(TelemetryPoint, ("kepserver-main", "point3")))
+    with sessions() as db:
+        live = shared_snapshot(db)
+        view = latest_view(db)
+    assert live["density_label"] == "A304"
+    assert live["cells"]["density"]["value"] == 1.48
+    average = next(item for item in view["derived_items"] if item.get("kind") == "numeric_average")
+    assert average["available"] is False and average["sample"]["value"] is None
 
 
 def test_live_and_hour_use_identical_gpt_inputs_and_results(sessions, seeded, client):

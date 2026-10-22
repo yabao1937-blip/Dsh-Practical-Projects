@@ -1,6 +1,7 @@
 """Bounded display memories; raw readings and live availability remain unchanged."""
 from collections import OrderedDict
 from copy import deepcopy
+from datetime import timedelta
 import json
 from threading import Lock
 from weakref import WeakKeyDictionary
@@ -8,13 +9,17 @@ from weakref import WeakKeyDictionary
 from sqlalchemy import select
 from sqlalchemy.orm import aliased
 
-from .domain import availability, definition_id, parse_time
+from .domain import availability, definition_id, iso_time, parse_time, utc_now
 from .derived import DENSITY_AVERAGE_MEMBERS, density_average_points
 from .density_effective import DENSITY_ITEMS, valid_density
 from .models import TelemetryPoint, TelemetryReading
 
 MEMORY = "_display_memory"
 DENSITY_MEMORY = "_density_display_memory"
+# A decision or replay lookup never walks further than this for a channel's last
+# valid density. A stuck channel (always 1.000) would otherwise scan its whole
+# retained history on every request, and history is never pruned.
+DENSITY_HISTORY_LOOKBACK = timedelta(hours=24)
 _legacy_cache = WeakKeyDictionary()
 _cache_lock = Lock()
 
@@ -88,6 +93,9 @@ def density_history(db, point, cutoff=None, authoritative=False):
         TelemetryReading.sample["value"].as_float() > 0)
     if cutoff:
         query = query.where(TelemetryReading.received_at <= cutoff)
+    if authoritative:
+        end = parse_time(cutoff) if isinstance(cutoff, str) else cutoff or utc_now()
+        query = query.where(TelemetryReading.received_at >= iso_time(end - DENSITY_HISTORY_LOOKBACK))
     latest = newest(*candidates)
     if latest:
         query = query.where(TelemetryReading.received_at > latest["received_at"])

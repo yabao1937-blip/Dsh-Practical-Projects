@@ -126,7 +126,10 @@ def latest_record(inputs, category):
 
 
 def collect_shared(inputs, config):
-    cells = inputs.collect()
+    # The node loop below derives cells['density'] from the configured source
+    # (single meter or the A303/A304 mean), so collecting the mean here would
+    # only add an unused full-history scan for every request.
+    cells = inputs.collect(with_density=False)
     # Historical/imported float assays are also visible in the overview. Respect their receipt time.
     row = latest_record(inputs, 'float')
     if row:

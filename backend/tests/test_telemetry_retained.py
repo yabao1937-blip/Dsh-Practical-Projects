@@ -13,7 +13,7 @@ from app.telemetry.domain import iso_time, normalize, utc_now
 from app.telemetry.derived import DENSITY_AVERAGE_MEMBERS
 from app.telemetry.models import TelemetryPoint, TelemetryReading
 from app.telemetry.repository import TelemetryRepository, latest_view
-from app.telemetry.retained import MEMORY, DENSITY_MEMORY
+from app.telemetry.retained import MEMORY, DENSITY_MEMORY, density_history
 
 
 @pytest.fixture
@@ -256,6 +256,32 @@ def test_ambiguous_density_configuration_is_not_arbitrarily_averaged(repo):
     effective = view(repo, cfg, now)["derived_items"][0]["effective_density"]
     assert effective["value"] is None
     assert "不唯一" in effective["reason"]
+
+
+def test_authoritative_density_lookup_ignores_history_outside_the_lookback(repo):
+    cfg = density_config()
+    old = utc_now() - timedelta(days=3)
+    repo.acquire(cfg, "owner")
+    send(repo, cfg, [1.47, 1.57], old)
+    send(repo, cfg, [1, 1], utc_now())
+    repo.state(cfg, "owner", "connected")
+    with repo.sessions() as db:
+        point = db.get(TelemetryPoint, (cfg.source_id, cfg.points[0].key))
+        cutoff = iso_time(utc_now())
+        assert density_history(db, point, cutoff, authoritative=True) is None
+        # The display path keeps its documented "last valid non-1 sample".
+        assert density_history(db, point, cutoff)["value"] == 1.47
+
+
+def test_authoritative_density_lookup_keeps_a_recent_hold(repo):
+    cfg = density_config()
+    held_at = utc_now() - timedelta(hours=2)
+    repo.acquire(cfg, "owner")
+    send(repo, cfg, [1.47, 1.57], held_at)
+    send(repo, cfg, [1, 1], utc_now())
+    with repo.sessions() as db:
+        point = db.get(TelemetryPoint, (cfg.source_id, cfg.points[0].key))
+        assert density_history(db, point, iso_time(utc_now()), authoritative=True)["value"] == 1.47
 
 
 def test_latest_view_density_alarm_uses_raw_values_and_marks_offline_unknown(repo):

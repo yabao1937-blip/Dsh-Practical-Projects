@@ -222,16 +222,20 @@ class Inputs:
     def default(key, reason=""):
         return cell(INSTRUMENT_DEFAULT[key], "在线仪表默认值", status="default", reason=reason, default_key=key)
 
-    def collect(self):
+    def collect(self, with_density=True):
         result = {
             "raw_ash": self.telemetry(RAW_ASH, zero_hold=True, unit="%"),
             "coal_amount": self.telemetry(COAL_AMOUNT, zero_hold=True, unit="t/h"),
             "systems": self.group(FOUR_SYSTEM_MEMBERS),
             "desliming": self.group(DESLIMING_MEMBERS),
             "float_press": self.group(FLOAT_PRESS_MEMBERS),
-            "density": self.density(),
             "reagent": cell(reason="尚未配置药剂量测点、手工录入或默认值"),
         }
+        if with_density:
+            # Shared decision snapshots always overwrite cells['density'] from the
+            # configured source; the unconditional A303/A304 mean must not scan
+            # each channel's retained history for a value nobody reads.
+            result["density"] = self.density()
         result["level"] = self.telemetry(LEVEL, unit="%")
         if result["level"]["value"] is None:
             result["level"] = self.manual(auto_paths=[("instrumentInputs", "level_tail")],
