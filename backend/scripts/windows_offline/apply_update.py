@@ -85,7 +85,12 @@ def collector_configuration(root):
                 not math.isfinite(timeout) or not .1 <= timeout <= 30):
             raise ValueError()
         return dict(enabled=enabled,source_id=source_id,
-            ready_timeout=max(90,poll*3+timeout*3+5))
+            # 2026-10-22：现场 KEP 会反复停转数分钟（当日 08:29/11:05/11:16 三次）。
+            # 旧窗口 max(90, poll*3+timeout*3+5)=95s 只覆盖正常重启；重启恰逢停转时
+            # 新采集器（按瞬态重试）在窗口内到不了 connected，被误判失败回滚——
+            # 而回滚后的旧代码同样超窗（本次 11:06 判败、11:07:30 实测已连上）。
+            # 窗口必须覆盖 retry_max(30s) 指数退避的数个周期，放宽到 300s。
+            ready_timeout=max(300,poll*3+timeout*3+5))
     except (OSError,ValueError,TypeError,AttributeError):
         raise ValueError('Local collector configuration is missing or invalid; nothing was changed') from None
 
