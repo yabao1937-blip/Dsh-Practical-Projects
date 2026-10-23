@@ -14,7 +14,7 @@ KEPServer 仍每 5 秒读取，实时卡片和即时计算使用有界运行缓�
 
 程序、Python 和现有启动入口仍留在：
 
-`C:\Users\ZJC\DshDensityControl`
+`C:\Users\XMC\DshDensityControl`（本次现场核实的安装路径）
 
 将两个主要增长目录迁为：
 
@@ -52,9 +52,16 @@ KEPServer 仍每 5 秒读取，实时卡片和即时计算使用有界运行缓�
 
 本次功能先在隔离临时数据库及 Windows 临时目录验证，不把本地测试通过等同于主机已部署。主机执行前后还需核对真实路径、配置、健康状态、实时采样推进与 30 秒历史批次。
 
+2026-10-23 现场已完成 D 盘迁移和旧 C 盘副本清理。清理脚本先确认新采集进程已有两次推进的提交，再移除 `backend\data.before-D-20261023-020305-766032`（7077 MiB）及 `backups.before-D-20261023-020305-766032`（31607 MiB），合计约 37.8 GiB；D 盘生产数据及历史备份保留。随后首次 30 秒入库更新在停止采集进程时超时并回退，主机恢复在线，不能将此次迁移成功等同于 30 秒入库已生效。
+
+停止辅助脚本改为先捕获本安装各采集进程的原生句柄，再核对完整脚本路径及进程创建时间，向全部已核实的进程发出停止信号后，按同一个 60 秒上限等待真实退出；不再以 CIM 记录是否消失判断执行是否结束。Windows 虚拟环境启动器和解释器可能同时匹配，实际进程退出后继续可见的 CIM 记录由隔离回归模拟；现场底层延迟原因尚不能仅凭日志确定。报错会列出仍未退出的 PID，且等待上限提示与实现一致。
+
 - 采集/缓存专项及原采集回归：`test_telemetry_realtime.py`、`test_collector_storage.py`、`test_telemetry.py`。
 - 主机缓存只读传输及测试服回归：`output/storage-30s-20261023/transport.xml`、`live-final.xml`。
 - GPT 输入、液位时间口径、历史保留及 DS 原版：`output/storage-30s-20261023/core.xml`。
 - 混合周期、覆盖率、小时回算和引用：`output/cadence-archive-final.xml` 及最终补丁复跑 `output/cadence-final-patch.xml`；分批用例结果，不能视为单轮完整运行。
 - 配置更新及失败恢复：`output/storage-policy-update-tests.xml`。
 - 迁移、晚失败新增数据回滚、清理范围及 Windows 进程归属：`output/storage-migration-20261023/tests.xml`。
+- 采集进程退出、虚拟环境启动器/子进程、保留句柄、滞留 CIM 记录、PID 身份及无关进程保护：`test_stop_owned_collector.py`、`test_stop_owned_collector_handles.py`。
+
+停止辅助脚本修复后的独立验收：上述两组进程测试连同项目更新、打包及存储迁移测试共 99 项通过（`output/storage-30s-20261023/stop-update-retry.xml`）。此结果仅证明隔离验证通过，30 秒策略仍需主机重试成功后核对实际批次。

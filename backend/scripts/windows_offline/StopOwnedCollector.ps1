@@ -41,24 +41,56 @@ function Is-OwnedCollector($taskCandidate) {
     return [IO.Path]::GetFullPath($taskScript).Equals($taskCollector, [StringComparison]::OrdinalIgnoreCase)
 }
 $taskOwned = @(Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" | Where-Object { Is-OwnedCollector $_ })
-foreach ($taskCandidate in $taskOwned) {
-    $taskCurrent = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $taskCandidate.ProcessId)
-    if (-not (Is-OwnedCollector $taskCurrent) -or $taskCurrent.CreationDate -ne $taskCandidate.CreationDate) { continue }
-    try { Stop-Process -Id $taskCurrent.ProcessId -Force -ErrorAction Stop }
-    catch {
-        $taskRemaining = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $taskCandidate.ProcessId)
-        if ((Is-OwnedCollector $taskRemaining) -and $taskRemaining.CreationDate -eq $taskCandidate.CreationDate) { throw }
+$taskHandles = [Collections.Generic.List[object]]::new()
+try {
+    foreach ($taskCandidate in $taskOwned) {
+        $taskProcess = $null
+        try {
+            try { $taskProcess = [Diagnostics.Process]::GetProcessById([int]$taskCandidate.ProcessId) }
+            catch [ArgumentException] { continue } # It exited before a handle could be captured.
+            # Keep a native handle open before rechecking identity. A PID cannot be
+            # recycled beneath this handle; Kill and HasExited refer to this object.
+            try { $null = $taskProcess.Handle }
+            catch [InvalidOperationException] { continue } # It exited while opening the handle.
+            catch [ComponentModel.Win32Exception] {
+                # Only a vanished PID is benign; access denied and other errors
+                # must stop the update rather than claim the collector stopped.
+                if ($_.Exception.NativeErrorCode -in @(87,1168)) { continue }
+                throw
+            }
+            $taskCurrent = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $taskCandidate.ProcessId)
+            if (-not (Is-OwnedCollector $taskCurrent) -or $taskCurrent.CreationDate -ne $taskCandidate.CreationDate) { continue }
+            if ($taskProcess.HasExited) { continue }
+            $taskHandles.Add([pscustomobject]@{ Process=$taskProcess; Candidate=$taskCandidate })
+            $taskProcess = $null # The list owns and disposes this handle.
+        } finally {
+            if ($null -ne $taskProcess) { $taskProcess.Dispose() }
+        }
     }
-    # 2026-10-22：磁盘被 6.6GiB 备份打满时，Stop-Process -Force 后进程真正退出
-    # 可远超 15 秒（实测 26 秒才消亡）；15 秒死线曾把一次健康的更新打成失败回滚。
-    # 放宽到 60 秒——覆盖备份写入的尾随 I/O，仍短于 powershell() 调用方的 120 秒上限。
-    $taskDeadline = [DateTime]::UtcNow.AddSeconds(60)
-    do {
-        $taskRemaining = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $taskCandidate.ProcessId)
-        if (-not $taskRemaining -or $taskRemaining.CreationDate -ne $taskCandidate.CreationDate) { break }
-        if ([DateTime]::UtcNow -ge $taskDeadline) { throw 'Owned collector did not stop within 15 seconds.' }
+
+    # A Windows venv can leave both its launcher and the interpreter running
+    # the same owned script. Signal all verified processes before waiting, so
+    # the launcher's exit never depends on a child we have not stopped yet.
+    foreach ($taskEntry in $taskHandles) {
+        try { if (-not $taskEntry.Process.HasExited) { $taskEntry.Process.Kill() } }
+        catch { if (-not $taskEntry.Process.HasExited) { throw } }
+    }
+    # Test execution exit, not Win32_Process entry removal: a retained or stale
+    # enumeration row is not proof that the original process is still running.
+    # One shared deadline stays below the updater caller's 120-second timeout.
+    $taskWait = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        $taskRunning = @($taskHandles | Where-Object { -not $_.Process.HasExited })
+        if ($taskRunning.Count -eq 0) { break }
+        if ($taskWait.Elapsed.TotalSeconds -ge 60) {
+            throw ('Owned collectors did not stop within 60 seconds (' + [int]$taskWait.Elapsed.TotalSeconds + 's elapsed): PID ' + (($taskRunning | ForEach-Object { $_.Candidate.ProcessId }) -join ', ') + '.')
+        }
         Start-Sleep -Milliseconds 100
-    } while ($true)
-    Write-Host ('Owned collector stopped: PID ' + $taskCandidate.ProcessId + ', created ' + $taskCandidate.CreationDate + '. Spool and database leases were retained.')
+    }
+    foreach ($taskEntry in $taskHandles) {
+        Write-Host ('Owned collector stopped: PID ' + $taskEntry.Candidate.ProcessId + ', created ' + $taskEntry.Candidate.CreationDate + '. Spool and database leases were retained.')
+    }
+} finally {
+    foreach ($taskEntry in $taskHandles) { $taskEntry.Process.Dispose() }
 }
 Write-Host 'Collector stop complete. Other installations and Python processes were preserved.'
