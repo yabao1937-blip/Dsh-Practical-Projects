@@ -24,6 +24,18 @@ def log_tail(path):
     return re.sub(r'([?&]token=)[^&\s"]+',r'\1[redacted]',text,flags=re.I)
 
 
+def decision_worker_tail(path):
+    """Keep background evidence even when frequent HTTP logs fill the short tail."""
+    if not path.is_file(): return 'not found'
+    with path.open('rb') as stream:
+        stream.seek(max(0,path.stat().st_size-8*1024*1024))
+        lines = stream.read().decode('utf-8-sig',errors='replace').splitlines()
+    selected = [line for line in lines if re.search(
+        r'decision_observation|Hourly decision|Hourly report|Traceback|database is locked',line,re.I)]
+    text = '\n'.join(selected[-100:])[-16000:]
+    return re.sub(r'([?&]token=)[^&\s"]+',r'\1[redacted]',text,flags=re.I)
+
+
 def collect(root):
     report = dict(at=datetime.now().astimezone().isoformat())
     usage = shutil.disk_usage(root)
@@ -65,7 +77,8 @@ def collect(root):
                                       elapsed=round(time.monotonic()-started,2))
         finally: db.close()
     except Exception as exc: report['database'] = dict(error=type(exc).__name__,message=str(exc)[:250])
-    report['logs'] = {'web':log_tail(Path(os.environ.get('TEMP','.'))/'dmcs_server.log')}
+    web_log = Path(os.environ.get('TEMP','.'))/'dmcs_server.log'
+    report['logs'] = {'web':log_tail(web_log), 'decision_worker':decision_worker_tail(web_log)}
     runtime = root/'backend/data/telemetry-runtime'
     for metadata in sorted(runtime.glob('*.json'))[:2]:
         try:
