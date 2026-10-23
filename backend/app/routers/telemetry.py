@@ -34,6 +34,8 @@ def latest(source_id: str | None = Query(None, max_length=64), db: Session = Dep
         # Freshness belongs to the computer recording the samples. A laptop
         # clock offset must not turn valid production samples into stale data.
         from ..remote_readonly.runtime import host_now
+        from ..remote_readonly.live_cache import attach_runtime
+        attach_runtime(db)
         return latest_view(db, source_id, now=host_now(db))
     return latest_view(db, source_id)
 

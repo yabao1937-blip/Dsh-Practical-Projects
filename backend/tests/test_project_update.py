@@ -223,6 +223,168 @@ def test_frontend_query_and_business_changes_keep_collector_running():
     assert not update.collector_changed({'profile':'query-only-hotfix','files':{'backend/app/telemetry/worker.py':{}}})
 
 
+def test_explicit_history_patch_requires_collector_restart_even_without_source_dependencies():
+    assert update.collector_changed(dict(files={},collector_history_interval_seconds=30))
+
+
+@pytest.fixture
+def history_prepared(collector_prepared):
+    package,root,target,manifest,events = collector_prepared
+    manifest['collector_history_interval_seconds'] = 30
+    configuration = root/'backend/config/kepserver.local.json'
+    original = (b'\xef\xbb\xbf{\r\n  "enabled": true, "source_id": "test-source",\r\n'
+        b'  "history_interval_seconds": 5, "poll_seconds": 5,\r\n'
+        b'  "credentials": {"password":"fixture-secret", "history_interval_seconds": 5},\r\n'
+        b'  "points": [{"id":"wash", "node":"s=unchanged"}]\r\n}\r\n')
+    configuration.write_bytes(original)
+    return package,root,target,manifest,events,configuration,original
+
+
+@pytest.mark.parametrize('value',[None,True,False,30.0,5,60,'30',{},[]])
+def test_history_patch_rejects_manifest_values_before_backup(history_prepared,value):
+    package,root,target,manifest,events,configuration,original = history_prepared
+    manifest['collector_history_interval_seconds'] = value
+    with pytest.raises(ValueError,match='integer value 30'):
+        update.apply(package,root,manifest)
+    assert configuration.read_bytes() == original and not events
+    assert not (root/'backups').exists()
+
+
+def test_query_hotfix_cannot_patch_history_configuration(history_prepared):
+    package,root,target,manifest,events,configuration,original = history_prepared
+    manifest['profile'] = 'query-only-hotfix'
+    with pytest.raises(ValueError,match='standard update'):
+        update.apply(package,root,manifest)
+    assert configuration.read_bytes() == original and not events
+    assert not (root/'backups').exists()
+
+
+def test_missing_history_configuration_fails_before_backup(history_prepared):
+    package,root,target,manifest,events,configuration,_ = history_prepared
+    configuration.unlink()
+    with pytest.raises(ValueError,match='configuration is missing or invalid'):
+        update.apply(package,root,manifest)
+    assert not events and not (root/'backups').exists()
+
+
+@pytest.mark.parametrize('value',[
+    b'{broken',b'[]',b'{"poll_seconds":true}',b'{"poll_seconds":35}',
+    b'{"poll_seconds":"5"}',b'{"history_interval_seconds":false}',
+    b'{"history_interval_seconds":5,"history_interval_seconds":10}',
+])
+def test_invalid_history_configuration_or_polling_relation_fails_before_backup(history_prepared,value):
+    package,root,target,manifest,events,configuration,_ = history_prepared
+    configuration.write_bytes(value)
+    with pytest.raises(ValueError,match='configuration is missing or invalid'):
+        update.apply(package,root,manifest)
+    assert configuration.read_bytes() == value and not events
+    assert not (root/'backups').exists()
+
+
+def test_history_configuration_changes_only_after_backup_and_collector_stop(history_prepared,monkeypatch):
+    package,root,target,manifest,events,configuration,original = history_prepared
+    replace = update.replace_configuration
+    def change(path,data):
+        assert path == configuration and path.read_bytes() == original
+        assert events == ['backup-complete','StopOwnedWeb.ps1','StopOwnedCollector.ps1','lease-expired']
+        assert target.read_text() == 'old collector code'
+        backup = next((root/'backups').iterdir())
+        assert (backup/'dense_medium.db').is_file()
+        assert (backup/'configuration/backend/config/kepserver.local.json').read_bytes() == original
+        replace(path,data)
+    monkeypatch.setattr(update,'replace_configuration',change)
+    backup = update.apply(package,root,manifest)
+    # BOM, CRLF, endpoint/credential/point data and even a nested name survive byte for byte.
+    assert configuration.read_bytes() == original.replace(
+        b'"history_interval_seconds": 5',b'"history_interval_seconds": 30',1)
+    assert (backup/'configuration/backend/config/kepserver.local.json').read_bytes() == original
+    record = json.loads((root/'source-update.json').read_text())
+    assert record['collector_history_interval_seconds'] == 30 and record['collector_restarted'] is True
+    assert not configuration.with_name(configuration.name+'.source-update.tmp').exists()
+
+
+@pytest.mark.parametrize('value',[b'{}',b'{ "poll_seconds": 5 }'])
+def test_history_field_can_be_added_without_rewriting_existing_configuration(prepared,value):
+    _,root,*_ = prepared
+    path = root/'backend/config/kepserver.local.json'
+    path.parent.mkdir()
+    path.write_bytes(value)
+    patch = update.history_configuration_patch(root,dict(collector_history_interval_seconds=30))
+    assert patch['original'] == value and path.read_bytes() == value
+    assert json.loads(patch['updated']) == dict(json.loads(value),history_interval_seconds=30)
+
+
+def test_no_explicit_history_patch_preserves_exact_configuration(history_prepared):
+    package,root,target,manifest,events,configuration,original = history_prepared
+    del manifest['collector_history_interval_seconds']
+    backup = update.apply(package,root,manifest)
+    assert configuration.read_bytes() == original
+    assert not (backup/'configuration').exists()
+    assert 'collector_history_interval_seconds' not in json.loads((root/'source-update.json').read_text())
+
+
+@pytest.mark.parametrize('phase',['restart','collector-ready','policy'])
+def test_history_patch_failure_restores_original_config_before_old_services_restart(history_prepared,monkeypatch,phase):
+    package,root,target,manifest,events,configuration,original = history_prepared
+    restart_intervals,ready_count = [],0
+    def restart(root):
+        interval = json.loads(configuration.read_bytes().decode('utf-8-sig'))['history_interval_seconds']
+        restart_intervals.append(interval)
+        if len(restart_intervals) == 1:
+            assert interval == 30 and target.read_text() == 'new collector code'
+            with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
+                db.execute('INSERT INTO evidence VALUES(2)')
+            if phase == 'restart': raise RuntimeError('fixture update failure')
+        else:
+            assert configuration.read_bytes() == original
+            assert target.read_text() == 'old collector code'
+    def ready(*args):
+        nonlocal ready_count
+        ready_count += 1
+        if ready_count == 1 and phase == 'collector-ready': raise RuntimeError('fixture update failure')
+    monkeypatch.setattr(update,'restart',restart)
+    monkeypatch.setattr(update,'collector_ready',ready)
+    if phase == 'policy':
+        monkeypatch.setattr(update,'urlopen',lambda *a,**kw:(_ for _ in ()).throw(RuntimeError('fixture update failure')))
+    with pytest.raises(RuntimeError,match='fixture update failure'):
+        update.apply(package,root,manifest)
+    assert restart_intervals == [30,5] and configuration.read_bytes() == original
+    assert events[-3:] == ['StopOwnedWeb.ps1','StopOwnedCollector.ps1','lease-expired']
+    with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
+        assert db.execute('SELECT * FROM evidence').fetchall() == [(1,),(2,)]
+    assert not (root/'source-update.json').exists()
+
+
+def test_config_changed_during_backup_is_never_overwritten(history_prepared,monkeypatch):
+    package,root,target,manifest,events,configuration,original = history_prepared
+    backup = update.backup_database
+    external = original.replace(b'"poll_seconds": 5',b'"poll_seconds": 10')
+    def race(*args):
+        result = backup(*args)
+        configuration.write_bytes(external)
+        return result
+    monkeypatch.setattr(update,'backup_database',race)
+    with pytest.raises(ValueError,match='configuration changed during backup'):
+        update.apply(package,root,manifest)
+    assert configuration.read_bytes() == external and target.read_text() == 'old collector code'
+
+
+def test_interrupted_configuration_replace_also_restores_original_bytes(history_prepared,monkeypatch):
+    package,root,target,manifest,events,configuration,original = history_prepared
+    replace,count = update.replace_configuration,0
+    def interrupted(path,data):
+        nonlocal count
+        count += 1
+        replace(path,data)
+        if count == 1: raise RuntimeError('interrupted after atomic configuration replace')
+    monkeypatch.setattr(update,'replace_configuration',interrupted)
+    with pytest.raises(RuntimeError,match='interrupted after atomic'):
+        update.apply(package,root,manifest)
+    assert count == 2 and configuration.read_bytes() == original
+    assert target.read_text() == 'old collector code'
+    assert events[-2:] == ['restart:old collector code','ready:old collector code']
+
+
 def test_ratio_hotfix_allowlist_covers_wash_coarse_change():
     """600:15→600:25 比例改动(2026-10-22)必须能走 query-only-hotfix 通道:
     只改计算常量/文案/前端展示,不触发采集器重启,也不动 schema/模型存储。"""

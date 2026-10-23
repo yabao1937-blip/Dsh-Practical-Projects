@@ -16,9 +16,13 @@ from app.telemetry.worker import run_collector, sqlite_busy
 
 
 def config(**changes):
-    return CollectorConfig(enabled=True, endpoint="opc.tcp://127.0.0.1:1", security="None", allow_insecure=True,
+    result = CollectorConfig(enabled=True, endpoint="opc.tcp://127.0.0.1:1", security="None", allow_insecure=True,
         poll_seconds=.1, timeout_seconds=1, retry_min_seconds=.1, retry_max_seconds=.1,
         points=[PointConfig(key="synthetic", name="Synthetic", node_id="ns=2;s=Synthetic")], **changes)
+    # Accelerated reliability tests intentionally persist each synthetic poll.
+    # Production's separate thirty-second policy is exercised in realtime tests.
+    result.history_interval_seconds = result.poll_seconds
+    return result
 
 
 def busy(code=sqlite3.SQLITE_BUSY):

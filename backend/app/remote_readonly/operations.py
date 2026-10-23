@@ -45,6 +45,8 @@ def _build_operations():
             _log_failure('snapshot', error)
             raise
         stamp = iso_time(observed)
+        from .live_cache import attach_runtime
+        attach_runtime(db)
         result = {'schema_version': 1, 'generated_at': stamp,
                   'health': None, 'telemetry': None, 'manual_measurements': None, 'errors': {}}
         health = {'ok': True, 'status': 'ok', 'modules': ['coal-records', 'telemetry'],

@@ -6,7 +6,7 @@ from ..hourly_brief.inputs import COAL_AMOUNT, business_time, numeric
 from ..telemetry.domain import iso_time
 from ..telemetry.models import TelemetryPoint, TelemetryReading
 from ..telemetry.retained import usable_at_receipt
-from .statistics import CADENCE
+from .statistics import cadence_seconds
 
 POLICY = 'confirmed-zero-production-v1'
 
@@ -47,15 +47,15 @@ def stopped_intervals(db, start, end, sources=None):
             group = batches.setdefault(row.received_at, {})
             good = (p.key not in group and usable_at_receipt(row.sample, p.config)
                     and numeric(row.sample.get('value')) and row.sample.get('value') == 0)
-            group[p.key] = row.batch_id if good and row.batch_id else None
+            group[p.key] = (row.batch_id, cadence_seconds(row.sample)) if good and row.batch_id else None
     times = sorted(batches)
     intervals = []
     for i, stamp in enumerate(times):
         group = batches[stamp]
-        if len(group) != 3 or None in group.values() or len(set(group.values())) != 1:
+        if len(group) != 3 or None in group.values() or len({v[0] for v in group.values()}) != 1:
             continue
         left = business_time(stamp).timestamp()
-        right = min(left+CADENCE, end.timestamp(),
+        right = min(left+min(v[1] for v in group.values()), end.timestamp(),
                     business_time(times[i+1]).timestamp() if i+1 < len(times) else end.timestamp())
         if right > left:
             if intervals and left <= intervals[-1][1]:

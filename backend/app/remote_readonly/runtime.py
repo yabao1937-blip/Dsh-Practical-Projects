@@ -139,7 +139,9 @@ def _build_bundle():
         # SQLite evaluates this on the host, so laptop clock skew does not make
         # production inputs appear expired or select a different published hour.
         observed = host_now(db)
-        current = shared_snapshot(db, when=observed, live=True, store_loader=load_decision_store)
+        from .live_cache import attach_runtime
+        attach_runtime(db)
+        current = shared_snapshot(db, when=observed, live=True, store_loader=load_decision_store, realtime=True)
         hourly = read_hour(db, now=observed, live=current, defer_missing=True,
                            store_loader=load_decision_store,
                            settlement_reader=settlement_replay().get)

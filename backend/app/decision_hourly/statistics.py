@@ -3,15 +3,36 @@ import hashlib
 import json
 from copy import deepcopy
 from math import fsum
+from datetime import datetime, timezone
 
 from ..hourly_brief.inputs import business_time, numeric
 
 CADENCE = 5
+# Slot ids always retain their original five-second meaning. Storage frequency
+# is recorded on each new row so old and new evidence can coexist unchanged.
+ARCHIVE_CADENCE = 30
 EXPECTED = 3600 // CADENCE
 MIN_COVERAGE = .8
 COVERAGE_POLICY = 'coverage-over-80-v1'
 VALID = {'good', 'manual', 'historical', 'default', 'predicted', 'calculated'}
 COMPUTED = {'coarse_ash', 'heavy_amount', 'total_ash'}
+
+
+def cadence_seconds(value):
+    """Only explicit supported metadata extends a historical five-second sample."""
+    value = value.get('cadence_seconds') if isinstance(value, dict) else None
+    return int(value) if type(value) in (int, float) and value in (CADENCE, ARCHIVE_CADENCE) else CADENCE
+
+
+def row_at(row):
+    value = getattr(row, 'sampled_at', None)
+    return business_time(value) if value else datetime.fromtimestamp(row.slot*CADENCE, timezone.utc)
+
+
+def row_seconds(row, end, following=None):
+    left = row_at(row)
+    return max(0., min(cadence_seconds(row.snapshot), (end-left).total_seconds(),
+        (row_at(following)-left).total_seconds() if following is not None else float('inf')))
 
 
 def digest(value):
@@ -39,15 +60,33 @@ def mean_cell(key, candidates, fallback, start, end):
         stamp = business_time(stamp_value) if stamp_value else None
         if stamp and start <= stamp < end:
             events[c.get('_event') or event_key(c)] = c
-    accepted = [c for c in events.values() if valid(c, key)]
+    ordered = sorted(events.values(), key=lambda c:business_time(c.get('_period_at') or c['observed_at']))
+    accepted, durations = [], []
+    weighted = any(cadence_seconds(c) == ARCHIVE_CADENCE for c in ordered)
+    for i, c in enumerate(ordered):
+        if not valid(c, key):
+            continue
+        accepted.append(c)
+        if not weighted:
+            durations.append(1.)  # Preserve legacy event means until cadence actually changes.
+        elif '_seconds' in c:
+            durations.append(max(0., c['_seconds']))
+        elif c.get('status') not in ('manual', 'historical', 'default'):
+            when = business_time(c.get('_period_at') or c['observed_at'])
+            durations.append(max(0., min(cadence_seconds(c), (end-when).total_seconds(),
+                (business_time(ordered[i+1].get('_period_at') or ordered[i+1]['observed_at'])-when).total_seconds()
+                if i+1 < len(ordered) else float('inf'))))
+        else:
+            durations.append(1.)  # Manual assays remain distinct measurements.
     result = {k:deepcopy(fallback.get(k)) for k in
               ('unit', 'source', 'source_id', 'point_key', 'item_id', 'density_label') if k in fallback}
     result.update(value=None, status='missing', observed_at=None, sample_count=len(accepted),
                   excluded_count=len(events)-len(accepted), carried=False)
     if accepted:
-        result.update(value=fsum(float(c['value']) for c in accepted)/len(accepted), status='average',
+        total = fsum(durations)
+        result.update(value=fsum(float(c['value'])*d for c,d in zip(accepted,durations))/total if total else None, status='average',
             observed_at=max((c['observed_at'] for c in accepted if c.get('observed_at')),default=None),
-            first_at=min((c['observed_at'] for c in accepted if c.get('observed_at')),default=None), reason=f'{len(accepted)} 条有效样本算术平均')
+            first_at=min((c['observed_at'] for c in accepted if c.get('observed_at')),default=None), reason=f'{len(accepted)} 条有效样本，按各自有效时长加权' if weighted else f'{len(accepted)} 条有效样本算术平均')
     elif key not in COMPUTED and fallback.get('status') in ('manual', 'historical', 'default') and valid(fallback, key):
         stamp = business_time(fallback.get('observed_at')) if fallback.get('observed_at') else None
         # Explicit carry/default, never silently count it as a new hourly measurement.
@@ -59,29 +98,48 @@ def mean_cell(key, candidates, fallback, start, end):
     return result
 
 
-def hour_advice(rows, start, end, density, max_step=.03):
+def hour_advice(rows, start, end, density, max_step=.03, *, weights=None):
+    rows = sorted(rows, key=lambda r:r.slot)
     seen, accepted = set(), []
-    for row in rows:
+    for i, row in enumerate(rows):
         snap = row.snapshot
         c, rho = snap.get('suggested_density', {}), snap.get('cells', {}).get('density', {})
         if row.fingerprint in seen or not valid(c) or not valid(rho, 'density'):
             continue
         seen.add(row.fingerprint)
-        accepted.append((row, c['value']-rho['value']))
-    slots = sorted({row.slot-int(start.timestamp())//CADENCE for row, _ in accepted})
-    gaps = [b-a-1 for a,b in zip([-1]+slots, slots+[EXPECTED])]
-    gap = max(gaps, default=EXPECTED)*CADENCE
-    count = len(slots)
-    deltas = [delta for _, delta in accepted]
-    mean = fsum(deltas)/len(deltas) if deltas else None
+        seconds = row_seconds(row,end,rows[i+1] if i+1 < len(rows) else None)
+        if weights is not None:
+            seconds = min(seconds,weights[row.slot]['duration_seconds'])
+        left = max(start.timestamp(), row_at(row).timestamp())
+        right = min(end.timestamp(), row_at(row).timestamp()+seconds)
+        if right > left:
+            accepted.append((row, c['value']-rho['value'], left, right))
+    cursor, gap, seconds = start.timestamp(), 0., 0.
+    for _, _, left, right in accepted:
+        gap = max(gap, left-cursor)
+        seconds += max(0.,right-max(cursor,left))
+        cursor = max(cursor,right)
+    gap = max(gap,end.timestamp()-cursor)
+    duration = (end-start).total_seconds()
+    count = float(len(accepted)) if all(cadence_seconds(r.snapshot) == CADENCE for r,_,_,_ in accepted) else seconds/CADENCE
+    if count.is_integer():
+        count = int(count)
+    if gap.is_integer():
+        gap = int(gap)
+    deltas = [delta for _, delta, _, _ in accepted]
+    weighted = any(cadence_seconds(r.snapshot) == ARCHIVE_CADENCE for r,_,_,_ in accepted)
+    mean = ((fsum(delta*(right-left) for _,delta,left,right in accepted)/seconds if weighted else
+             fsum(deltas)/len(deltas)) if deltas and seconds else None)
     coverage = dict(valid_count=count, recorded_count=len(rows), expected_count=EXPECTED,
-        ratio=count/EXPECTED, longest_gap_seconds=gap, required_ratio=MIN_COVERAGE,
+        ratio=seconds/duration, longest_gap_seconds=gap, required_ratio=MIN_COVERAGE,
         max_gap_seconds=None, required_ratio_exclusive=True, policy=COVERAGE_POLICY, cadence_seconds=CADENCE,
+        valid_seconds=seconds, total_seconds=duration, valid_sample_count=len(accepted),
+        storage_cadences_seconds=sorted({cadence_seconds(r.snapshot) for r in rows}),
         up=sum(v > 1e-9 for v in deltas), down=sum(v < -1e-9 for v in deltas),
         stable=sum(abs(v) <= 1e-9 for v in deltas))
     reasons = []
-    if count/EXPECTED <= MIN_COVERAGE:
-        reasons.append(f'有效建议覆盖 {count}/{EXPECTED}（{count/EXPECTED:.1%}）；需超过 {MIN_COVERAGE:.0%}')
+    if seconds/duration <= MIN_COVERAGE:
+        reasons.append(f'有效建议覆盖 {count:g}/{EXPECTED}（{seconds/duration:.1%}）；需超过 {MIN_COVERAGE:.0%}')
     if len({r.context_key for r in rows}) > 1:
         reasons.append('小时内数据来源、模型或调密参数发生变化，暂不合并建议')
     at = business_time(density.get('observed_at')) if density.get('observed_at') else None

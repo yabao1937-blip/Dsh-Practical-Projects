@@ -1,11 +1,12 @@
 """GPT-only, forward-only operating evidence. No response fitting or device writes."""
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from math import fsum, sqrt
+from bisect import bisect_right
 
 from ..hourly_brief.inputs import business_time, numeric
 from ..telemetry.domain import iso_time
-from .statistics import CADENCE, valid, digest
+from .statistics import CADENCE, cadence_seconds, row_seconds, valid, digest
 
 POLICY = 'gpt-operating-evidence-v1'
 MASS = 'output-mass-v1'
@@ -44,7 +45,7 @@ def flow_event(row):
     if not 0 <= age <= CADENCE*2:
         return None, '流量读数过期或晚于决策'
     # Conservative boundary: never carry a previous-hour batch into this hour.
-    # The former hour already credited up to five seconds (clipped at its end).
+    # The former hour already credited its declared period (clipped at its end).
     # Without a new batch the uncovered boundary remains a gap, not new production.
     if business_time(a['observed_at']) < at(row).replace(minute=0,second=0,microsecond=0):
         return None, '跨小时旧皮带批次'
@@ -52,13 +53,51 @@ def flow_event(row):
     return (key, a['value']+b['value']), None
 
 
-def weights(rows, end):
-    """One new flow batch covers at most five seconds; never bridge a gap/hour."""
+def quality_boundaries(db, rows, end):
+    """Rare durable quality events can terminate a previously saved 30s period."""
+    if db is None:
+        return {}
+    from sqlalchemy import select, tuple_
+    from ..telemetry.models import TelemetryReading
+    identities = {(c.get('source_id'),c.get('point_key')) for r in rows
+        if cadence_seconds(r.snapshot) == 30 for c in quality_sources(r)
+        if c.get('source_id') and c.get('point_key')}
+    if not identities:
+        return {}
+    query = select(TelemetryReading.source_id,TelemetryReading.point_key,
+        TelemetryReading.received_at,TelemetryReading.sample).where(
+        tuple_(TelemetryReading.source_id,TelemetryReading.point_key).in_(identities),
+        TelemetryReading.received_at >= iso_time(min(at(r) for r in rows)-timedelta(seconds=90)),
+        TelemetryReading.received_at < iso_time(end)).order_by(TelemetryReading.received_at)
+    result = {}
+    for source,key,when,sample in db.execute(query):
+        if (sample.get('storage_kind') == 'quality-event' and
+                (sample.get('quality') != 'good' or sample.get('issue'))):
+            result.setdefault((source,key),[]).append(business_time(when).timestamp())
+    return result
+
+
+def quality_sources(row):
+    return [*(row.snapshot.get('quality_sources') or []),
+        *(row.snapshot.get('cells',{}).get(k,{}) for k in ('belt501','belt502'))]
+
+
+def weights(rows, end, *, db=None):
+    """Each archived batch covers its explicit 5/30s cadence, never a gap/hour."""
     seen, result = set(), {}
+    boundaries = quality_boundaries(db,rows,end)
     for i, row in enumerate(rows):
         event, reason = flow_event(row)
-        seconds = max(0., min(CADENCE, (end-at(row)).total_seconds(),
-            (at(rows[i+1])-at(row)).total_seconds() if i+1 < len(rows) else CADENCE))
+        seconds = row_seconds(row, end, rows[i+1] if i+1 < len(rows) else None)
+        if cadence_seconds(row.snapshot) == 30:
+            left = at(row).timestamp()
+            for c in quality_sources(row):
+                times = boundaries.get((c.get('source_id'),c.get('point_key')),[])
+                lag = c.get('lag_seconds',0)
+                lag = lag if lag in (0,90) else 0
+                i_boundary = bisect_right(times,left-lag)
+                if i_boundary < len(times):
+                    seconds = min(seconds,times[i_boundary]+lag-left)
         mass = 0.
         if event:
             key, rate = event
@@ -67,7 +106,8 @@ def weights(rows, end):
             else:
                 seen.add(key)
                 mass = rate*seconds/3600
-        result[row.slot] = dict(seconds=seconds if reason is None else 0., mass_t=mass, reason=reason)
+        result[row.slot] = dict(seconds=seconds if reason is None else 0., duration_seconds=seconds,
+                                mass_t=mass, reason=reason)
     return result
 
 
@@ -121,27 +161,31 @@ def statistics(rows, key, w):
     if not accepted:
         return dict(mean=None, mass_mean=None, count=0)
     values = [c['value'] for _, c in accepted]
-    avg = fsum(values)/len(values)
+    weighted = any(cadence_seconds(r.snapshot) == 30 for r,_ in accepted)
+    actual_durations = [w[r.slot].get('duration_seconds',w[r.slot]['seconds']) for r,_ in accepted]
+    durations = actual_durations if weighted else [1.]*len(accepted)
+    seconds = fsum(durations)
+    avg = fsum(v*d for v,d in zip(values,durations))/seconds if seconds else fsum(values)/len(values)
     tonnes = fsum(w[r.slot]['mass_t'] for r, _ in accepted)
     delta = values[-1]-values[0]
     return dict(mean=avg, mass_mean=fsum(c['value']*w[r.slot]['mass_t'] for r,c in accepted)/tonnes if tonnes else None,
-        stddev=sqrt(fsum((v-avg)**2 for v in values)/len(values)), minimum=min(values), maximum=max(values),
+        stddev=sqrt(fsum((v-avg)**2*d for v,d in zip(values,durations))/seconds) if seconds else 0., minimum=min(values), maximum=max(values),
         first=values[0], last=values[-1], change=delta,
         direction='上升' if delta > 1e-9 else '下降' if delta < -1e-9 else '平稳',
-        count=len(values), unit=accepted[0][1].get('unit',''),
+        count=len(values), valid_seconds=fsum(actual_durations), unit=accepted[0][1].get('unit',''),
         manual_record_ids=sorted({c['record_id'] for _,c in accepted if c.get('metric') and c.get('record_id')}))
 
 
-def summarize(rows, end):
+def summarize(rows, end, *, db=None, prepared_weights=None):
     rows = sorted(rows, key=lambda r: r.slot)
-    w = weights(rows, end)
+    w = weights(rows, end, db=db) if prepared_weights is None else prepared_weights
     segments, current, previous, pending, runs = [], [], None, None, 0
 
     def finish(reason,boundary=None):
         if not current:
             return
         last = current[-1]
-        stop = min(end.timestamp(), at(last).timestamp()+CADENCE,
+        stop = min(end.timestamp(), at(last).timestamp()+cadence_seconds(last.snapshot),
                    boundary.timestamp() if boundary else end.timestamp())
         segments.append(dict(id=digest([POLICY,current[0].slot,last.slot,current[0].context_key]),
             start=current[0].sampled_at, end=stamp(stop),
@@ -153,7 +197,7 @@ def summarize(rows, end):
     segment_reason = '小时起点'
     for row in rows:
         reason = None
-        if previous and row.slot-previous.slot > 1:
+        if previous and (at(row)-at(previous)).total_seconds() > cadence_seconds(previous.snapshot)+1:
             reason = '采集缺口'
         elif previous and state(row) != state(previous):
             reason = '系统组合、开停机、补录采用值、质量或计算口径变化'

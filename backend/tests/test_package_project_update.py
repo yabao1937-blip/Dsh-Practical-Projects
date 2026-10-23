@@ -57,6 +57,7 @@ def test_default_has_no_additional_history_and_bundles_collector_helper(reposito
         manifest = json.loads(archive.read('update.json'))
         assert manifest['revision'] == revisions[-1]
         assert 'accepted_baseline_revisions' not in manifest
+        assert 'collector_history_interval_seconds' not in manifest
         assert 'accepted_previous_sha256' not in manifest['files']['frontend/app.js']
         assert 'StopOwnedCollector.ps1' in archive.namelist()
     assert 'do-not-print-this-token' not in capsys.readouterr().out
@@ -125,4 +126,28 @@ def test_damaged_baseline_package_never_broadens_accepted_hashes(repository):
     baseline_zip(package,revisions[1],damage=True)
     with pytest.raises(ValueError,match='Damaged accepted baseline'):
         builder.build(output,accepted_baseline_packages=[package])
+    assert not (output/'extras/ProjectUpdate.zip').exists()
+
+
+def test_explicit_history_interval_is_manifest_metadata_not_config_payload(repository,capsys):
+    root,output,_,git = repository
+    config = root/'backend/config/kepserver.local.json'
+    config.parent.mkdir(parents=True)
+    config.write_text('{"password":"private-host-value","history_interval_seconds":5}')
+    git('add','backend/config/kepserver.local.json')
+    builder.build(output,history_interval_seconds=30)
+    with zipfile.ZipFile(output/'extras/ProjectUpdate.zip') as archive:
+        manifest = json.loads(archive.read('update.json'))
+        assert manifest['collector_history_interval_seconds'] == 30
+        assert 'backend/config/kepserver.local.json' not in manifest['files']
+        assert not any('/config/' in name for name in archive.namelist())
+        assert 'private-host-value' not in archive.read('update.json').decode()
+    assert 'private-host-value' not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('value',[True,False,30.0,5,60,'30',{}])
+def test_packager_rejects_unsupported_history_interval_before_output(repository,value):
+    _,output,_,_ = repository
+    with pytest.raises(ValueError,match='30-second'):
+        builder.build(output,history_interval_seconds=value)
     assert not (output/'extras/ProjectUpdate.zip').exists()

@@ -46,7 +46,7 @@ def send(repo, cfg, when, values, statuses=None):
 
 def config(items):
     return CollectorConfig(enabled=True, endpoint="opc.tcp://localhost:49320",
-        security="None", allow_insecure=True, points=[
+        security="None", allow_insecure=True, history_interval_seconds=5, points=[
             PointConfig(key="point" + str(i), name=item, node_id="ns=2;s=" + item, item_id=item)
             for i, item in enumerate(items)])
 

@@ -121,8 +121,9 @@ def test_bundle_uses_one_transaction_host_clock_and_passes_current_to_hourly(mon
         sessions.append(db)
         return db
 
-    def current(database, *, when, live, store_loader):
+    def current(database, *, when, live, store_loader, realtime):
         assert database is db and live is True and not db.closed
+        assert realtime is True
         assert store_loader is load_decision_store
         assert when == datetime(2026, 10, 17, 1, 0, 0, 123000, tzinfo=timezone.utc)
         calls.append(('current', when))
@@ -208,10 +209,10 @@ def test_production_routes_keep_original_uncached_execution(monkeypatch):
     db = ProductionSession()
     monkeypatch.setattr(decision, 'REMOTE_READONLY', None)
     monkeypatch.setattr(runtime, 'decision_view', lambda _: pytest.fail('Production route used readonly cache'))
-    monkeypatch.setattr(decision, 'shared_snapshot', lambda current: {'current': current is db})
+    monkeypatch.setattr(decision, 'shared_snapshot', lambda current, *, realtime: {'current': current is db, 'realtime': realtime})
     monkeypatch.setattr(app.decision_hourly.service, 'read_hour', lambda current, **kwargs: {
         'hourly': current is db, **kwargs})
-    assert decision.current_decision(db) == {'current': True}
+    assert decision.current_decision(db) == {'current': True, 'realtime': True}
     assert decision.hourly_decision(db) == {'hourly': True, 'defer_missing': True}
     assert db.statements == ['BEGIN', 'BEGIN']
 
@@ -240,7 +241,8 @@ def test_shared_snapshot_live_override_preserves_all_default_call_behaviour(monk
     class StopAfterInputs(Exception):
         pass
 
-    def inputs(db, when, *, live, authoritative):
+    def inputs(db, when, *, live, authoritative, realtime):
+        assert realtime is False  # Stored/replayed decisions do not consume IPC implicitly.
         observed.append((live, authoritative))
         raise StopAfterInputs()
 

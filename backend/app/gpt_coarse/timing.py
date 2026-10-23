@@ -19,8 +19,8 @@ POLICY = dict(version='gpt-level-lag-v1', level_lag_seconds=LEVEL_LAG_SECONDS,
 def aligned_level(inputs, current):
     """Latest raw event at/before t-90, within 30s; never skip a bad latest event.
 
-    The five-second telemetry history is the sole authority. Decision outputs and
-    mutable latest caches must never become substitute observations.
+    Historical decisions only use durable telemetry. Live-only calculations may
+    also use the bounded raw collector ring, explicitly marked runtime_only.
     """
     from ..telemetry.models import TelemetryPoint, TelemetryReading
 
@@ -54,6 +54,10 @@ def aligned_level(inputs, current):
     ).order_by(TelemetryReading.received_at.desc(), TelemetryReading.id.desc()))
     for row in rows:
         add(dict(raw_sample(row.sample) or {}, batch_id=row.batch_id))
+    if getattr(inputs, 'realtime', False):
+        from ..telemetry.realtime import cached_samples
+        for sample in cached_samples(inputs.runtime, point, target):
+            add(sample)
 
     sample = max(candidates, key=lambda s:parse_time(s['received_at']), default=None)
     if sample is None:

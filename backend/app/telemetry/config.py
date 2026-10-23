@@ -42,7 +42,7 @@ class CollectorConfig(BaseModel):
     timeout_seconds: float = Field(default=10, ge=0.1, le=30)
     retry_min_seconds: float = Field(default=1, ge=0.1, le=30)
     retry_max_seconds: float = Field(default=30, ge=0.1, le=120)
-    history_interval_seconds: float = Field(default=5, ge=1, le=3600)
+    history_interval_seconds: float = Field(default=30, ge=1, le=3600)
     # Compatibility with deployed config files; positive legacy values no longer
     # enable deletion. All raw history is retained permanently (0 = no expiry).
     retention_days: int = Field(default=0, ge=0, le=90, description="永久保留；旧保留天数自动转换为 0")
@@ -93,7 +93,8 @@ class CollectorConfig(BaseModel):
 
     @property
     def lease_seconds(self) -> float:
-        return max(30, self.poll_seconds * 3 + self.timeout_seconds * 3, self.retry_max_seconds * 2)
+        return max(30, self.poll_seconds * 3 + self.timeout_seconds * 3,
+                   self.retry_max_seconds * 2, self.history_interval_seconds * 2 + self.timeout_seconds)
 
 
 def load_config(path: Path) -> CollectorConfig:

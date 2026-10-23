@@ -4,7 +4,7 @@ from sqlalchemy import select
 from ..hourly_brief.inputs import Inputs, business_time, numeric
 from ..telemetry.domain import iso_time
 from .models import DensityAction, DensityObservation, DensityActionEntry
-from .statistics import digest
+from .statistics import digest, cadence_seconds
 from .evidence import state
 
 
@@ -30,7 +30,8 @@ def observe(db, row):
             continue
         current = dict(pair=pair, slot=row.slot, sampled_at=c.get('observed_at') or row.sampled_at,
                        decision_at=row.sampled_at, context_key=row.context_key, operating_state=state(row),
-                       suggestion=deepcopy(row.snapshot.get('suggested_density')), gap=False)
+                       suggestion=deepcopy(row.snapshot.get('suggested_density')), gap=False,
+                       cadence_seconds=cadence_seconds(row.snapshot))
         if cached:
             old = cached.snapshot
             previous = old['pair']['setpoint']
@@ -39,8 +40,8 @@ def observe(db, row):
                 identifier = digest([channel,old['slot'],row.slot,c.get('batch_id')])
                 db.add(DensityAction(id=identifier,detected_at=row.sampled_at,channel=channel,evidence=dict(
                     before=old, after=current,
-                    continuous=not old.get('gap') and row.slot-old['slot'] <= 3 and
-                        0 < (business_time(current['sampled_at'])-business_time(old['sampled_at'])).total_seconds() <= 15,
+                    continuous=not old.get('gap') and
+                         0 < (business_time(current['sampled_at'])-business_time(old['sampled_at'])).total_seconds() <= max(15,cadence_seconds(old)),
                     note='检测到设定值变化；实际操作时刻位于两次观测之间，来源及是否采纳建议待人工确认。')))
             cached.snapshot = current
         else:
@@ -109,13 +110,16 @@ def assess_window(db,action,start,end):
     rows=sorted(by_slot.values(),key=lambda r:r.slot)
     if len(rows)<2:
         return dict(status='insufficient',reason='缺少采样关联区间的逐次工况证据')
-    w=weights(rows,last+timedelta(seconds=5))
+    w=weights(rows,last+timedelta(seconds=cadence_seconds(rows[-1].snapshot)),db=db)
     factors={key:statistics(rows,key,w) for key in SEGMENT_POLICY['thresholds']}
     warnings=[]
     if len({digest(state(r)) for r in rows})>1:
         warnings.append('系统、质量或计算口径在采样关联期间变化')
-    if any(rows[i+1].slot-rows[i].slot>3 for i in range(len(rows)-1)) or (business_time(rows[0].sampled_at)-first).total_seconds()>15 or (last-business_time(rows[-1].sampled_at)).total_seconds()>15:
-        warnings.append('逐次证据存在超过 15 秒的缺口')
+    if (any((business_time(rows[i+1].sampled_at)-business_time(rows[i].sampled_at)).total_seconds() >
+            max(15,cadence_seconds(rows[i].snapshot)) for i in range(len(rows)-1)) or
+            (business_time(rows[0].sampled_at)-first).total_seconds()>max(15,cadence_seconds(rows[0].snapshot)) or
+            (last-business_time(rows[-1].sampled_at)).total_seconds()>max(15,cadence_seconds(rows[-1].snapshot))):
+        warnings.append('逐次证据存在超过记录采样周期的缺口')
     for key,limit in SEGMENT_POLICY['thresholds'].items():
         # Density is deliberately adjusted; other inputs confound the response.
         if key=='density':

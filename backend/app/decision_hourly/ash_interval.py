@@ -12,7 +12,7 @@ from .ash_history import read_ash_hours
 from .evidence import POLICY, MASS, at, weights, mass_cell
 from .models import DecisionCycleSample, DecisionEvidenceArchive
 from .references import hydrate_rows
-from .statistics import CADENCE, valid
+from .statistics import CADENCE, valid, row_seconds
 
 LEGACY = 'legacy-sample-mean'
 
@@ -28,16 +28,18 @@ def partial_item(db, start, end, has_rows=True):
         DecisionCycleSample.sampled_at < iso_time(hour_end)).order_by(DecisionCycleSample.slot))) if has_rows else []
     rows.update({r.slot:r for r in hydrate_rows(db,hot)})
     rows = sorted(rows.values(),key=lambda r:r.slot)
-    w = weights(rows,hour_end)
-    selected, legacy, seen = [], [], set()
-    for r in rows:
+    w = weights(rows,hour_end,db=db)
+    selected, legacy, legacy_seconds, seen = [], [], [], set()
+    for i,r in enumerate(rows):
         when = at(r)
-        if when >= end or when+timedelta(seconds=CADENCE) <= start:
+        duration = row_seconds(r,hour_end,rows[i+1] if i+1 < len(rows) else None)
+        if when >= end or when+timedelta(seconds=duration) <= start:
             continue
         if r.snapshot.get('evidence_policy') != POLICY:
             c = r.snapshot.get('total_ash',{})
             if start <= when < end and r.fingerprint not in seen and valid(c) and 0 <= c['value'] <= 100:
                 legacy.append(c['value'])
+                legacy_seconds.append(max(0., (min(end,when+timedelta(seconds=duration))-max(start,when)).total_seconds()))
                 seen.add(r.fingerprint)
             continue
         weight = w[r.slot]
@@ -50,7 +52,7 @@ def partial_item(db, start, end, has_rows=True):
     mixed = bool(mass and legacy)
     count = cell['sample_count']+len(legacy)
     seconds = (end-start).total_seconds()
-    valid_seconds = min(seconds,cell['valid_seconds']+len(legacy)*CADENCE)
+    valid_seconds = min(seconds,cell['valid_seconds']+fsum(legacy_seconds))
     value = None if mixed else cell['value'] if mass else fsum(legacy)/len(legacy) if legacy else None
     reason = ('区间含产煤量加权与旧样本均值，不能合并' if mixed else cell['reason'] if mass else
               '旧口径：区间内已保存逐次灰分的样本均值' if legacy else

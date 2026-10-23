@@ -1,4 +1,4 @@
-"""Verified source-only update. Never replace production databases/config/models."""
+"""Verified source update; only an explicit, backed-up history setting may change."""
 import argparse
 from contextlib import closing
 from datetime import datetime, timezone
@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
@@ -37,12 +38,84 @@ def safe_path(root,name):
 
 def collector_changed(manifest):
     """These files are imported by the long-lived collector or define its schema."""
-    return manifest.get('profile') != 'query-only-hotfix' and any(
+    return manifest.get('profile') != 'query-only-hotfix' and ('collector_history_interval_seconds' in manifest or any(
         name.startswith(('backend/app/telemetry/','backend/migrations/')) or name in {
             'backend/collector.py','backend/client_mode.py','backend/scripts/start_collector.py',
             'backend/app/database.py','backend/app/config.py','backend/app/models.py',
             'backend/app/schema_upgrade.py','backend/app/decision_hourly/models.py'}
-        for name in manifest['files'])
+        for name in manifest['files']))
+
+
+def history_configuration_patch(root,manifest):
+    """Prepare one fixed setting change, preserving every other config byte.
+
+    No credential, endpoint, point or polling setting can be supplied by an
+    update manifest. The original bytes are also used for race detection and
+    exact rollback, rather than reconstructing a production configuration.
+    """
+    if 'collector_history_interval_seconds' not in manifest: return None
+    interval = manifest['collector_history_interval_seconds']
+    if manifest.get('profile') is not None or type(interval) is not int or interval != 30:
+        raise ValueError('Collector history interval patch requires a standard update and the integer value 30')
+    path = root/'backend/config/kepserver.local.json'
+    try:
+        original = path.read_bytes()
+        text = original.decode('utf-8-sig')
+        data = json.loads(text)
+        if not isinstance(data,dict): raise ValueError()
+        poll = data.get('poll_seconds',5)
+        if (isinstance(poll,bool) or not isinstance(poll,(int,float)) or
+                not math.isfinite(poll) or not .1 <= poll <= 60): raise ValueError()
+        if interval < poll:
+            raise ValueError('history interval must be at least the polling interval')
+        previous = data.get('history_interval_seconds',30)
+        if (isinstance(previous,bool) or not isinstance(previous,(int,float)) or
+                not math.isfinite(previous) or not 1 <= previous <= 3600): raise ValueError()
+        # Locate root-level values with the JSON decoder, so identically named
+        # nested keys and strings cannot be changed by a textual replacement.
+        decoder = json.JSONDecoder()
+        def skip(index):
+            while index < len(text) and text[index].isspace(): index += 1
+            return index
+        index = skip(skip(0)+1)
+        matches,last_end = [],None
+        while text[index] != '}':
+            key,index = decoder.raw_decode(text,index)
+            index = skip(index)
+            if text[index] != ':': raise ValueError()
+            start = skip(index+1)
+            _,end = decoder.raw_decode(text,start)
+            if key == 'history_interval_seconds': matches.append((start,end))
+            last_end = end
+            index = skip(end)
+            if text[index] == '}': break
+            if text[index] != ',': raise ValueError()
+            index = skip(index+1)
+        if len(matches) > 1: raise ValueError()
+        if matches:
+            start,end = matches[0]
+            changed = text[:start]+'30'+text[end:]
+        else:
+            insert = last_end if last_end is not None else index
+            changed = text[:insert]+(', ' if last_end is not None else '')+'"history_interval_seconds": 30'+text[insert:]
+        updated = (b'\xef\xbb\xbf' if original.startswith(b'\xef\xbb\xbf') else b'')+changed.encode('utf-8')
+        expected = dict(data,history_interval_seconds=30)
+        if json.loads(updated.decode('utf-8-sig')) != expected: raise ValueError()
+        return dict(path=path,original=original,updated=updated)
+    except (OSError,UnicodeError,ValueError,TypeError,IndexError):
+        raise ValueError('Local collector history configuration is missing or invalid; 30 seconds must be at least the polling interval; nothing was changed') from None
+
+
+def replace_configuration(path,data):
+    temporary = path.with_name(path.name+'.source-update.tmp')
+    try:
+        with temporary.open('wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def verify(package,root,manifest):
@@ -51,6 +124,7 @@ def verify(package,root,manifest):
     profile = manifest.get('profile')
     if profile not in (None,'query-only-hotfix'):
         raise ValueError('Unknown update profile')
+    history_configuration_patch(root,manifest)
     if profile == 'query-only-hotfix' and not set(manifest['files']).issubset({
             'backend/app/decision_hourly/ash_history.py','backend/app/decision_hourly/ash_settlement.py',
             'backend/app/decision_hourly/quality_advice.py','backend/app/routers/health.py',
@@ -323,6 +397,7 @@ def restart(root):
 
 def apply(package,root,manifest,report=lambda stage,message:None):
     verify(package,root,manifest)
+    history_patch = history_configuration_patch(root,manifest)
     cycle_collector = collector_changed(manifest)
     configuration = collector_configuration(root) if cycle_collector else None
     backup = root/'backups'/('source-update-'+datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
@@ -335,6 +410,10 @@ def apply(package,root,manifest,report=lambda stage,message:None):
         report('copying','Query-only hotfix: saving source backup; production database and verified full backup are retained.')
     else:
         snapshot = backup_database(root,backup,report)
+    if history_patch is not None:
+        saved_configuration = backup/'configuration/backend/config/kepserver.local.json'
+        saved_configuration.parent.mkdir(parents=True,exist_ok=True)
+        saved_configuration.write_bytes(history_patch['original'])
     original = {}
     for name in manifest['files']:
         source = safe_path(root,name)
@@ -347,6 +426,7 @@ def apply(package,root,manifest,report=lambda stage,message:None):
     report('copying','Backup complete; preparing the project service update.')
     before = collector_status(root,configuration['source_id']) if cycle_collector and configuration['enabled'] else {}
     services_stopped = False
+    configuration_changed = False
     try:
         # Enter recovery before stopping either process. A failed stop or expired
         # wait must still restore the previous sources and bring Web back up.
@@ -356,6 +436,13 @@ def apply(package,root,manifest,report=lambda stage,message:None):
             report('copying','Stopping only this installation\'s collector; spool files and SQLite transactions are retained.')
             powershell(package/'StopOwnedCollector.ps1','-InstallDir',str(root),cwd=root)
             if configuration['enabled']: wait_collector_lease(root,configuration,report)
+        if history_patch is not None:
+            if history_patch['path'].read_bytes() != history_patch['original']:
+                raise ValueError('Collector configuration changed during backup; the history interval was not changed')
+            # Recovery must also cover interruption immediately after replace.
+            configuration_changed = True
+            replace_configuration(history_patch['path'],history_patch['updated'])
+            report('copying','Collector history storage interval set to 30 seconds; polling and all other settings preserved.')
         report('copying','Installing verified source files.')
         for name in manifest['files']:
             target = safe_path(root,name)
@@ -396,6 +483,8 @@ def apply(package,root,manifest,report=lambda stage,message:None):
                     powershell(package/'StopOwnedCollector.ps1','-InstallDir',str(root),cwd=root)
             except Exception as exc:
                 recovery_error = exc
+        if configuration_changed:
+            replace_configuration(history_patch['path'],history_patch['original'])
         for name,existed in original.items():
             target = safe_path(root,name)
             if existed: shutil.copy2(backup/'source'/name,target)
@@ -421,7 +510,8 @@ def apply(package,root,manifest,report=lambda stage,message:None):
         database_snapshot=manifest.get('profile') != 'query-only-hotfix',
         snapshot_verification=(snapshot or {}).get('content_check'),
         snapshot_content_check=deferred_check,
-        collector_restarted=cycle_collector and configuration['enabled']),indent=2),encoding='utf-8')
+        collector_restarted=cycle_collector and configuration['enabled'],
+        **({'collector_history_interval_seconds':30} if history_patch is not None else {})),indent=2),encoding='utf-8')
     return backup
 
 
@@ -438,7 +528,10 @@ def main():
                 healthy=stage=='installed',at=datetime.now().astimezone().isoformat())).encode()
             with urlopen(Request(manifest['report_url'],data=data,headers={'Content-Type':'application/json'}),timeout=4): pass
         except OSError: pass
-    report('verifying','Verifying source update; production database/configuration will be preserved.')
+    report('verifying',
+        'Verifying source update and explicit 30-second history setting; production database and all other configuration will be preserved.'
+        if 'collector_history_interval_seconds' in manifest else
+        'Verifying source update; production database/configuration will be preserved.')
     try:
         backup = apply(package,args.install_dir.resolve(),manifest,report)
         report('installed','Source update complete. Backup: '+str(backup)+'. Refresh Chrome with Ctrl+F5.')

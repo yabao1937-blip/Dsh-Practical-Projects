@@ -399,6 +399,12 @@ def create_router(manager=None):
     def begin(request: Request):
         return invoke(request, lambda current, owner: current.open_transaction(owner))
 
+    @router.get('/live-cache')
+    def live_cache(request: Request):
+        # Reuse the same exact-IP/token check; callers cannot choose file paths.
+        from .live_cache import transport_view
+        return invoke(request, lambda current, owner: transport_view(current.path))
+
     @router.post('/transactions/{identifier}/queries')
     async def query(identifier: str, request: Request):
         # Authenticate before reading SQL/parameters. Avoid framework validation

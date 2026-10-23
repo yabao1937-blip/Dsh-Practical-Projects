@@ -11,6 +11,8 @@ from sqlalchemy.exc import OperationalError
 from .opcua import ConfigurationError, OpcUaReader
 from .repository import CollectorBusy, LeaseLost
 from .spool import SpoolError
+from .domain import parse_time
+from .realtime import RuntimePublisher
 
 log = logging.getLogger("dmcs.collector")
 
@@ -81,10 +83,22 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
     cancelled = False
     exit_code = 0
     last_error = None
+    runtime = None
+
+    def publish(state, code=None, delay=0, batch=None):
+        if runtime is None:
+            return
+        try:
+            runtime.publish(state, code, delay, batch)
+        except Exception as exc:
+            # IPC is replaceable. A failed display cache must not stop durable
+            # sampling, disclose readings in logs, or trigger a UA reconnect.
+            log.warning('collector_runtime_unavailable source=%s code=%s', cfg.source_id, type(exc).__name__)
 
     def state(state, code=None, delay=0):
         if desired[1:] != [state, code, delay]:
             desired[:] = [desired[0] + 1, state, code, delay]
+            publish(state, code, delay)
         wake.set()
 
     def storage_error(phase, exc, delay=0):
@@ -146,6 +160,8 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
     async def produce():
         nonlocal exit_code, last_error
         attempt = 0
+        last_bucket = None
+        last_quality = None
         try:
             while not halt.is_set():
                 try:
@@ -160,10 +176,26 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
                             if len(samples) != len(cfg.points):
                                 raise ValueError("incomplete read batch")
                             batch = {"source_id": cfg.source_id, "batch_id": uuid.uuid4().hex, "samples": samples}
+                            publish('connected', batch=batch)
+                            stamp = max(parse_time(s['received_at']).timestamp() for s in samples)
+                            bucket = int(stamp // cfg.history_interval_seconds)
+                            quality = tuple((s['key'], s['quality'], s.get('issue')) for s in samples)
+                            periodic = (cfg.history_interval_seconds <= cfg.poll_seconds
+                                        or last_bucket is None or bucket != last_bucket)
+                            changed_quality = last_quality is not None and quality != last_quality
                             try:
                                 # All spool operations run in this event loop;
                                 # only repository calls run in a worker thread.
-                                spool.enqueue(batch)
+                                if once or periodic or changed_quality:
+                                    cadence = cfg.history_interval_seconds if periodic or once else cfg.poll_seconds
+                                    batch.update(storage_policy='periodic-v1', cadence_seconds=cadence,
+                                        storage_kind='periodic' if periodic or once else 'quality-event')
+                                    batch['samples'] = [dict(s, cadence_seconds=cadence,
+                                        storage_kind=batch['storage_kind']) for s in samples]
+                                    spool.enqueue(batch)
+                                    if periodic:
+                                        last_bucket = bucket
+                                last_quality = quality
                             except Exception as exc:
                                 failed("spool_enqueue", exc)
                                 return
@@ -273,6 +305,10 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
                     return 1
                 await pause(delay)
         log.info("collector_started source=%s points=%d read_only=True history_retention=permanent", cfg.source_id, len(cfg.points))
+        try:
+            runtime = RuntimePublisher.for_repository(repository, cfg, owner)
+        except Exception as exc:
+            log.warning('collector_runtime_unavailable source=%s code=%s', cfg.source_id, type(exc).__name__)
         jobs = [asyncio.create_task(produce()), asyncio.create_task(store())]
         group = asyncio.gather(*jobs)
         while True:
@@ -289,6 +325,7 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
         watcher.cancel()
         await asyncio.gather(watcher, return_exceptions=True)
         if acquired:
+            publish('fault' if exit_code else 'stopped', last_error if exit_code else None)
             try:
                 await db_call(repository.state, cfg, owner, "fault" if exit_code else "stopped",
                     last_error if exit_code else None, 0, True)

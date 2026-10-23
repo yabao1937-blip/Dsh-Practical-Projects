@@ -137,7 +137,8 @@ def test_archive_repeat_is_idempotent_and_corruption_retains_rows(wal):
 def test_worker_records_during_slow_maintenance_and_waits_on_shutdown(monkeypatch):
     started,release=Event(),Event()
     calls=[]
-    def observe():
+    def observe(**kwargs):
+        assert kwargs['cadence_seconds'] == 30
         calls.append('observation')
         return HOUR
     def maintain(now):
@@ -172,7 +173,8 @@ def test_worker_requires_committed_observation_and_survives_maintenance_failure(
     entered,release,maintained=Event(),Event(),Event()
     observations=[]
     maintenance=[]
-    def observe():
+    def observe(**kwargs):
+        assert kwargs['cadence_seconds'] == 30
         entered.set()
         assert release.wait(5)
         observations.append(HOUR)

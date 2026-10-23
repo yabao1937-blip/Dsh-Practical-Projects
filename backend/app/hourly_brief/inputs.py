@@ -35,10 +35,13 @@ def business_time(value):
 
 
 class Inputs:
-    def __init__(self, db, hour, live=False, authoritative=False):
+    def __init__(self, db, hour, live=False, authoritative=False, realtime=False):
         self.db, self.hour = db, hour
         self.live = live
         self.authoritative = authoritative
+        self.realtime = realtime
+        from ..telemetry.realtime import read_runtime
+        self.runtime = read_runtime(db, hour) if realtime else {}
         self.cutoff = iso_time(hour)
         self.points = {}
         for p in db.scalars(select(TelemetryPoint).where(TelemetryPoint.enabled.is_(True))):
@@ -68,6 +71,9 @@ class Inputs:
 
     def latest(self, point):
         candidates = [raw_sample(point.latest)] if not self.authoritative and self.before(point.latest) else []
+        if self.realtime:
+            from ..telemetry.realtime import cached_samples
+            candidates.extend(cached_samples(self.runtime, point, self.hour))
         row = self.db.scalar(select(TelemetryReading).where(
             TelemetryReading.source_id == point.source_id, TelemetryReading.point_key == point.key,
             TelemetryReading.received_at <= self.cutoff,
@@ -82,7 +88,8 @@ class Inputs:
             return False
         if self.live:
             source = self.sources.get(point.source_id)
-            if not source or source.state != 'connected' or not source.lease_until or parse_time(source.lease_until) <= self.hour:
+            state = (self.runtime.get(point.source_id) or {}).get('state', source.state if source else None)
+            if not source or state != 'connected' or not source.lease_until or parse_time(source.lease_until) <= self.hour:
                 return False
         # The current connection can change just AFTER the boundary. Judge the
         # already received sample at the hour, not a future source-state update.
@@ -91,6 +98,11 @@ class Inputs:
     def nonzero(self, point):
         cached = ((point.latest or {}).get(MEMORY) or {}).get("last_nonzero")
         candidates = [cached] if not self.authoritative and self.before(cached) and usable_at_receipt(cached, point.config) else []
+        if self.realtime:
+            from ..telemetry.realtime import cached_memory
+            found = cached_memory(self.runtime, point, 'last_nonzero', self.hour)
+            if found:
+                candidates.append(found)
         query = select(TelemetryReading).where(
             TelemetryReading.source_id == point.source_id, TelemetryReading.point_key == point.key,
             TelemetryReading.received_at <= self.cutoff,
@@ -130,11 +142,18 @@ class Inputs:
             items.append(dict(source_id=p.source_id, key=p.key, item_id=p.config["item_id"],
                 unit=p.config.get("unit", ""), definition_id=definition_id(p.config), sample=sample, as_of=self.cutoff,
                 available=self.usable(p, sample), status="good",
-                last_density_sample=density_history(self.db, p, self.cutoff, authoritative=self.authoritative)))
+                last_density_sample=self.last_density(p)))
         effective = effective_average(items)
         return cell(effective["value"], "KEPServer · A303/A304 平均", effective["received_at"],
                     effective["status"], effective["reason"], sample=effective,
                     components=effective["components"], policy=effective["policy"])
+
+    def last_density(self, point):
+        candidates = [density_history(self.db, point, self.cutoff, authoritative=self.authoritative)]
+        if self.realtime:
+            from ..telemetry.realtime import cached_memory
+            candidates.append(cached_memory(self.runtime, point, 'last_density', self.hour))
+        return max((s for s in candidates if s), key=lambda s:parse_time(s['received_at']), default=None)
 
     def group(self, members, source_id=None):
         parts = {label: self.telemetry(item, source_id=source_id) for label, item in members}

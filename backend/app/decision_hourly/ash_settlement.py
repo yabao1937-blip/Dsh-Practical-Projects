@@ -23,7 +23,7 @@ from .ash_history import hour_range, read_ash_hours
 from .evidence import MASS, POLICY as EVIDENCE_POLICY, at, weights
 from .models import DecisionAshSettlement, DecisionCycleHour, DecisionCycleSample, DecisionEvidenceArchive
 from .references import resolve_snapshots
-from .statistics import CADENCE, valid
+from .statistics import CADENCE, ARCHIVE_CADENCE, valid, row_seconds
 from .production_coverage import stopped_intervals, fields as coverage_fields, overlap
 
 POLICY = 'gpt-ash-settlement-v4'
@@ -39,7 +39,7 @@ def latest_end(now):
 def settlement_snapshot(snapshot):
     """Select chemistry evidence before expanding hot or archived references."""
     return {**{k:snapshot[k] for k in ('storage_version', 'evidence_policy', 'sources',
-        'coarse_ash', 'heavy_amount', 'total_ash') if k in snapshot},
+        'coarse_ash', 'heavy_amount', 'total_ash', 'cadence_seconds', 'quality_sources') if k in snapshot},
         'cells':{k:v for k,v in snapshot.get('cells', {}).items() if k in
                  ('belt501', 'belt502', 'float_ash', 'float_amount', 'coarse_amount')}}
 
@@ -177,14 +177,15 @@ def build_settlement(db, start, now=None, basis=None, source=None, *, rows=None,
     basis = manual_basis(db, start, end, now) if basis is None else basis
     source = source_revision(db, start) if source is None else source
     rows = load_rows(db, start) if rows is None else rows
-    w, contributions, excluded, replaced = weights(rows, end), [], Counter(), 0
+    w, contributions, excluded, replaced = weights(rows, end, db=db), [], Counter(), 0
     seen_legacy = set()
-    for row in rows:
+    for i,row in enumerate(rows):
         use_manual = basis['value'] is not None and permits_manual(row.snapshot)
         if row.snapshot.get('evidence_policy') != EVIDENCE_POLICY:
             old = row.snapshot.get('total_ash', {})
             if row.fingerprint not in seen_legacy and valid(old) and 0 <= old['value'] <= 100:
-                contributions.append(dict(slot=row.slot, sampled_at=row.sampled_at, seconds=CADENCE,
+                contributions.append(dict(slot=row.slot, sampled_at=row.sampled_at,
+                    seconds=row_seconds(row,end,rows[i+1] if i+1 < len(rows) else None),
                     aggregation=LEGACY, value=old['value'], manual_applied=False, legacy_reference=True))
             seen_legacy.add(row.fingerprint)
             continue
@@ -260,7 +261,7 @@ def prepare_due_hours(db, now):
     available, guard = available_assays(db, now), manual_revision(db)
     # Visit a bounded slice of old hours, plus newly entered assays' own hours.
     # Never parse every saved contribution JSON on every five-second worker tick.
-    offset = int(now.timestamp()/CADENCE) % len(backlog) if backlog else 0
+    offset = int(now.timestamp()/ARCHIVE_CADENCE) % len(backlog) if backlog else 0
     recent = [iso_time(business_time(measurement_time(r)).replace(minute=0, second=0, microsecond=0))
               for r in reversed(available) if r.created_at >= iso_time(now-timedelta(minutes=1))]
     rotated = (backlog[offset:]+backlog[:offset])[:2]

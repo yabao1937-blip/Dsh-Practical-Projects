@@ -4,6 +4,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 import logging
 import time
+import json
 
 from sqlalchemy import select, text, func
 
@@ -14,9 +15,9 @@ from ..services.decision_live import gpt_group
 from ..services.state import load_store
 from ..telemetry.domain import iso_time, utc_now
 from .models import DecisionCycleContext, DecisionCycleSample, DecisionCycleHour
-from .statistics import CADENCE, digest, hour_advice
+from .statistics import CADENCE, ARCHIVE_CADENCE, digest, hour_advice
 from .history import historical_cells
-from .evidence import POLICY, PROVISIONAL, SEGMENT_POLICY, summarize
+from .evidence import POLICY, PROVISIONAL, SEGMENT_POLICY, summarize, weights
 from .tracking import density_channels, observe
 from .archive import archive_tick
 from .references import pack_snapshot, hydrate_rows, pin_readings
@@ -39,7 +40,7 @@ def compact_cell(c):
         result['raw_sample'] = deepcopy(effective['raw_sample'])
     sample = c.get('sample') or {}
     if sample:
-        for key in ('batch_id','definition_id','quality','status_code','issue','source_at','server_at','received_at','raw_value'):
+        for key in ('batch_id','definition_id','quality','status_code','issue','source_at','server_at','received_at','raw_value','cadence_seconds'):
             result[key] = deepcopy(sample.get(key))
     if isinstance(c.get('components'),dict):
         result['components'] = {k:compact_cell(v) for k,v in c['components'].items()}
@@ -79,9 +80,14 @@ def context_definition(result, store):
         input_derivations=deepcopy(result.get('input_derivations')))
 
 
-def prepare_record(db, now, result=None, store=None):
+def prepare_record(db, now, result=None, store=None, *, cadence_seconds=CADENCE):
     """Prepare detached evidence; no writes or writer reservation are required."""
     slot = int(now.timestamp())//CADENCE
+    if cadence_seconds == ARCHIVE_CADENCE:
+        first = int(now.timestamp())//ARCHIVE_CADENCE*ARCHIVE_CADENCE//CADENCE
+        if db.scalar(select(DecisionCycleSample.slot).where(DecisionCycleSample.slot >= first,
+                DecisionCycleSample.slot < first+ARCHIVE_CADENCE//CADENCE).limit(1)) is not None:
+            return None
     if db.get(DecisionCycleSample,slot):
         return None
     result = result or shared_snapshot(db)
@@ -103,8 +109,22 @@ def prepare_record(db, now, result=None, store=None):
     snapshot['input_timing'] = deepcopy(result.get('input_timing'))
     snapshot['input_derivations'] = deepcopy(result.get('input_derivations'))
     snapshot['evidence_policy'] = POLICY
+    snapshot['cadence_seconds'] = cadence_seconds
     snapshot.update({k:deepcopy(result[k]) for k in ('features','expert_explanation') if k in result})
     snapshot['inputs'] = {k:compact_cell(c) for k,c in result['inputs'].items()}
+    quality_sources = set()
+    def source_clock(c):
+        if c.get('source_id') and c.get('point_key') and c.get('source_id') != 'manual-measurements':
+            lag = (c.get('alignment') or {}).get('level_lag_seconds',0)
+            quality_sources.add((c['source_id'],c['point_key'],lag if lag in (0,90) else 0))
+        parts = c.get('components') or []
+        for part in parts.values() if isinstance(parts,dict) else parts:
+            source_clock(part)
+    for name,c in result['inputs'].items():
+        if result['model'].get('method') != 'expert8' or name != 'raw_ash':
+            source_clock(c)
+    snapshot['quality_sources'] = [dict(source_id=s,point_key=p,lag_seconds=lag)
+        for s,p,lag in sorted(quality_sources)]
     snapshot['density_channels'] = density_channels(db,now,compact_cell)
     snapshot['protection'] = {k:deepcopy(store.get(k)) for k in ('densityLastMoveAt','densityActionLatch')}
     pins = set()
@@ -118,6 +138,11 @@ def save_record(db, prepared):
     now, slot, key = prepared['now'], prepared['slot'], prepared['key']
     if db.get(DecisionCycleSample, slot):
         return False
+    if prepared['snapshot'].get('cadence_seconds') == ARCHIVE_CADENCE:
+        first = slot//(ARCHIVE_CADENCE//CADENCE)*(ARCHIVE_CADENCE//CADENCE)
+        if db.scalar(select(DecisionCycleSample.slot).where(DecisionCycleSample.slot >= first,
+                DecisionCycleSample.slot < first+ARCHIVE_CADENCE//CADENCE).limit(1)) is not None:
+            return False
     latest_slot = db.scalar(select(func.max(DecisionCycleSample.slot)))
     if latest_slot is not None and latest_slot > slot:
         return False  # A slower concurrent preparation must not rewind observation tracking.
@@ -148,7 +173,7 @@ def build_hour(db, start, end, now):
     # Only restore fields actually consumed by hour statistics. Full detail also
     # contains duplicate input/density-channel evidence and model explanations.
     fields = ('sources','model','input_timing','evidence_policy','total_ash',
-              'suggested_density','cells','storage_version')
+              'suggested_density','cells','storage_version','cadence_seconds','quality_sources')
     # Parse each JSON once; separate SQLite JSON_EXTRACT expressions repeatedly
     # scan the same large document and cost more than the hydration they save.
     data = db.scalars(select(DecisionCycleSample).where(DecisionCycleSample.sampled_at>=iso_time(start),
@@ -157,11 +182,12 @@ def build_hour(db, start, end, now):
         fingerprint=r.fingerprint,snapshot={**{k:r.snapshot[k] for k in fields if k in r.snapshot},
             'inputs':{k:v for k,v in r.snapshot.get('inputs',{}).items() if k=='is_stoppage'}}) for r in data]
     rows = hydrate_rows(db,rows)
-    cells, sources, basis = historical_cells(db,start,end,rows)
+    durations = weights(rows,end,db=db)
+    cells, sources, basis = historical_cells(db,start,end,rows,weights=durations)
     context = db.get(DecisionCycleContext,rows[-1].context_key) if rows else None
     step = (context.definition.get('density_guide') or {}).get('maxStep',.03) if context else .03
-    advice, coverage, guide = hour_advice(rows,start,end,basis,step)
-    evidence = summarize(rows,end)
+    advice, coverage, guide = hour_advice(rows,start,end,basis,step,weights=durations)
+    evidence = summarize(rows,end,prepared_weights=durations)
     cells['total_ash'] = evidence['total_ash']
     guide.update(validation='awaiting_experiment', empirical_note=PROVISIONAL,
                  feasible_interval=None, interval_width_limit=None)
@@ -178,13 +204,31 @@ def build_hour(db, start, end, now):
         model=rows[-1].snapshot['model'] if rows else {}, context_key=rows[-1].context_key if rows else None,
         coverage=coverage,guidance=guide,density_basis=basis,
         coarse_ash=cells['coarse_ash'],heavy_amount=cells['heavy_amount'],total_ash=cells['total_ash'],suggested_density=advice,
-        notes=['总灰分按 501+502 实际产煤量加权；每批最多计 5 秒，不跨缺口补齐产量。其他显示指标保留样本均值。',
+        notes=['总灰分按 501+502 实际产煤量加权；每批按记录的 5/30 秒时长计权，不跨缺口补齐产量。其他显示指标按有效时长加权。',
                '手工数据按实际记录条数平均；没有新增时沿用该小时前最近值并显示采样时间。',
                '工况分段保留真实系统组合、均值、波动、方向和持续时间，暂不推断下一工况。',
                PROVISIONAL+'；等待响应实验，不限制未来估计区间宽度，单次执行仍限 ±0.03。'])
 
 
-def observation_tick(now=None, sessions=SessionLocal):
+def periodic_batch_ready(db, now, sources=None):
+    """Wait for this bucket's durable batch, including bad-quality batches.
+
+    Reading the five-second runtime cache here would leave dangling archive
+    references. Never turn a previous bucket or a quality event into a new period.
+    """
+    from datetime import datetime, timezone
+    from ..telemetry.models import TelemetryReading
+    start = datetime.fromtimestamp(int(now.timestamp())//ARCHIVE_CADENCE*ARCHIVE_CADENCE,timezone.utc)
+    query = select(TelemetryReading.source_id,TelemetryReading.sample).where(
+        TelemetryReading.received_at >= iso_time(start),TelemetryReading.received_at <= iso_time(now))
+    if sources:
+        query = query.where(TelemetryReading.source_id.in_(sources))
+    found = {source for source,sample in db.execute(query) if sample.get('storage_kind') == 'periodic'
+             and sample.get('cadence_seconds') == ARCHIVE_CADENCE and not sample.get('runtime_only')}
+    return set(sources) <= found if sources else bool(found)
+
+
+def observation_tick(now=None, sessions=SessionLocal, *, cadence_seconds=CADENCE):
     from .observation_guard import configuration_revision
     explicit_time = now is not None
     started = time.monotonic()
@@ -192,7 +236,20 @@ def observation_tick(now=None, sessions=SessionLocal):
         if db.bind.dialect.name == 'sqlite':
             db.execute(text('BEGIN'))
         revision = configuration_revision(db)
-        prepared = prepare_record(db, now or utc_now())
+        if cadence_seconds == ARCHIVE_CADENCE and not periodic_batch_ready(db,now or utc_now()):
+            return None
+        prepared = prepare_record(db, now or utc_now(), cadence_seconds=cadence_seconds)
+        if prepared and cadence_seconds == ARCHIVE_CADENCE:
+            sources = set()
+            for choice in prepared['snapshot'].get('sources',{}).get('resolved_choices',{}).values():
+                try:
+                    source,_ = json.loads(choice)
+                except (ValueError,TypeError):
+                    continue
+                if source != 'manual-measurements':
+                    sources.add(source)
+            if not periodic_batch_ready(db,prepared['now'],sources):
+                return None
     log.info('decision_observation phase=prepare elapsed_ms=%.2f', (time.monotonic()-started)*1000)
     if prepared is None:
         return None
@@ -273,8 +330,8 @@ def read_hour(db, now=None, live=None, defer_missing=False, *, store_loader=None
     result['frozen'] = bool(saved)
     result['checked_at'] = iso_time(now)
     from .quality_advice import apply_quality_advice
-    current = live if live is not None else (shared_snapshot(db) if store_loader is None
-        else shared_snapshot(db, store_loader=store_loader))
+    current = live if live is not None else (shared_snapshot(db, realtime=True) if store_loader is None
+        else shared_snapshot(db, store_loader=store_loader, realtime=True))
     loader = load_store if store_loader is None else store_loader
     store = loader(db)
     if settlement_reader is None:

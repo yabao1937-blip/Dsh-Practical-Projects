@@ -18,7 +18,7 @@ from ..telemetry.retained import density_rows, raw_sample, usable_at_receipt
 from .ash_settlement import get_settlement, latest_end
 from .evidence import PROVISIONAL
 from .models import DecisionCycleContext, DecisionCycleHour, DecisionCycleSample
-from .statistics import CADENCE, MIN_COVERAGE, valid
+from .statistics import CADENCE, MIN_COVERAGE, valid, cadence_seconds
 from .production_coverage import stopped_intervals, overlap, fields as coverage_fields
 from ..gpt_density.execution import advise, setpoints, empirical_target, EPSILON
 from ..gpt_density.execution import POLICY as EXECUTION_POLICY
@@ -35,7 +35,7 @@ def period(start, end):
 
 
 def density_mean(db, start, end, sources):
-    """Mean retained events once; coverage is the union of at-most-5s intervals."""
+    """Duration-weight retained events using each recorded 5/30s interval."""
     choice = (sources.get('resolved_choices') or {}).get('density-current')
     points = []
     if choice:
@@ -59,7 +59,7 @@ def density_mean(db, start, end, sources):
                     definitions[p.key].add(s['definition_id'])
                 cell = dict(value=s.get('value'), status='good' if usable_at_receipt(s, p.config) else 'missing')
                 if valid(cell, 'density'):
-                    items[(row.received_at, row.batch_id)] = cell['value']
+                    items[(row.received_at, row.batch_id)] = (cell['value'], cadence_seconds(s))
             parts.append(items)
         if any(len(ids) > 1 for ids in definitions.values()):
             reason = '小时内密度采集点定义变化，暂不混合均值'
@@ -67,7 +67,8 @@ def density_mean(db, start, end, sources):
             if len(parts) == 1:
                 events[stamp] = value
             elif batch and (stamp, batch) in parts[1]:
-                events[stamp] = (value+parts[1][(stamp, batch)])/2
+                second = parts[1][(stamp, batch)]
+                events[stamp] = ((value[0]+second[0])/2,min(value[1],second[1]))
     stopped = stopped_intervals(db, start, end, sources)
     covered, cursor = 0., start.timestamp()
     active = {}
@@ -76,20 +77,22 @@ def density_mean(db, start, end, sources):
         if stamp not in events:
             continue
         left = business_time(stamp).timestamp()
-        right = min(end.timestamp(), left+CADENCE,
+        right = min(end.timestamp(), left+events[stamp][1],
                     business_time(stamps[i+1]).timestamp() if i+1 < len(stamps) else end.timestamp())
         active_seconds = max(0., right-max(left, cursor)-overlap(max(left, cursor), right, stopped))
         covered += active_seconds
         if active_seconds:
-            active[stamp] = events[stamp]
+            active[stamp] = (events[stamp][0],active_seconds)
         cursor = max(cursor, right)
-    value = fsum(active.values())/len(active) if active and not reason else None
+    weighted = any(v[1] == 30 for v in events.values())
+    value = ((fsum(v*s for v,s in active.values())/covered if weighted else
+              fsum(v for v,_ in active.values())/len(active)) if active and covered and not reason else None)
     return dict(**period(start, end), value=value, status='average' if value is not None else 'missing',
         unit='g/cm³', source=sources.get('density_label'), choice=choice,
         sample_count=len(active), excluded_count=len(observed)-len(active),
         **coverage_fields(start, end, stopped, covered),
         observed_at=max(active) if active else None,
-        reason=reason or ('上一完整小时有效实测密度的算术平均' if events else '上一完整小时没有有效实测密度'))
+        reason=reason or ('上一完整小时有效实测密度按有效时长加权平均' if events else '上一完整小时没有有效实测密度'))
 
 
 def context_keys(db, start, end, snapshot=None):

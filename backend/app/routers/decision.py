@@ -139,7 +139,7 @@ def current_decision(db: Session = Depends(get_db)):
         return decision_view('current')
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))
-    return shared_snapshot(db)
+    return shared_snapshot(db, realtime=True)
 
 
 @router.get('/hourly')

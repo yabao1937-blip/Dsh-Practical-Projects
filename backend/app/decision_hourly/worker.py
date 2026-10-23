@@ -3,7 +3,7 @@ import logging
 import time
 
 from .service import observation_tick, maintenance_tick
-from .statistics import CADENCE
+from .statistics import CADENCE, ARCHIVE_CADENCE
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ async def run(stop):
     try:
         while not stop.is_set():
             try:
-                now = await asyncio.to_thread(observation_tick)
+                now = await asyncio.to_thread(observation_tick, cadence_seconds=ARCHIVE_CADENCE)
                 if now is not None:
                     if requests.full():
                         requests.get_nowait()

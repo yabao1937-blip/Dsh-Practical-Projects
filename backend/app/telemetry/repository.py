@@ -98,7 +98,7 @@ class TelemetryRepository:
                 # makes two consecutive receipts slightly less than five seconds apart.
                 due = (cfg.history_interval_seconds <= cfg.poll_seconds or not point.last_history_at
                        or (parse_time(received) - parse_time(point.last_history_at)).total_seconds() >= cfg.history_interval_seconds)
-                if existing is None and (due or changed_quality):
+                if existing is None and (batch.get('storage_policy') == 'periodic-v1' or due or changed_quality):
                     db.add(TelemetryReading(source_id=cfg.source_id, point_key=sample["key"],
                         batch_id=batch["batch_id"], received_at=received, sample=sample))
                     if not point.last_history_at or received > point.last_history_at:
@@ -134,6 +134,8 @@ class TelemetryRepository:
 
 def latest_view(db, source_id=None, now=None):
     now = now or utc_now()
+    from .realtime import read_runtime, cached_samples, cached_memory
+    runtime = read_runtime(db, now)
     sources_query = select(TelemetrySource).order_by(TelemetrySource.source_id)
     points_query = select(TelemetryPoint).where(TelemetryPoint.enabled.is_(True)).order_by(TelemetryPoint.source_id, TelemetryPoint.key)
     if source_id:
@@ -142,21 +144,35 @@ def latest_view(db, source_id=None, now=None):
     sources = []
     online = {}
     for row in db.scalars(sources_query):
+        live = runtime.get(row.source_id)
         alive = bool(row.lease_until and parse_time(row.lease_until) > now)
-        online[row.source_id] = row.state == "connected" and alive
+        online[row.source_id] = (live.get('state') if live else row.state) == "connected" and alive
         state = "offline" if row.state in {"connecting", "connected", "retrying"} and not alive else row.state
+        if live:
+            state = live.get('state', state)
+        stamps = [s.get('received_at') for b in (live or {}).get('batches', []) for s in b.get('samples', []) if s.get('received_at')]
         sources.append({"source_id": row.source_id, "name": row.name, "state": state,
-            "heartbeat_at": row.heartbeat_at, "last_sample_at": row.last_sample_at,
-            "error_code": row.error_code, "retry_seconds": row.retry_seconds})
+            "heartbeat_at": live['published_at'] if live else row.heartbeat_at,
+            "last_sample_at": max(stamps, default=row.last_sample_at),
+            "error_code": live.get('error_code') if live else row.error_code,
+            "retry_seconds": live.get('retry_seconds', 0) if live else row.retry_seconds})
     items = []
     for row in db.scalars(points_query):
-        usable, reason = availability(row.latest, row.config, online.get(row.source_id, False), now)
+        candidates = cached_samples(runtime, row, now)
+        if row.latest:
+            candidates.append(raw_sample(row.latest))
+        latest = max(candidates, key=lambda s:parse_time(s['received_at']), default=None)
+        usable, reason = availability(latest, row.config, online.get(row.source_id, False), now)
         memory = point_memory(db, row)
+        for kind in ('last_valid', 'last_nonzero', 'last_density'):
+            found = cached_memory(runtime, row, kind, now)
+            if found and (not memory.get(kind) or found['received_at'] > memory[kind]['received_at']):
+                memory[kind] = found
         items.append({"source_id": row.source_id, "key": row.key, "name": row.config["name"],
             "device": row.config.get("device", ""), "tag_name": row.config.get("tag_name", ""),
             "description": row.config.get("description", ""), "item_id": row.config.get("item_id", ""),
             "definition_id": definition_id(row.config),
-            "unit": row.config["unit"], "sample": raw_sample(row.latest), "available": usable, "status": reason,
+            "unit": row.config["unit"], "sample": raw_sample(latest), "available": usable, "status": reason,
             "last_valid_sample": memory["last_valid"], "last_nonzero_sample": memory["last_nonzero"]})
         if row.config.get("item_id") in DENSITY_ITEMS:
             held = memory.get("last_density")

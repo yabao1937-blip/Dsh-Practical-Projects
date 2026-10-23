@@ -31,6 +31,9 @@ def serve(output):
     project_update = (output/'extras'/'ProjectUpdate.zip').resolve()
     diagnostics = (output/'extras'/'ProjectDiagnostics.zip').resolve()
     readonly_bridge = (output/'extras'/'ReadOnlyBridge.zip').resolve()
+    storage_move = (output/'extras'/'MoveStorageToD.zip').resolve()
+    if not storage_move.is_relative_to(output.resolve()):
+        raise ValueError('Storage migration must stay inside the configured output directory')
     prefix = '/'+settings['token']
     allowed = {settings['client'], settings['bind'], '127.0.0.1'}
 
@@ -50,6 +53,11 @@ def serve(output):
                 self.send_header('Location', prefix+'/')
                 self.end_headers()
             elif path in (prefix, prefix+'/'):
+                storage = (f'<h2>C 盘空间：迁移数据到 D 盘</h2>'
+                    f'<p><a href="{prefix}/storage-move.zip">下载 D 盘数据迁移工具</a></p>'
+                    f'<p>全部解压后运行 <b>MoveStorageToD.cmd</b>。停服复制并校验，程序入口保留在 C 盘。</p>'
+                    f'<p>原 C 盘副本暂时保留；迁移成功后按 README 中的校验清理步骤释放空间。</p><hr>'
+                    if storage_move.is_file() else '')
                 readonly = (f'<h2>笔记本测试服 · 主机只读数据接入</h2>'
                     f'<p><a href="{prefix}/readonly-bridge.zip">下载只读数据接入包</a></p>'
                     f'<p>在主机全部解压到新文件夹，双击 <b>EnableReadOnlyTest.cmd</b>。'
@@ -58,7 +66,7 @@ def serve(output):
                 project = (f'<h2>已有主机：本次项目更新</h2>'
                     f'<p><a href="{prefix}/project-update.zip">下载本次项目更新包（保留主机数据库）</a></p>'
                     f'<p>右键 ZIP → 全部解压，进入文件夹，双击 <b>UpdateProject.cmd</b>。成功后按 Ctrl＋F5。</p>'
-                    f'<p>自动备份主机数据库和原程序；仅替换程序，保留采集配置、模型和历史数据。</p><hr>'
+                    f'<p>自动备份数据库和原程序，保留模型、历史数据和点位设置，应用本次更新配置。</p><hr>'
                     if project_update.is_file() else '')
                 update = (f'<hr><h2>浏览器兼容更新</h2>'
                     f'<p><a href="{prefix}/browser-compat.zip">下载浏览器兼容更新包（无需重装系统）</a></p>'
@@ -71,7 +79,7 @@ def serve(output):
                     if chrome.is_file() else '')
                 content = (f'<!doctype html><meta charset="utf-8"><title>离线安装</title>'
                     f'<body style="font:22px sans-serif;padding:32px;line-height:1.7">'
-                    f'{readonly}{project}'+(f'<h2>主机故障诊断</h2><p><a href="{prefix}/diagnostics.zip">下载一键诊断包</a>：全部解压后运行 DiagnoseProject.cmd，不停止服务、不修改数据库。</p><hr>' if diagnostics.is_file() else '')+
+                    f'{storage}{project}{readonly}'+(f'<h2>主机故障诊断</h2><p><a href="{prefix}/diagnostics.zip">下载一键诊断包</a>：全部解压后运行 DiagnoseProject.cmd，不停止服务、不修改数据库。</p><hr>' if diagnostics.is_file() else '')+
                     f'<h2>首次安装 · Windows 10 64位 · 重介密控系统</h2>'
                     f'<p><a href="{prefix}/download.zip">下载离线安装包（{bundle.stat().st_size/1048576:.0f} MB）</a></p>'
                     f'<ol><li>下载完成后，右键 ZIP → 全部解压。</li>'
@@ -97,6 +105,8 @@ def serve(output):
                 self.download(diagnostics, 'application/zip')
             elif path == prefix+'/readonly-bridge.zip' and readonly_bridge.is_file():
                 self.download(readonly_bridge, 'application/zip')
+            elif path == prefix+'/storage-move.zip' and storage_move.is_file():
+                self.download(storage_move, 'application/zip')
             else:
                 self.send_error(404)
 

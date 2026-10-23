@@ -66,7 +66,9 @@ def package_hashes(path):
     return evidence,hashes
 
 
-def build(output,accepted_baseline_revisions=(),accepted_baseline_packages=()):
+def build(output,accepted_baseline_revisions=(),accepted_baseline_packages=(),history_interval_seconds=None):
+    if history_interval_seconds is not None and (type(history_interval_seconds) is not int or history_interval_seconds != 30):
+        raise ValueError('Only the explicit 30-second collector history interval is supported')
     latest = json.loads((output/'latest.json').read_text(encoding='utf-8'))
     baseline = json.loads((Path(latest['stage'])/'manifest.json').read_text(encoding='utf-8'))
     settings = json.loads((output/'transfer-settings.json').read_text(encoding='utf-8'))
@@ -102,6 +104,8 @@ def build(output,accepted_baseline_revisions=(),accepted_baseline_packages=()):
     revision = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     manifest = dict(format=1,revision=revision,created_at=datetime.now().astimezone().isoformat(),
         report_url=f'http://{settings["bind"]}:{settings["port"]}/{settings["token"]}/status',files=files)
+    if history_interval_seconds is not None:
+        manifest['collector_history_interval_seconds'] = history_interval_seconds
     if commits: manifest['accepted_baseline_revisions'] = commits
     if packages: manifest['accepted_baseline_packages'] = packages
     target = output/'extras/ProjectUpdate.zip'
@@ -121,5 +125,7 @@ if __name__ == '__main__':
         help='Explicitly accept committed source hashes from this previously published revision; repeatable')
     parser.add_argument('--accepted-baseline-package',type=Path,action='append',default=[],
         help='Explicitly accept verified payload hashes from this previously published update ZIP; repeatable')
+    parser.add_argument('--history-interval-seconds',type=int,choices=[30],
+        help='Explicitly set only the installed collector history interval to 30 seconds')
     args = parser.parse_args()
-    build(args.output.resolve(),args.accepted_baseline_revision,args.accepted_baseline_package)
+    build(args.output.resolve(),args.accepted_baseline_revision,args.accepted_baseline_package,args.history_interval_seconds)

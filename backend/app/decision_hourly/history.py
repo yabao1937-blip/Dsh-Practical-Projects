@@ -12,11 +12,11 @@ from ..telemetry.derived import DENSITY_AVERAGE_MEMBERS
 from ..telemetry.domain import iso_time
 from ..telemetry.models import TelemetryReading
 from ..telemetry.retained import raw_sample, usable_at_receipt
-from .statistics import COMPUTED, digest, event_key, mean_cell, valid
+from .statistics import COMPUTED, digest, event_key, mean_cell, valid, row_seconds
 from ..gpt_coarse.timing import level_mean
 
 
-def historical_cells(db, start, end, rows):
+def historical_cells(db, start, end, rows, *, weights=None):
     from datetime import timedelta
     inputs = Inputs(db, end-timedelta(microseconds=1), authoritative=True)
     sources = config_view(db, inputs.hour, inputs)
@@ -46,7 +46,8 @@ def historical_cells(db, start, end, rows):
         for s in by_point[(p.source_id, p.key)].values():
             result.append(dict(value=s.get('value'), status='good' if usable_at_receipt(s,p.config) else 'missing',
                 observed_at=s['received_at'], source_id=p.source_id, point_key=p.key, item_id=p.config.get('item_id'),
-                source='KEPServer', unit=p.config.get('unit') or '', batch_id=s.get('batch_id'),definition_id=s.get('definition_id')))
+                source='KEPServer', unit=p.config.get('unit') or '', batch_id=s.get('batch_id'),definition_id=s.get('definition_id'),
+                cadence_seconds=s.get('cadence_seconds',5)))
         return result
 
     for node,key in NODE_CELLS.items():
@@ -100,7 +101,7 @@ def historical_cells(db, start, end, rows):
                     observed_at=iso_time(business_time(r.ts)),record_id=r.id,_event=f'record:{r.id}'))
 
     seen_decisions = set()
-    for r in rows:
+    for i,r in enumerate(rows):
         snapshot = r.snapshot
         duplicate = r.fingerprint in seen_decisions
         seen_decisions.add(r.fingerprint)
@@ -112,7 +113,10 @@ def historical_cells(db, start, end, rows):
                 continue
             if key in COMPUTED:
                 if not duplicate:
-                    series[key].append(dict(c,observed_at=r.sampled_at,_event=r.fingerprint))
+                    series[key].append(dict(c,observed_at=r.sampled_at,_event=r.fingerprint,
+                        cadence_seconds=r.snapshot.get('cadence_seconds',5),
+                        _seconds=weights[r.slot]['duration_seconds'] if weights is not None else
+                            row_seconds(r,end,rows[i+1] if i+1 < len(rows) else None)))
             elif isinstance(c.get('components'),dict):
                 for label,part in c['components'].items():
                     series[f'{key}:{label}'].append(part)
