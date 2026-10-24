@@ -26,7 +26,7 @@ def test_migration_preserves_existing_business_and_telemetry(tmp_path, auto_crea
         run(env, "-c", "from app.main import app; from app.database import engine; from sqlalchemy import text; conn=engine.connect(); conn.execute(text(\"INSERT INTO telemetry_sources (source_id,name,state,retry_seconds) VALUES ('test','test','stopped',0)\")); conn.commit(); conn.close()")
     run(env, "-m", "alembic", "upgrade", "head")
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "c3a610160001"
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "c3a610240001"
         tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {'gpt_decision_evidence_archives','gpt_density_observations','gpt_density_actions','gpt_density_action_entries'} <= tables
         assert 'decision_telemetry_pins' in tables
@@ -36,7 +36,7 @@ def test_migration_preserves_existing_business_and_telemetry(tmp_path, auto_crea
         assert [r[1] for r in db.execute("PRAGMA table_info(hourly_brief_feedback)")] == ["id", "hour", "content", "created_at", "client_id"]
         assert [r[1] for r in db.execute("PRAGMA table_info(decision_cycle_samples)")] == ["slot", "sampled_at", "context_key", "fingerprint", "snapshot"]
         assert db.execute("SELECT count(*) FROM decision_cycle_hours").fetchone()[0] == 0
-        assert [r[1] for r in db.execute("PRAGMA table_info(online_instruments)")] == ["设备", "标签名", "说明", "ItemID", "值", "时间"]
+        assert [r[1] for r in db.execute("PRAGMA table_info(online_instruments)")] == ["来源", "点位", "说明", "值", "时间"]
         assert db.execute("SELECT value FROM settings WHERE key='migration-test'").fetchone()[0] == 8.5
         assert db.execute("SELECT count(*) FROM telemetry_sources").fetchone()[0] == int(auto_created)
     run(env, "-m", "alembic", "downgrade", "b7e2c4d9a001")

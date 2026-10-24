@@ -4,6 +4,24 @@ $ErrorActionPreference = 'Stop'
 $env:PYTHONHOME = $null
 $env:PYTHONPATH = $null
 $env:PYTHONUTF8 = '1'
+function Copy-PointMetadata([string]$Source, [string]$Destination) {
+    if (-not (Test-Path -LiteralPath $Source)) { return }
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    foreach ($taskMetadata in Get-ChildItem -LiteralPath $Source -File -Filter '*.json') {
+        if ($taskMetadata.BaseName -notmatch '^[0-9a-f]{64}$' -or
+            ($taskMetadata.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Invalid point metadata file.' }
+        if ((Get-FileHash -LiteralPath $taskMetadata.FullName -Algorithm SHA256).Hash -ne $taskMetadata.BaseName) {
+            throw 'Point metadata checksum failed.'
+        }
+        $taskMetadataTarget = Join-Path $Destination $taskMetadata.Name
+        if (-not (Test-Path -LiteralPath $taskMetadataTarget)) {
+            [IO.File]::Copy($taskMetadata.FullName, $taskMetadataTarget, $false)
+        }
+        if ((Get-FileHash -LiteralPath $taskMetadataTarget -Algorithm SHA256).Hash -ne $taskMetadata.BaseName) {
+            throw 'Existing point metadata conflicts with the installation snapshot.'
+        }
+    }
+}
 function Send-InstallStatus([string]$stage, [string]$message = '', [bool]$healthy = $false) {
     if (-not $taskManifest.report_url -or $NoStart) { return }
     try {
@@ -42,6 +60,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $taskInstall 'runtime\python.exe')))
     Copy-Item -LiteralPath (Join-Path $taskRoot 'runtime') -Destination $taskInstall -Recurse
 }
 $taskDatabase = Join-Path $taskInstall 'backend\data\dense_medium.db'
+# Publish immutable identity versions before the database, including resumed installs.
+& (Join-Path $taskInstall 'runtime\python.exe') -I -c "import sys; sys.path.insert(0,sys.argv[1]); from point_metadata import validate_catalog_presence; validate_catalog_presence(sys.argv[2])" (Join-Path $taskInstall 'backend') (Join-Path $taskRoot 'snapshot\dense_medium.db')
+if ($LASTEXITCODE -ne 0) { throw 'Snapshot requires missing point metadata; database was not installed.' }
+Copy-PointMetadata -Source (Join-Path $taskRoot 'snapshot\point-metadata') -Destination (Join-Path $taskInstall 'backend\data\point-metadata')
 if (-not (Test-Path -LiteralPath $taskDatabase)) { Copy-Item -LiteralPath (Join-Path $taskRoot 'snapshot\dense_medium.db') -Destination $taskDatabase }
 $taskConfig = Join-Path $taskInstall 'backend\config\kepserver.local.json'
 if ((Test-Path -LiteralPath (Join-Path $taskRoot 'configuration\kepserver.local.json')) -and -not (Test-Path -LiteralPath $taskConfig)) {

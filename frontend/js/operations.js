@@ -283,7 +283,7 @@ window.Operations = {
         if (typeof DecisionOverviewPage !== 'undefined') DecisionOverviewPage.telemetryUpdated();
         const body = document.getElementById('telemetry-tbody');
         if (!body) return;
-        if (!items.length) { body.innerHTML = '<tr><td colspan="4" class="ops-empty">暂无采集数据</td></tr>'; return; }
+        if (!items.length) { body.innerHTML = '<tr><td colspan="7" class="ops-empty">暂无采集数据</td></tr>'; return; }
         const reasons = {good:'可用', no_data:'暂无数据', bad_quality:'坏质量', uncertain_quality:'质量不确定',
             stale:'接收超时', source_stale:'源时间过期', collector_offline:'采集离线', out_of_range:'超出量程',
             invalid_value_type:'类型不匹配', non_finite_value:'数值无效', future_source_time:'源时钟异常'};
@@ -310,9 +310,14 @@ window.Operations = {
             const label = labels.filter(name => name === shortLabel).length > 1
                 ? `${shortLabel}（${item.device || item.source_id}）` : shortLabel;
             // Descriptions can repeat. Stable source/key stays attached to the row;
-            // fixed connection identifiers remain available on hover for diagnostics.
+            // Fixed identifiers are reconstructed by the API from its point catalog.
             const identity = [item.source_id, item.key, item.item_id || sample.node_id].filter(Boolean).join(' / ');
-            return '<tr data-source="' + this.escape(item.source_id || '') + '" data-point="' + this.escape(item.key || '') + '"><td title="' + this.escape(identity) + '">' + this.escape(label) + '</td>' +
+            const itemId = item.item_id || String(sample.node_id || '').replace(/^ns=\d+;s=/, '');
+            const channel = item.channel || (itemId.includes('.') ? itemId.split('.')[0] : '');
+            return '<tr data-source="' + this.escape(item.source_id || '') + '" data-point="' + this.escape(item.key || '') + '">' +
+                '<td>' + this.escape(item.device || '—') + '</td><td>' + this.escape(channel || '—') + '</td>' +
+                '<td class="telemetry-point-name" title="' + this.escape(identity) + '">' + this.escape(label) + '</td>' +
+                '<td>' + this.escape(itemId || '—') + '</td>' +
                 '<td class="' + (valid ? '' : 'ops-unavailable') + '" title="' + this.escape(quality + ' / ' + reason) + '">' + this.escape(displayValue) + '</td>' +
                 '<td>' + this.escape(valid ? '可用' : reason) + '</td>' +
                 '<td title="' + this.escape(sample.received_at || '') + '">' + this.escape(this.time(sample.received_at)) + '</td></tr>';

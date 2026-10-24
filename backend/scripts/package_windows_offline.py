@@ -28,6 +28,7 @@ from packaging.tags import sys_tags
 from packaging.utils import canonicalize_name
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT/'backend'))
 TEMPLATES = Path(__file__).with_name('windows_offline')
 
 
@@ -133,6 +134,8 @@ def database_snapshot(target):
             if destination.execute('PRAGMA quick_check').fetchone() != ('ok',):
                 raise RuntimeError('Snapshot integrity check failed')
         source.rollback()
+    from point_metadata import copy_catalog
+    copy_catalog(ROOT/'backend/data/dense_medium.db', target)
 
 
 def verify_runtime(output, wheelhouse, packages):

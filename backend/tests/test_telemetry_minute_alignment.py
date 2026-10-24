@@ -19,12 +19,14 @@ from app.telemetry.realtime import RuntimePublisher, select_alignment_evidence
 from app.telemetry.repository import TelemetryRepository
 from app.telemetry.spool import DurableSpool
 from app.telemetry.worker import run_collector
+from app.telemetry.metadata import install_codec
 
 
 @pytest.fixture
 def setup(tmp_path):
     engine = create_engine('sqlite:///' + str(tmp_path/'isolated.db'),
                            connect_args={'check_same_thread': False})
+    install_codec(engine)
     Base.metadata.create_all(engine)
     cfg = CollectorConfig(enabled=True, endpoint='opc.tcp://127.0.0.1:1', security='None',
         allow_insecure=True, poll_seconds=5, history_interval_seconds=60,

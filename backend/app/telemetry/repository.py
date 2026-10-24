@@ -221,6 +221,7 @@ def latest_view(db, source_id=None, now=None):
                 memory[kind] = found
         items.append({"source_id": row.source_id, "key": row.key, "name": row.config["name"],
             "device": row.config.get("device", ""), "tag_name": row.config.get("tag_name", ""),
+            "channel": row.config.get("item_id", "").split(".", 1)[0] if "." in row.config.get("item_id", "") else "",
             "description": row.config.get("description", ""), "item_id": row.config.get("item_id", ""),
             "definition_id": definition_id(row.config),
             "unit": row.config["unit"], "sample": raw_sample(latest), "available": usable, "status": reason,

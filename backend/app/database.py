@@ -20,6 +20,13 @@ else:
         DATABASE_URL,
         connect_args={"check_same_thread": False, "timeout": 15} if _is_sqlite else {},
     )
+from .telemetry.metadata import install_codec
+import os
+# Deploy compatible readers first. Compact writes are a separate activation so
+# a failed first update can roll source back without stranding newly saved data.
+_point_storage = os.environ.get('DMCS_POINT_METADATA_STORAGE', 'legacy')
+if _point_storage not in ('legacy', 'compact-v1'):
+    raise ValueError('Unknown point metadata storage format')
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
@@ -49,6 +56,9 @@ if _is_sqlite and not REMOTE_READONLY:
             pass
         finally:
             cur.close()
+
+
+install_codec(engine, REMOTE_READONLY, compact_writes=_point_storage == 'compact-v1')
 
 
 class Base(DeclarativeBase):

@@ -12,6 +12,10 @@ import json
 import math
 from pathlib import Path
 import sqlite3
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from point_metadata import Catalog, DIRECTORY
 
 from openpyxl import load_workbook
 
@@ -96,6 +100,7 @@ def read_assays(path, year, date_fixes):
 
 
 def open_database(stack, path, name):
+    catalog = Catalog(path.resolve().parent / DIRECTORY, compact_writes=False)
     conn = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)
     stack.callback(conn.close)
     conn.row_factory = sqlite3.Row
@@ -103,16 +108,16 @@ def open_database(stack, path, name):
     conn.execute('BEGIN')  # One consistent read snapshot per database.
     points = {}
     for row in conn.execute('SELECT source_id,key,config FROM telemetry_points'):
-        cfg = json.loads(row['config'])
+        cfg = catalog.loads(row['config'])
         points[(row['source_id'], row['key'])] = cfg
-    return dict(conn=conn, points=points, name=name, path=str(path.resolve()))
+    return dict(conn=conn, points=points, name=name, path=str(path.resolve()), catalog=catalog)
 
 
 def selected_points(database, at):
     row = database['conn'].execute(
         'SELECT id,config FROM decision_source_revisions WHERE effective_at<=? ORDER BY id DESC LIMIT 1',
         (iso(at),)).fetchone()
-    choices = json.loads(row['config'])['choices'] if row else {}
+    choices = database['catalog'].loads(row['config'])['choices'] if row else {}
     nodes = {'coal_amount': 'coal-rate', 'level': 'tail-level'}
     result = {}
     for feature, (_, item, _) in ITEMS.items():
@@ -150,7 +155,7 @@ def match_feature(databases, key, feature, target):
         return dict(meta, value=None, candidate_value=None, status='no_history',
                     reason='目标之前无采集记录', offline_usable=False, strict_usable=False)
     row, db, _ = max(candidates, key=lambda x: (x[0]['received_at'], -x[2], x[0]['id']))
-    sample = json.loads(row['sample'])
+    sample = db['catalog'].loads(row['sample'])
     sample = {k: v for k, v in sample.items() if k not in ('_display_memory', '_density_display_memory')}
     cfg = db['points'].get(key)
     age = (target - datetime.fromisoformat(row['received_at'])).total_seconds()

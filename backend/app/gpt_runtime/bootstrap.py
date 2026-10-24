@@ -26,8 +26,9 @@ class SourceChoices:
         self.db, self.hour, self.cutoff = db, when, iso_time(when)
         self.points = defaultdict(list)
         rows = db.execute(select(TelemetryPoint.source_id, TelemetryPoint.key,
-            TelemetryPoint.config['item_id'].as_string()).where(TelemetryPoint.enabled.is_(True)))
-        for source, key, item in rows:
+            TelemetryPoint.config).where(TelemetryPoint.enabled.is_(True)))
+        for source, key, config in rows:
+            item = config.get('item_id')
             self.points[item].append(SimpleNamespace(source_id=source, key=key, config={'item_id': item}))
 
 

@@ -31,6 +31,8 @@ def main():
         backup.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(database) as source, sqlite3.connect(backup) as destination:
             source.backup(destination)
+        from point_metadata import copy_catalog
+        copy_catalog(database, backup)
         GptCoarseRevision.__table__.create(engine, checkfirst=True)
         with SessionLocal() as db:
             row = activate(db, artifact)

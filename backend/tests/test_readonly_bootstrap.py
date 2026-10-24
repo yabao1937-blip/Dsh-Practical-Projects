@@ -46,7 +46,9 @@ def test_finite_settings_preserve_values_and_sources_without_history_queries(ses
         assert all(name not in sql for name in ('auto_state', 'coal_records', 'calc_logs', 'heavy_samples',
             'coarse_models', 'gpt_coarse_revisions', 'telemetry_readings', 'telemetry_sources'))
         point_query = next(statement for statement in statements if 'telemetry_points' in statement)
-        assert 'telemetry_points.latest' not in point_query and 'JSON_EXTRACT' in point_query.upper()
+        # Fixed ItemIDs are now file-catalog references: read only the small config
+        # column so its JSON decoder can hydrate the original source identity.
+        assert 'telemetry_points.latest' not in point_query and 'telemetry_points.config' in point_query
         assert not db.new and not db.dirty and not db.deleted
         assert 'unneeded' not in json.dumps(result)
 

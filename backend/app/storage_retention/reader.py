@@ -333,6 +333,8 @@ def transport_read(database_path, kind, parameters):
         return connection
 
     engine = create_engine(URL.create('sqlite', database=str(path)), creator=connect, poolclass=NullPool)
+    from ..telemetry.metadata import install_codec
+    install_codec(engine, compact_writes=False)
     try:
         with Session(engine, autoflush=False) as db:
             db.execute(text('BEGIN'))

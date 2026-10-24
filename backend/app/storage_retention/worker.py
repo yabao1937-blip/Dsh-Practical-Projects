@@ -23,6 +23,9 @@ def maintenance_sessions(engine):
     def configure(connection, _):
         connection.execute('PRAGMA busy_timeout=250')
         connection.execute('PRAGMA foreign_keys=ON')
+    if getattr(engine, 'point_metadata_catalog', None) is not None:
+        from ..telemetry.metadata import install_codec
+        install_codec(maintenance, compact_writes=engine.point_metadata_catalog.compact_writes)
     return maintenance, sessionmaker(bind=maintenance, autoflush=False)
 
 

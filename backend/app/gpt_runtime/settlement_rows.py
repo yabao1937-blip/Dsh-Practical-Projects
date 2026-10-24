@@ -15,10 +15,12 @@ from ..decision_hourly.ash_settlement import settlement_snapshot
 from ..decision_hourly.models import DecisionCycleSample
 from ..decision_hourly.references import resolve_snapshots
 from ..telemetry.domain import iso_time
+from ..telemetry.metadata import unpack
+from point_metadata import MARKER
 
 
 _TOP = ('storage_version', 'evidence_policy', 'sources', 'coarse_ash', 'heavy_amount', 'total_ash',
-        'cadence_seconds', 'quality_sources')
+        'cadence_seconds', 'quality_sources', MARKER)
 _CELLS = ('belt501', 'belt502', 'float_ash', 'float_amount', 'coarse_amount')
 
 
@@ -54,7 +56,10 @@ def _snapshot(row):
     else:
         snapshot['cells'] = {key: _value(values['cell_'+key+'_kind'], values['cell_'+key+'_value'])
             for key in _CELLS if values['cell_'+key+'_kind'] is not None}
-    return settlement_snapshot(snapshot)
+    result = settlement_snapshot(snapshot)
+    if MARKER in snapshot:
+        result[MARKER] = snapshot[MARKER]
+    return result
 
 
 def load_rows(db, start):
@@ -73,7 +78,7 @@ def load_rows(db, start):
     # Apply the same consumer contract after decoding. This also preserves the
     # original explicit failure for malformed non-object cells, rather than
     # accepting a damaged snapshot as empty chemistry evidence.
-    snapshots = [_snapshot(row) for row in hot]
+    snapshots = [unpack(db, _snapshot(row), projected=True) for row in hot]
     resolved = resolve_snapshots(db, snapshots)
     rows.update({row.slot: SimpleNamespace(slot=row.slot, sampled_at=row.sampled_at,
         fingerprint=row.fingerprint, snapshot=snapshot) for row, snapshot in zip(hot, resolved)})

@@ -408,6 +408,18 @@ def create_router(manager=None):
         from .live_cache import transport_view
         return invoke(request, lambda current, owner: transport_view(current.path))
 
+    @router.get('/point-metadata/{key}')
+    def point_metadata(key: str, request: Request):
+        from point_metadata import Catalog, DIRECTORY, MetadataError, valid_key
+        def read(current, _owner):
+            if not valid_key(key):
+                raise BridgeError('readonly_request_rejected')
+            try:
+                return Catalog(Path(current.path).parent / DIRECTORY).get(key)
+            except (OSError, ValueError, MetadataError):
+                raise BridgeError('readonly_point_metadata_unavailable', 503) from None
+        return invoke(request, read)
+
     def cold(request, kind):
         from ..storage_retention.reader import (ColdDetailExpired, ColdReadError, ColdReadLimit,
                                                 transport_read, validate_transport_request)

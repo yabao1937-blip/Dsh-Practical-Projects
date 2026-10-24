@@ -2,6 +2,7 @@
 from copy import deepcopy
 from datetime import timedelta
 from uuid import uuid4
+import pytest
 
 from sqlalchemy import select
 
@@ -22,6 +23,13 @@ from app.telemetry.spool import DurableSpool
 from test_ash_settlement import assay
 from test_decision_sources import seeded
 from test_hourly_brief import HOUR, sessions
+
+
+@pytest.fixture(autouse=True)
+def compact_metadata_storage(sessions, tmp_path):
+    from point_metadata import Catalog
+    from app.telemetry.metadata import install_codec
+    install_codec(sessions.kw['bind'], catalog=Catalog(tmp_path/'point-metadata'))
 
 
 def _advance(sessions, now, maximum=24):

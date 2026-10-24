@@ -33,10 +33,10 @@ const base='http://127.0.0.1:8000',output=path.resolve(__dirname,'../../output/l
         await page.locator('#maintenance-nav').click();
         await page.locator('[data-page="page-telemetry"]').click();
         await page.waitForFunction(()=>document.querySelectorAll('#telemetry-tbody tr[data-point]').length>0);
-        assert.deepEqual(await page.locator('#page-telemetry th').allTextContents(),['测点名称','实时值','状态','采样时间']);
+        assert.deepEqual(await page.locator('#page-telemetry th').allTextContents(),['设备名','通道','测点名称','ITEMID','实时值','状态','采样时间']);
         const points=await page.locator('#telemetry-tbody tr[data-point]').evaluateAll(rows=>rows.map(row=>[row.dataset.source,row.dataset.point]));
         assert.equal(new Set(points.map(x=>JSON.stringify(x))).size,points.length);
-        const names=await page.locator('#telemetry-tbody tr[data-point] td:first-child').allTextContents();
+        const names=await page.locator('#telemetry-tbody .telemetry-point-name').allTextContents();
         assert.equal(new Set(names).size,names.length,'Same-description points remain distinguishable');
         assert.equal(await page.locator('#telemetry-reconnect').isDisabled(),true);
         assert.equal(requests.includes('/api/v1/state'),false,'KEP status needs no full-history download');

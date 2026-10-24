@@ -15,6 +15,7 @@ from sqlalchemy import select, text
 
 from ..hourly_brief.inputs import business_time
 from ..telemetry.domain import iso_time
+from ..telemetry.metadata import pack, unpack
 from .models import RetentionHourBasis
 
 POLICY = 'permanent-hour-chemistry-v1'
@@ -47,7 +48,7 @@ def _independent(value):
     return not isinstance(value, float) or isfinite(value)
 
 
-def _decode(saved):
+def _decode(saved, db=None):
     try:
         unpacker = zlib.decompressobj()
         raw = unpacker.decompress(saved.payload, MAX_UNPACKED_BYTES + 1)
@@ -56,7 +57,7 @@ def _decode(saved):
             raise ValueError('永久小时依据压缩长度异常')
         if hashlib.sha256(raw).hexdigest() != saved.checksum:
             raise ValueError('永久小时依据校验失败')
-        data = json.loads(raw)
+        data = unpack(db, json.loads(raw)) if db is not None else json.loads(raw)
         start, end = _hour(saved.start)
         if (data.get('policy') != POLICY or data.get('start') != iso_time(start)
                 or data.get('end') != iso_time(end) or saved.end != iso_time(end)):
@@ -130,11 +131,11 @@ def prepare_basis(db, start, rows, now):
         if hasattr(row, 'context_key'):
             frame['context_key'] = row.context_key
         frames.append(frame)
-    raw = _json(dict(policy=POLICY, start=iso_time(start), end=iso_time(end),
-                     rows=frames, stopped_intervals=stopped))
+    raw = _json(pack(db, dict(policy=POLICY, start=iso_time(start), end=iso_time(end),
+                     rows=frames, stopped_intervals=stopped)))
     result = dict(start=iso_time(start), end=iso_time(end), created_at=iso_time(now),
                   checksum=hashlib.sha256(raw).hexdigest(), payload=zlib.compress(raw))
-    _decode(SimpleNamespace(**result))
+    _decode(SimpleNamespace(**result), db)
     return result
 
 
@@ -143,7 +144,7 @@ def save_basis(db, prepared):
     from ..config import REMOTE_READONLY
     if REMOTE_READONLY:
         raise ValueError('只读测试服不能保存永久小时依据')
-    _decode(SimpleNamespace(**prepared))
+    decoded = _decode(SimpleNamespace(**prepared), db)
     if db.get_bind().dialect.name == 'sqlite':
         from sqlalchemy.dialects.sqlite import insert
         db.execute(insert(RetentionHourBasis).values(**prepared)
@@ -153,8 +154,7 @@ def save_basis(db, prepared):
         db.flush()
     saved = db.scalar(select(RetentionHourBasis).where(
         RetentionHourBasis.start == prepared['start']).execution_options(populate_existing=True))
-    _decode(saved)
-    if saved.checksum != prepared['checksum']:
+    if _decode(saved, db) != decoded:
         raise ValueError('永久小时依据已存在不同内容，保留原始记录')
     return saved
 
@@ -167,7 +167,7 @@ def _load(db, start):
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='retention_hour_bases'"))):
         return None
     saved = db.get(RetentionHourBasis, iso_time(start))
-    return _decode(saved) if saved else None
+    return _decode(saved, db) if saved else None
 
 
 def load_basis_rows(db, start):

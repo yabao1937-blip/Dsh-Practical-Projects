@@ -5,6 +5,7 @@ import zlib
 from sqlalchemy import select, delete, text
 from .models import DecisionCycleSample, DecisionCycleHour, DecisionEvidenceArchive
 from .references import resolve_snapshots
+from ..telemetry.metadata import pack, unpack
 
 
 def prepare_archive(db, cutoff):
@@ -19,12 +20,15 @@ def prepare_archive(db, cutoff):
         DecisionCycleSample.sampled_at < hour.end).order_by(DecisionCycleSample.slot)))
     data = [dict(slot=r.slot, sampled_at=r.sampled_at, context_key=r.context_key,
                  fingerprint=r.fingerprint, snapshot=r.snapshot) for r in rows]
-    raw = json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(',',':')).encode()
+    raw = json.dumps(pack(db, data), ensure_ascii=False, allow_nan=False, separators=(',',':')).encode()
     checksum = hashlib.sha256(raw).hexdigest()
     saved = db.get(DecisionEvidenceArchive,hour.start)
     if saved:
-        if saved.checksum != checksum or hashlib.sha256(zlib.decompress(saved.payload)).hexdigest() != checksum:
+        old_raw = zlib.decompress(saved.payload)
+        if (hashlib.sha256(old_raw).hexdigest() != saved.checksum
+                or unpack(db, json.loads(old_raw)) != data):
             raise ValueError('逐次证据归档校验不一致，保留原始记录')
+        checksum = saved.checksum
     else:
         payload = zlib.compress(raw)
         if zlib.decompress(payload) != raw:
@@ -89,7 +93,7 @@ def read_sample(db, slot):
     raw = zlib.decompress(saved.payload)
     if hashlib.sha256(raw).hexdigest() != saved.checksum:
         raise ValueError('逐次证据归档校验失败')
-    found = next((r for r in json.loads(raw) if r['slot']==slot),None)
+    found = next((r for r in unpack(db, json.loads(raw)) if r['slot']==slot),None)
     if found:
         found['snapshot'] = resolve_snapshots(db,[found['snapshot']])[0]
     return found
@@ -109,7 +113,7 @@ def archived_rows(db, start, *, project_snapshot=None):
     raw=zlib.decompress(saved.payload)
     if hashlib.sha256(raw).hexdigest()!=saved.checksum:
         raise ValueError('逐次证据归档校验失败')
-    rows = json.loads(raw)
+    rows = unpack(db, json.loads(raw))
     snapshots = [r['snapshot'] for r in rows]
     if project_snapshot is not None:
         snapshots = [project_snapshot(s) for s in snapshots]

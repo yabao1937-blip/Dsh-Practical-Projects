@@ -114,7 +114,8 @@ def _decisions(db, start, end, limit):
         raw = zlib.decompress(archived.payload)
         if sha256(raw).hexdigest() != archived.checksum:
             raise ValueError('Existing decision archive checksum failed; nothing deleted')
-        data = json.loads(raw)
+        from ..telemetry.metadata import unpack
+        data = unpack(db, json.loads(raw))
         if len(data) != archived.sample_count or len(data) > limit:
             raise ValueError('Existing decision archive row count is invalid')
         packed = {r['slot']: r for r in data}

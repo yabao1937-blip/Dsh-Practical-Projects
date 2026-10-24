@@ -11,10 +11,12 @@ from app.telemetry.domain import definition_id, normalize, utc_now
 from app.telemetry.models import TelemetryPoint
 from app.telemetry.repository import TelemetryRepository, latest_view
 from app.telemetry.views import ensure_sqlite_views
+from app.telemetry.metadata import install_codec
 
 
 def setup(tmp_path, points):
     engine = create_engine(f"sqlite:///{tmp_path / 'instruments.db'}")
+    install_codec(engine)
     Base.metadata.create_all(engine)
     ensure_sqlite_views(engine)
     cfg = CollectorConfig(points=points)
@@ -23,7 +25,7 @@ def setup(tmp_path, points):
     return engine, cfg, repo
 
 
-def test_exact_six_columns_preserve_zero_false_and_unread_points(tmp_path):
+def test_sql_dynamic_columns_preserve_zero_false_and_unread_points(tmp_path):
     points = [PointConfig(key=key, name=key, node_id=f"ns=2;s={key}", device="PLC", tag_name=key,
         description="说明", item_id=f"PLC.Device.{key}", value_type="boolean" if key == "run" else "number")
         for key in ["zero", "run", "unread"]]
@@ -34,11 +36,11 @@ def test_exact_six_columns_preserve_zero_false_and_unread_points(tmp_path):
         repo.persist(cfg, "owner", {"source_id":cfg.source_id, "batch_id":uuid.uuid4().hex, "samples":samples})
         with engine.connect() as db:
             result = db.execute(text("SELECT * FROM online_instruments"))
-            assert list(result.keys()) == ["设备", "标签名", "说明", "ItemID", "值", "时间"]
+            assert list(result.keys()) == ["来源", "点位", "说明", "值", "时间"]
             rows = {r[1]:tuple(r) for r in result}
-            assert rows["zero"][4] == 0 and rows["run"][4] == 0
-            assert rows["unread"][4:] == (None, None)
-            assert rows["zero"][:4] == ("PLC", "zero", "说明", "PLC.Device.zero")
+            assert rows["zero"][3] == 0 and rows["run"][3] == 0
+            assert rows["unread"][3:] == (None, None)
+            assert rows["zero"][:3] == (cfg.source_id, "zero", "说明")
     finally:
         engine.dispose()
 

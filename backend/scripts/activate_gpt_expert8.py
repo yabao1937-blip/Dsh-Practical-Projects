@@ -37,6 +37,8 @@ def main():
     backup.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(database.resolve().as_uri()+'?mode=ro', uri=True) as source, sqlite3.connect(backup) as target:
         source.backup(target)
+    from point_metadata import copy_catalog
+    copy_catalog(database, backup)
     with SessionLocal.begin() as db:
         row = activate(db, artifact)
         evidence = dict(revision=row.id, artifact_id=row.artifact_id, activated_at=row.activated_at,

@@ -427,6 +427,8 @@ def backup_database(tag: str = "force") -> str | None:
                 bck.close()
         finally:
             con.close()
+        from point_metadata import copy_catalog
+        copy_catalog(src, dest)
         # Certification is independent of copying: large/timeout copies remain
         # protected unverified recovery snapshots, not deletion candidates.
         _certify_migration_backup(dest, created_at=created_at, db_path=Path(src))

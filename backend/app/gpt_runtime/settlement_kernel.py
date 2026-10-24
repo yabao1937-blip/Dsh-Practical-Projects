@@ -18,6 +18,8 @@ from ..decision_hourly.references import VERSION, chunks
 from ..models import ManualMeasurement
 from ..telemetry.domain import iso_time
 from ..telemetry.models import TelemetryReading
+from ..telemetry.metadata import unpack
+from point_metadata import MARKER
 from .settlement_rows import load_rows as lossless_rows
 
 
@@ -86,7 +88,7 @@ def _columns():
     result = [func.json_array(func.json_type(column, '$.sources'),
         func.json_type(column, '$.sources.resolved_choices'), func.json_type(column, '$.cells')).label('root_types'),
         func.json_extract(column, '$.storage_version', '$.evidence_policy',
-            '$.sources.resolved_choices').label('root_values')]
+            '$.sources.resolved_choices', '$.'+MARKER).label('root_values')]
     for key, fields in _CELLS.items():
         path = '$.'+key if key in _TOP_CELLS else '$.cells.'+key
         stored_fields = func.json_extract(column, path+'.fields')
@@ -107,10 +109,12 @@ def _columns():
 def _decode(row):
     data = row._mapping
     source_kind, choices_kind, cells_kind = json.loads(data['root_types'])
-    version, policy, choices = json.loads(data['root_values'])
+    version, policy, choices, metadata = json.loads(data['root_values'])
     if source_kind not in (None, 'object') or cells_kind not in (None, 'object'):
         raise _UnsupportedKernel()
     result = {'storage_version': version, 'evidence_policy': policy, 'cells': {}}
+    if metadata is not None:
+        result[MARKER] = metadata
     if source_kind is not None:
         result['sources'] = {'resolved_choices': choices} if choices_kind is not None else {}
     for key, fields in _CELLS.items():
@@ -190,7 +194,7 @@ def _archive(db, start):
     raw = zlib.decompress(saved.payload)
     if hashlib.sha256(raw).hexdigest() != saved.checksum:
         raise ValueError('逐次证据归档校验失败')
-    return [dict(row, snapshot=kernel_snapshot(row['snapshot'])) for row in json.loads(raw)]
+    return [dict(row, snapshot=kernel_snapshot(row['snapshot'])) for row in unpack(db, json.loads(raw))]
 
 
 def load_kernel_rows(db, start):
@@ -212,7 +216,8 @@ def load_kernel_rows(db, start):
             DecisionCycleSample.fingerprint, *_columns()).where(
                 DecisionCycleSample.sampled_at >= iso_time(start),
                 DecisionCycleSample.sampled_at < iso_time(start+timedelta(hours=1))).order_by(DecisionCycleSample.slot)))
-        snapshots = _resolve(db, [row['snapshot'] for row in archived]+[_decode(row) for row in hot])
+        snapshots = _resolve(db, [row['snapshot'] for row in archived]+
+            [kernel_snapshot(unpack(db, _decode(row), projected=True)) for row in hot])
         rows = {row['slot']: SimpleNamespace(**dict(row, snapshot=snapshot))
             for row, snapshot in zip(archived, snapshots[:len(archived)])}
         rows.update({row.slot: SimpleNamespace(slot=row.slot, sampled_at=row.sampled_at,

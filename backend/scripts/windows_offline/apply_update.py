@@ -31,7 +31,7 @@ def digest(path):
 
 def allowed(name):
     return (name.startswith(('frontend/','backend/app/','backend/migrations/')) or name in {
-        'backend/client_mode.py','backend/serve.py','backend/collector.py',
+        'backend/client_mode.py','backend/serve.py','backend/collector.py','backend/point_metadata.py',
         'backend/scripts/storage_retention.py',
         'backend/scripts/start_server.ps1','backend/scripts/start_collector.py','backend/scripts/watchdog_server.ps1'})
 
@@ -125,7 +125,7 @@ def collector_changed(manifest):
     """These files are imported by the long-lived collector or define its schema."""
     return manifest.get('profile') != 'query-only-hotfix' and ('collector_history_interval_seconds' in manifest or any(
         name.startswith(('backend/app/telemetry/','backend/migrations/')) or name in {
-            'backend/collector.py','backend/client_mode.py','backend/scripts/start_collector.py',
+            'backend/collector.py','backend/client_mode.py','backend/point_metadata.py','backend/scripts/start_collector.py',
             'backend/app/database.py','backend/app/config.py','backend/app/models.py',
             'backend/app/schema_upgrade.py','backend/app/decision_hourly/models.py'}
         for name in manifest['files']))
@@ -443,6 +443,15 @@ def backup_database(root,backup,report=lambda stage,message:None,*,timeout=1200,
                 copied = structure_fingerprint(source)
             finally:
                 source.rollback()
+            catalog_path = path.parent/'point-metadata'
+            module_path = root/'backend/point_metadata.py'
+            if module_path.is_file():
+                spec = importlib.util.spec_from_file_location('dmcs_backup_point_metadata', module_path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                module.copy_catalog(path, backup/'dense_medium.db')
+            elif catalog_path.exists() or target.execute("SELECT 1 FROM sqlite_master WHERE name='point_metadata_storage'").fetchone():
+                raise RuntimeError('Point metadata backup support is missing; backup cannot be certified')
             size = (backup/'dense_medium.db').stat().st_size
             full_check_limit = MANUAL_CHECK_MIN_BYTES if defer_large_snapshot_check else FULL_CHECK_MAX_BYTES
             if size <= full_check_limit:
