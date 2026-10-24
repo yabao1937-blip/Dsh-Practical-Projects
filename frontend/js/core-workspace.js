@@ -1,4 +1,4 @@
-/* Read-only test workspace shell. Legacy production and DS pages keep their readers. */
+/* Read-only test workspace shell. Analysis pages retain their historical readers. */
 const CoreWorkspace = {
     installed:false,
     install() {
@@ -9,13 +9,9 @@ const CoreWorkspace = {
         maintenance.hidden=false;
         document.getElementById('maintenance-nav').hidden=false;
         const descriptions={
-            'page-overview':'原密度视图 · 业务数据导出与恢复',
-            'page-collect':'采集点位状态 · 补录记录',
+            'page-telemetry':'KEP 实时值 · 采集连接状态',
             'page-coarse':'GPT / DS 分析 · 模型训练与版本核对',
             'page-float':'浮精历史与影响分析',
-            'page-import':'批量导入 · 数据校验',
-            'page-brief':'小时记录 · 人工反馈',
-            'page-history':'历史采集与业务数据查询',
         };
         const tools=document.getElementById('maintenance-pages');
         for (const item of [...document.querySelectorAll('.main-nav .nav-item')]) {
@@ -33,7 +29,6 @@ const CoreWorkspace = {
             App.goToPage('page-decision');
             setTimeout(() => {if(DecisionOverviewPage.active()) DecisionOverviewPage.select('raw-ash');}, 80);
         });
-        document.getElementById('maintenance-backup').addEventListener('click', () => App.goToPage('page-overview'));
         document.getElementById('maintenance-diagnostics').addEventListener('click', async () => {
             await window.Operations?.refresh();this.renderDiagnostics();
         });

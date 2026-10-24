@@ -144,7 +144,7 @@ from sqlalchemy.sql.schema import MetaData
 MetaData.create_all = forbidden_writer
 import app.schema_upgrade
 import app.telemetry.views
-import app.hourly_brief.worker
+import app.decision_hourly.worker
 app.schema_upgrade.upgrade_schema = forbidden_writer
 app.telemetry.views.ensure_sqlite_views = forbidden_writer
 
@@ -153,7 +153,7 @@ async def forbidden_lifespan(app):
     forbidden_writer()
     yield
 
-app.hourly_brief.worker.lifespan = forbidden_lifespan
+app.decision_hourly.worker.lifespan = forbidden_lifespan
 
 real_write_text = Path.write_text
 def checked_write_text(path, *args, **kwargs):
@@ -229,8 +229,6 @@ def test_localhost_writes_are_blocked_but_read_calculations_work(remote_runtime)
                 ('POST', '/api/v1/manual-measurements'),
                 ('PATCH', '/api/v1/decision/sources'),
                 ('POST', '/api/v1/telemetry/collector/start'),
-                ('POST', '/api/v1/import/apply'),
-                ('DELETE', '/api/v1/records/1'),
             ]:
                 response = client.request(method, path, json={})
                 assert response.status_code == 403, (path, response.status_code, response.text)

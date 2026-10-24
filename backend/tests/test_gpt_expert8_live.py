@@ -16,7 +16,7 @@ from app.gpt_coarse.models import GptCoarseRevision
 from app.services.decision_live import calculate
 from app.services.decision_sources import shared_snapshot
 from app.services.state import load_store
-from app.hourly_brief.service import build_snapshot
+from legacy_hourly_reference import build_snapshot
 from app.decision_hourly.service import context_definition, record, build_hour
 from app.decision_hourly.models import DecisionCycleSample
 from app.decision_hourly.statistics import hour_advice

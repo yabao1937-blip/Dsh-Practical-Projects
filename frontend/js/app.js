@@ -3,7 +3,7 @@
    - store：内存数据模型（coarseCoal/floatCoal/calcLogs/coarseModel 等）
    - saveStore/loadStore：localStorage 持久化，http 下额外镜像 PUT /api/v1/state
    - 算法：取值链 resolve*、总灰分 calcTotalAsh、密度建议 computeDensityGuidance、
-           粗灰预测 predictCoarseAsh、推测简报 buildHourlyBrief
+           粗灰预测 predictCoarseAsh
    - 训练：DS _trainCoarseDs / GPT _trainCoarseRows + retrainCoarseModelAsync（后端同算法）
    ======================================== */
 
@@ -150,10 +150,8 @@ const App = {
         // 密度计：纯手动录入（每次采样时录入实际密度计数值），系统只给"建议密度"展示，不自动写入密度计
         if (this.store.densityAutoOn == null) { this.store.densityAutoOn = false; this.saveStore(true); }
         if (!this.store.guideScheme) { this.store.guideScheme = 'total'; this.saveStore(true); }
-        this._syncGuideSchemeBtn();
         // 切换来源只决定当前使用哪个值，刷新页面不得删除已保存的人工总灰分。
         if (this.store.totalAshManualOn == null) { this.store.totalAshManualOn = false; this.saveStore(true); }
-        this._syncTotalAshBtn();
         if (!this.store.floatAshInput) { this.store.floatAshInput = { manual: null }; this.saveStore(true); }
         if (!this.store.coarseCalc) { this.store.coarseCalc = { screen315: null, waterUnder: null }; this.saveStore(true); }
         if (!this.store.instrumentInputs) {
@@ -203,8 +201,7 @@ const App = {
         if (this.isReadOnlyTest()) this.renderAlerts();
         else this.checkAlerts();
         // 只初始化首页（当前可见页）
-        const initialPage = this._pendingPage || (window.location.hash === '#decision' || this.isReadOnlyTest()
-            ? 'page-decision' : 'page-overview');
+        const initialPage = this._pendingPage || 'page-decision';
         this._pendingPage = null;
         this.goToPage(initialPage);
     },
@@ -804,133 +801,8 @@ const App = {
     },
 
     // 导出数据备份为 Excel/CSV 文件
-    exportData() {
-        const now = new Date();
-        const pad = n => String(n).padStart(2, '0');
-        const ts = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-        const fileName = `密控系统数据备份_${ts}.csv`;
-
-        // 每个 store 数组对应一个 Sheet（xlsx-lite 只输出 CSV，所以合并到一个文件）
-        const sheetNames = {
-            magneticTail: '精磁尾',
-            rawSlime: '原煤煤泥',
-            coarseCoal: '粗煤泥',
-            floatCoal: '浮选',
-            regressionModels: '回归模型',
-            calcLogs: '计算日志',
-            manualEntries: '手工录入',
-            importLogs: '导入日志',
-            alerts: '告警'
-        };
-
-        // 用第一个有数据的数组生成 CSV
-        let allRows = [];
-        Object.keys(sheetNames).forEach(key => {
-            const arr = this.store[key];
-            if (arr && arr.length > 0) {
-                // 写入分节标题
-                allRows.push([`=== ${sheetNames[key]} ===`]);
-                if (arr.length > 0) {
-                    const headers = Object.keys(arr[0]);
-                    allRows.push(headers);
-                    arr.forEach(item => {
-                        allRows.push(headers.map(h => item[h] !== undefined ? item[h] : ''));
-                    });
-                }
-                allRows.push([]); // 空行分隔
-            }
-        });
-
-        if (allRows.length === 0) {
-            this.showToast('暂无数据可导出', 'warning');
-            return;
-        }
-
-        const ws = XLSX.utils.aoa_to_sheet(allRows);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, '数据备份');
-        XLSX.writeFile(wb, fileName);
-        this.showToast('数据备份已导出: ' + fileName, 'success');
-    },
 
     // 导入数据备份文件
-    importBackup() {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.csv,.xlsx,.xls';
-        input.onchange = (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = async (ev) => {
-                try {
-                    const wb = await XLSX.read(ev.target.result, { type: 'array' });
-                    const ws = wb.Sheets[wb.SheetNames[0]];
-                    const raw = XLSX.utils.sheet_to_json(ws, { header: 1 });
-
-                    // 解析备份格式：按 === 分节 === 分隔各数组
-                    const sections = {};
-                    let currentSection = null;
-                    let currentHeaders = null;
-
-                    raw.forEach(row => {
-                        if (!row || row.length === 0) {
-                            currentHeaders = null;
-                            return;
-                        }
-                        const firstCell = String(row[0] || '');
-                        const match = firstCell.match(/^===\s*(.+?)\s*===$/);
-                        if (match) {
-                            currentSection = match[1].trim();
-                            currentHeaders = null;
-                            sections[currentSection] = [];
-                            return;
-                        }
-                        if (currentSection) {
-                            if (!currentHeaders) {
-                                currentHeaders = row.map(c => String(c || ''));
-                            } else {
-                                const obj = {};
-                                currentHeaders.forEach((h, i) => {
-                                    obj[h] = row[i] !== undefined && row[i] !== '' ? row[i] : undefined;
-                                });
-                                sections[currentSection].push(obj);
-                            }
-                        }
-                    });
-
-                    // 映射中文 section 名到 store key
-                    const sectionMap = {
-                        '精磁尾': 'magneticTail',
-                        '原煤煤泥': 'rawSlime',
-                        '粗煤泥': 'coarseCoal',
-                        '浮选': 'floatCoal',
-                        '回归模型': 'regressionModels',
-                        '计算日志': 'calcLogs',
-                        '手工录入': 'manualEntries',
-                        '导入日志': 'importLogs',
-                        '告警': 'alerts'
-                    };
-
-                    Object.keys(sections).forEach(secName => {
-                        const key = sectionMap[secName];
-                        if (key && sections[secName].length > 0) {
-                            this.store[key] = sections[secName];
-                        }
-                    });
-
-                    this.saveStore();
-                    this.refreshAllPages();
-                    this.showToast('数据备份导入成功，共恢复 ' +
-                        Object.keys(sections).filter(s => sections[s].length > 0).length + ' 个数据表', 'success');
-                } catch (err) {
-                    this.showToast('备份文件解析失败: ' + err.message, 'error');
-                }
-            };
-            reader.readAsArrayBuffer(file);
-        };
-        input.click();
-    },
 
     // 刷新所有已初始化页面
     refreshAllPages() {
@@ -938,9 +810,6 @@ const App = {
             DecisionOverviewPage.refresh();
         }
         if (this.isReadOnlyTest() && !this._readOnlyFullStateLoaded) return;
-        if (typeof OverviewPage !== 'undefined' && OverviewPage.chart) {
-            OverviewPage.refresh();
-        }
         if (typeof CoarsePage !== 'undefined' && CoarsePage.trendChart) {
             CoarsePage.refresh();
             CoarsePage.updateCharts();
@@ -951,19 +820,7 @@ const App = {
                 FloatPage.updateCharts();
             }
         }
-        if (typeof CollectPage !== 'undefined') {
-            CollectPage.loadHistory();
-        }
-        if (typeof ImportPage !== 'undefined') {
-            ImportPage.loadLogs();
-        }
         // 简报页已生成过才重渲染（没生成过就别在每次数据变动时白算一遍 263 行）
-        if (typeof BriefPage !== 'undefined' && BriefPage.result) {
-            BriefPage.render();
-        }
-        if (typeof HistoryPage !== 'undefined') {
-            // History page refreshes on demand via query button
-        }
     },
 
     // 导航切换
@@ -978,14 +835,14 @@ const App = {
         });
     },
 
-    // 以代码方式切页（弹窗里的「在简报页查看全部」等入口用），与点击导航行为一致
+    // 以代码方式切页，与点击导航行为一致
     goToPage(pageId) {
         const item = document.querySelector(`.nav-item[data-page="${pageId}"]`);
         const sec = pageId ? document.getElementById(pageId) : null;
         if (!item || !sec) return;
         const navigation = this._navigation = (this._navigation || 0) + 1;
         if (this._syncReady === false) { this._pendingPage = pageId; return; }
-        if (this.isReadOnlyTest() && !['page-decision','page-maintenance'].includes(pageId) && !this._readOnlyFullStateLoaded) {
+        if (this.isReadOnlyTest() && !['page-decision','page-maintenance','page-telemetry'].includes(pageId) && !this._readOnlyFullStateLoaded) {
             this.showToast('正在按需读取主机历史数据…', 'info');
             return this.ensureReadOnlyHistory().then(() => {
                 if (navigation === this._navigation) this.goToPage(pageId);
@@ -1010,26 +867,11 @@ const App = {
                 case 'page-decision':
                     if (typeof DecisionOverviewPage !== 'undefined') DecisionOverviewPage.init();
                     break;
-                case 'page-overview':
-                    if (typeof OverviewPage !== 'undefined') OverviewPage.init();
-                    break;
-                case 'page-collect':
-                    if (typeof CollectPage !== 'undefined') CollectPage.init();
-                    break;
                 case 'page-coarse':
                     if (typeof CoarsePage !== 'undefined') CoarsePage.init();
                     break;
                 case 'page-float':
                     if (typeof FloatPage !== 'undefined') FloatPage.init();
-                    break;
-                case 'page-import':
-                    if (typeof ImportPage !== 'undefined') ImportPage.init();
-                    break;
-                case 'page-brief':
-                    if (typeof BriefPage !== 'undefined') BriefPage.init();
-                    break;
-                case 'page-history':
-                    if (typeof HistoryPage !== 'undefined') HistoryPage.init();
                     break;
             }
         } else {
@@ -1037,18 +879,6 @@ const App = {
             switch (pageId) {
                 case 'page-decision':
                     if (typeof DecisionOverviewPage !== 'undefined') DecisionOverviewPage.refresh();
-                    break;
-                case 'page-overview':
-                    if (OverviewPage.chart) {
-                        OverviewPage.refresh();
-                        OverviewPage.chart.resize();
-                    }
-                    break;
-                case 'page-collect':
-                    if (typeof CollectPage !== 'undefined') {
-                        CollectPage.renderTable();
-                        CollectPage.loadHistory();
-                    }
                     break;
                 case 'page-coarse':
                     if (CoarsePage.trendChart) {
@@ -1065,24 +895,6 @@ const App = {
                         FloatPage.updateCharts();
                         FloatPage.linkageChart.resize();
                         if (FloatPage.distChart) FloatPage.distChart.resize();
-                    }
-                    break;
-                case 'page-import':
-                    if (typeof ImportPage !== 'undefined') {
-                        ImportPage.loadLogs();
-                    }
-                    break;
-                case 'page-brief':
-                    // 切回简报页时重渲染：既刷新数据，也重新执行"滚到最新一行"。
-                    // （页面隐藏时 scrollHeight/clientHeight 为 0，渲染阶段的自动滚动会失效，
-                    //   所以必须在页面已可见之后再滚一次）
-                    if (typeof BriefPage !== 'undefined' && BriefPage.result) {
-                        BriefPage.render();
-                    }
-                    break;
-                case 'page-history':
-                    if (typeof HistoryPage !== 'undefined') {
-                        HistoryPage.setDefaultDates();
                     }
                     break;
             }
@@ -1107,48 +919,6 @@ const App = {
     },
 
     // 清除所有数据
-    clearData() {
-        if (this.isReadOnlyTest()) { this.showToast(window.Api.readOnlyMessage, 'warning'); return; }
-        if (!confirm('确定清除所有数据？此操作不可恢复。')) return;
-        localStorage.removeItem('dmcs_store');
-        this.store = {
-            magneticTail: [], rawSlime: [], coarseCoal: [], floatCoal: [],
-            regressionModels: [], calcLogs: [], manualEntries: [],
-            importLogs: [], alerts: [],
-            coarseModel: null, coarseModelVariants: {}, coarseModelHistory: [], coarseTolerance: 0.8,
-            coarseTrainRange: 'jun_jul',
-            coarseAshEma: null,
-            autoState: {},
-            amountInputs: {
-                totalAmount:  { mode: 'manual', manual: null, entry: null },
-                floatAmount:  { mode: 'auto',   manual: null },
-                coarseAmount: { mode: 'manual', manual: null },
-                denseAmount:  { mode: 'calc',   manual: null },
-            },
-            ashInputs: { totalAsh: { mode: 'auto', manual: null, entry: null } },
-            heavyAshBackcalc: null,
-            heavyAshInput: { manual: null },
-            heavyAshManualOn: false,
-            heavySamples: [],
-            ashTargetTol: 0.1,
-            guideScheme: 'total',
-            ashTarget: 8.50,
-            densityGuide: { maxStep: 0.02, deadband: 0.05 },
-            densityAutoOn: true,
-            coarseAshInput: { manual: null },
-            floatAshInput: { manual: null },
-            coarseCalc: { screen315: null, waterUnder: null },
-            instrumentInputs: {
-                ash_501: { manual: null }, ash_502: { manual: null },
-                density_actual: { manual: null },
-                scale_501: { manual: null }, scale_502: { manual: null },
-                density: { manual: null }, level_tail: { manual: null },
-            },
-        };
-        this.refreshAllPages();
-        this.checkAlerts();
-        this.showToast('所有数据已清除', 'success');
-    },
 
     // 检查告警（从实际 store 数据动态计算）
     checkAlerts() {
@@ -1236,89 +1006,6 @@ const App = {
     },
 
     // 训练回归模型（从精磁尾液位数据训练）
-    async trainModels() {
-        try {
-        const data = this.store.magneticTail;
-        if (data.length < 5) {
-            this.showToast('精磁尾液位数据不足（至少需要5条），请先录入精磁尾数据或加载测试数据', 'warning');
-            return;
-        }
-
-        const xArr = data.map(d => d.level);
-        const yArr = data.map(d => d.ash_content);
-        const models = [];
-
-        // 线性回归 (degree=1)
-        const lr = this.polyRegression(xArr, yArr, 1);
-        if (lr) {
-            models.push({
-                id: 1, model_type: 'linear',
-                params: lr.params.map(p => +p.toFixed(6)),
-                r_squared: +lr.rSquared.toFixed(6),
-                rmse: +lr.rmse.toFixed(4),
-                created_at: this.formatDate(new Date()),
-                data_points: data.length
-            });
-        }
-
-        // 二次多项式 (degree=2)
-        if (data.length >= 6) {
-            const pr2 = this.polyRegression(xArr, yArr, 2);
-            if (pr2) {
-                models.push({
-                    id: 2, model_type: 'poly2',
-                    params: pr2.params.map(p => +p.toFixed(6)),
-                    r_squared: +pr2.rSquared.toFixed(6),
-                    rmse: +pr2.rmse.toFixed(4),
-                    created_at: this.formatDate(new Date()),
-                    data_points: data.length
-                });
-            }
-        }
-
-        // 三次多项式 (degree=3)
-        if (data.length >= 8) {
-            const pr3 = this.polyRegression(xArr, yArr, 3);
-            if (pr3) {
-                models.push({
-                    id: 3, model_type: 'poly3',
-                    params: pr3.params.map(p => +p.toFixed(6)),
-                    r_squared: +pr3.rSquared.toFixed(6),
-                    rmse: +pr3.rmse.toFixed(4),
-                    created_at: this.formatDate(new Date()),
-                    data_points: data.length
-                });
-            }
-        }
-
-        if (models.length === 0) {
-            this.showToast('模型训练失败，数据可能存在问题', 'error');
-            return;
-        }
-
-        this.store.regressionModels = models;
-        this.saveStore();
-        this.checkAlerts();
-
-        // 同步训练粗精煤泥多因素模型（MLR + PLS），不阻塞单因素密度模型
-        let coarseMsg = '';
-        try {
-            const ok = await this.retrainCoarseModelAsync();
-            if (ok) {
-                const cm = this.store.coarseModel;
-                coarseMsg = `；粗精煤泥多因素模型[${cm.production.toUpperCase()}] R²=${cm[cm.production].metrics.r2.toFixed(3)} 合格率=${cm[cm.production].metrics.passRate.toFixed(0)}%`;
-            }
-        } catch (e) {
-            console.warn('粗精煤泥多因素模型训练失败:', e);
-        }
-
-        this.refreshAllPages();
-        this.showToast(`模型训练成功，共训练 ${models.length} 个单因素模型（${models.map(m => m.model_type).join('、')}）${coarseMsg}`, 'success');
-        } catch (err) {
-            console.error('模型训练错误:', err);
-            this.showToast('模型训练出错: ' + err.message, 'error');
-        }
-    },
 
     // 多项式回归（degree 阶）返回 { params: [a_d, ..., a_1, a_0], rSquared, rmse }
     polyRegression(xArr, yArr, degree) {
@@ -1401,7 +1088,7 @@ const App = {
         const configured = String(item?.unit || '').trim();
         if (configured) return configured;
         const belt = /^TIA_3_4\.TIA_3_4\.(501|502)\/COAL_CAP$/.exec(item?.item_id || '');
-        if (belt) return (typeof CollectPage !== 'undefined' ? CollectPage.instruments.find(i => i.id === `scale_${belt[1]}`)?.unit : null) || 't/h';
+        if (belt) return 't/h';
         if (item?.item_id === 'TIA_3_1.TIA_3_1.301/COAL_CAP') return 't/h';
         if (['TIA_3_1.TIA_3_1.202/ASH_R_INS','TIA_3_5.TIA_3_5.JMCWC/LEVEL_B'].includes(item?.item_id)) return '%';
         const density = item?.key === 'a303_a304_density_average' ||
@@ -1409,7 +1096,7 @@ const App = {
         if (!density) return '';
         // Reuse the established instrument unit without changing telemetry
         // definitions or the units attached to retained raw samples.
-        return (typeof CollectPage !== 'undefined' ? CollectPage.instruments.find(i => i.id === 'density')?.unit : null) || 'g/cm³';
+        return 'g/cm³';
     },
 
     formatDate(d) {
@@ -1650,8 +1337,6 @@ const App = {
 
     // 量数据变化后联动刷新相关页面（总览/粗精煤泥/浮精；未初始化的页面访问时会自行读取）
     notifyAmountChange() {
-        if (typeof OverviewPage !== 'undefined' && OverviewPage.chart) OverviewPage.refresh();
-        if (typeof CollectPage !== 'undefined' && document.getElementById('collect-tbody')) CollectPage.renderTable();
         if (typeof CoarsePage !== 'undefined' && CoarsePage.trendChart) { CoarsePage.refresh(); CoarsePage.updateCharts(); }
         if (typeof FloatPage !== 'undefined' && FloatPage.linkageChart) { FloatPage.refresh(); FloatPage.updateCharts(); }
     },
@@ -2037,19 +1722,6 @@ const App = {
         };
     },
 
-    applyDensityGuideSettings() {
-        const msEl = document.getElementById('density-maxstep');
-        const tolEl = document.getElementById('ash-target-tol');
-        const ms = msEl ? parseFloat(msEl.value) : NaN;
-        const tol = tolEl ? parseFloat(tolEl.value) : NaN;
-        if (!isFinite(ms) || ms <= 0 || ms > 0.1) { this.showToast('钳制幅度需在 0.001~0.1 之间', 'error'); return; }
-        if (!isFinite(tol) || tol <= 0 || tol > 3) { this.showToast('达标容差需在 0~3 之间', 'error'); return; }
-        this.store.densityGuide = { maxStep: ms, deadband: (this.store.densityGuide && this.store.densityGuide.deadband) || 0.05 };
-        this.store.ashTargetTol = tol;
-        this.saveStore();
-        if (typeof OverviewPage !== 'undefined' && OverviewPage.chart) OverviewPage.refresh();
-        this.showToast(`已应用：钳制±${ms} g/cm³，达标容差±${tol}%`, 'success');
-    },
 
     // 密度指导计算（总灰分偏差驱动）：
     // 实际总灰分 = 在线仪表"总精煤灰分"同源值（手动化验 > 公式计算 > 录入 > 默认）；
@@ -2251,198 +1923,8 @@ const App = {
     },
 
     // 切换密度指导版本：总灰分版 / 重介精煤灰分版（持久化）
-    toggleGuideScheme() {
-        this.store.guideScheme = (this.store.guideScheme === 'heavy') ? 'total' : 'heavy';
-        this.saveStore();
-        this._onExternalInput();
-        this._syncGuideSchemeBtn();
-        if (typeof OverviewPage !== 'undefined' && OverviewPage.chart) OverviewPage.refresh();
-        this.showToast(`已切换为${this.store.guideScheme === 'heavy' ? '重介精煤灰分版' : '总灰分版'}密度指导`, 'info');
-    },
-    _syncGuideSchemeBtn() {
-        const btn = document.getElementById('btn-guide-scheme');
-        if (!btn) return;
-        const heavy = (this.store.guideScheme === 'heavy');
-        btn.textContent = heavy ? '重介精煤灰分版' : '总灰分版';
-        btn.title = heavy ? '当前：重介精煤灰分版（偏差=实测重介灰分−目标重介灰分）点击切换总灰分版' : '当前：总灰分版（偏差=实际总灰分−目标总灰分）点击切换重介精煤灰分版';
-        btn.classList.toggle('btn-primary', heavy);
-    },
 
-    // ============================================================
-    //  推测简报：三表数据 1h 对齐 + 逐小时重建在线仪表状态
-    //  表头：左侧静态数据(皮带秤/粗精煤泥量/重介灰分/总精煤量)，右侧 建议密度|实测密度 + 预测粗灰|实测粗灰
-    // ============================================================
-    BRIEF_HEADERS: ['时间',
-                    '501皮带秤(t/h)', '502皮带秤(t/h)', '粗精煤泥量(t/h)', '重介精煤灰分(%)', '总精煤量(t/h)',
-                    '501皮带灰分仪(%)', '502皮带灰分仪(%)', '精磁尾液位(%)', '浮精灰分(%)', '浮精量(t/h)', '总精煤灰分(%)',
-                    '建议密度(g/cm³)', '实测密度(g/cm³)', '预测粗精煤泥灰分(%)', '实测粗精煤泥灰分(%)'],
 
-    buildHourlyBrief() {
-        const tol = (this.store.ashTargetTol != null) ? this.store.ashTargetTol : 0.1;
-        const target = (this.store.ashTarget != null) ? this.store.ashTarget : 8.50;
-        const scheme = (this.store.guideScheme === 'heavy') ? 'heavy' : 'total';
-        const lim = this.getDensityGuide();
-        const COARSE_AMT = 40;                        // 粗精煤泥量恒值（三表无数据源，沿用当前默认）
-        const SCALE_501 = 268.5, SCALE_502 = 235.2;   // 皮带秤恒值（三表无数据源）
-        const TOTAL_AMT = +(SCALE_501 + SCALE_502).toFixed(1);   // 503.7
-        // 2026-09 工艺确认:501=总混配(在线总灰分),502=仅重介(在线重介灰分);
-        // 默认值随之校正(旧 8.52/10.68 方向颠倒)。heavyAsh 走 getHeavyAsh(502 在线链)。
-        // 注意：ash501 **没有**默认值 —— 501 未接入时该列留空，不用常量冒充实测
-        // （与后端 brief.DEF 一致：真实库 360 条 ash_density 全部 belt=502、零条 501）
-        const DEF = { ash502: 7.9, density: 1.450, level: 55, floatAsh: 9.85 };
-
-        const toTs = t => { const d = new Date(t); return isNaN(d) ? null : d.getTime(); };
-
-        // 表1 粗精煤泥多因素（液位 + 实测315灰分 + 模型因子）
-        const coarseRecs = (this.store.coarseCoal || [])
-            .map(r => ({ t: toTs(r.timestamp), r })).filter(x => x.t != null).sort((a, b) => a.t - b.t);
-        // 表2 浮精
-        const floatRecs = (this.store.floatCoal || [])
-            .map(r => ({ t: toTs(r.timestamp), r })).filter(x => x.t != null).sort((a, b) => a.t - b.t);
-        // 表3 灰分密度（按皮带解析 501/502 灰分 + 密度）
-        const adRecs = [];
-        (this.store.calcLogs || []).forEach(l => {
-            if (!['ash_density', 'ash_meter', 'density_meter'].includes(l.calc_type)) return;
-            const t = toTs(l.timestamp); if (t == null) return;
-            try {
-                const v = JSON.parse(l.input_json || '{}');
-                const d = this.measurementNumber(l.calc_type === 'density_meter' ? v.value : v.density);
-                const a = this.measurementNumber(l.calc_type === 'ash_meter' ? v.value : v.ash_content);
-                const density = d != null && d >= 1.3 && d <= 1.65 ? d : null;
-                adRecs.push({ t, belt: String(v.belt || ''), ash: a != null && a >= 0 && a <= 100 ? a : null, density });
-            } catch (e) { /* 忽略坏记录 */ }
-        });
-        (this.store.heavySamples || []).forEach(s => {
-            const t = toTs(s.timestamp || s.ts), ash = this.measurementNumber(s.ash_content);
-            if (t != null && ash != null && ash >= 0 && ash <= 100) adRecs.push({ t, belt: 'sample', ash, density: null });
-        });
-        adRecs.sort((a, b) => a.t - b.t);
-
-        // 连续 1h 桶：三表最早~最晚，每个整点一行（两次采样之间的整点由递归预测/前向填充补位）
-        if (!coarseRecs.length && !floatRecs.length && !adRecs.length) return { headers: this.BRIEF_HEADERS, rows: [] };
-        const allTs = [].concat(coarseRecs.map(x => x.t), floatRecs.map(x => x.t), adRecs.map(x => x.t));
-        const hMin = Math.floor(Math.min(...allTs) / 3600000);
-        const hMax = Math.floor(Math.max(...allTs) / 3600000);
-        const hours = [];
-        for (let h = hMin; h <= hMax; h++) hours.push(h);
-
-        // 前向填充游标(每表独立);各表当前记录的时间戳用于 24h 新鲜度判定
-        const FRESH_MS = 24 * 3600000;   // 三表续传窗口:超过视为该表在本小时无数据
-        let iCoarse = 0, iFloat = 0, iAd = 0;
-        let curCoarse = null, curFloat = null;
-        let curCoarseT = -Infinity, curFloatT = -Infinity, curAdT = -Infinity;
-        let prevCoarse = null;     // 上一成行的 表1 记录（判断是否新采样）
-        let estCoarse = null;      // 递归软测量值（粗精煤泥灰分预测值）
-        let prevForecast = null;   // 上一成行的模型原始预测（用于增量）
-        let curAsh501 = null, curAsh502 = null, curDensity = null;
-        let heavyAsh = null, ash501T = -Infinity, ash502T = -Infinity, densityT = -Infinity, heavyT = -Infinity;
-
-        const pad = n => String(n).padStart(2, '0');
-        const fmtHour = hms => { const d = new Date(hms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`; };
-        const fmt = (v, n) => (v == null || !isFinite(v)) ? '' : (+v).toFixed(n);
-
-        const rows = [];
-        for (const h of hours) {
-            const hEnd = (h + 1) * 3600000;
-            while (iCoarse < coarseRecs.length && coarseRecs[iCoarse].t < hEnd) { curCoarse = coarseRecs[iCoarse].r; curCoarseT = coarseRecs[iCoarse].t; iCoarse++; }
-            while (iFloat < floatRecs.length && floatRecs[iFloat].t < hEnd) { curFloat = floatRecs[iFloat].r; curFloatT = floatRecs[iFloat].t; iFloat++; }
-            const densityBefore = curDensity;
-            while (iAd < adRecs.length && adRecs[iAd].t < hEnd) {
-                const a = adRecs[iAd];
-                if (a.belt === '501' && a.ash != null) { curAsh501 = a.ash; ash501T = a.t; }
-                if (a.belt === '502' && a.ash != null) { curAsh502 = a.ash; ash502T = a.t; }
-                if (['502', 'sample'].includes(a.belt) && a.ash != null) { heavyAsh = a.ash; heavyT = a.t; }
-                if (a.density != null) { curDensity = a.density; densityT = a.t; }
-                curAdT = a.t;
-                iAd++;
-            }
-
-            // 行存在规则(2026-09 用户确认:三表齐全才成行):粗精煤泥/浮精/灰分密度
-            // 各自最近一条记录距本小时结束 ≤ 24h 才生成该行,否则跳过——
-            // 三表时间窗不重叠的时段(如 6-7月只有表1)不再用陈旧续传凑行。
-            // 跳过时递归状态(prevForecast/prevCoarse/estCoarse)不推进,空窗后新采样自然重新锚定。
-            const threeOk = (curCoarse != null && hEnd - curCoarseT <= FRESH_MS
-                          && curFloat != null && hEnd - curFloatT <= FRESH_MS
-                          && hEnd - curAdT <= FRESH_MS);
-            if (!threeOk) continue;
-
-            // 实测密度：仅本小时有表3新密度测量时有值（稀疏），用于与建议密度对照
-            const densityMeasured = densityT >= hEnd - 3600000 && densityT < hEnd ? curDensity : null;
-
-            const level = (curCoarse && typeof curCoarse.level === 'number') ? curCoarse.level : DEF.level;
-            const floatAsh = (curFloat && typeof curFloat.ash_content === 'number') ? curFloat.ash_content : DEF.floatAsh;
-            const floatAmt = (curFloat && typeof curFloat.coal_amount === 'number') ? curFloat.coal_amount : null;
-            const ash501 = hEnd - ash501T <= FRESH_MS ? curAsh501 : null;
-            const ash502 = hEnd - ash502T <= FRESH_MS ? curAsh502 : null;
-            const density = hEnd - densityT <= FRESH_MS ? curDensity : null;
-            if (hEnd - heavyT > FRESH_MS) heavyAsh = null;
-
-            // 粗精煤泥灰分实测 = 表1 315灰分（人工采样稀疏，仅采样时刻有值）
-            const isNewSample = (curCoarse != null && curCoarse !== prevCoarse);
-            const coarseMeasured = (isNewSample && curCoarse && typeof curCoarse.ash_content === 'number') ? curCoarse.ash_content : null;
-
-            // 模型原始预测（当前因子）
-            let forecast = null;
-            if (curCoarse) {
-                const p = this.predictCoarseAsh(curCoarse);
-                if (p != null && isFinite(p)) forecast = +p.toFixed(2);
-            }
-
-            // 递归软测量：基值=第一次采样；有采样→反馈重置；无采样→上一预测值+模型增量
-            if (isNewSample && coarseMeasured != null) {
-                estCoarse = +coarseMeasured.toFixed(2);                          // 采样反馈：覆盖预测
-            } else if (estCoarse != null && forecast != null && prevForecast != null) {
-                estCoarse = +(estCoarse + (forecast - prevForecast)).toFixed(2); // 上一预测值 + 模型增量
-            }
-            const coarseModel = estCoarse;
-
-            const heavyAmt = (floatAmt != null) ? +(TOTAL_AMT - floatAmt - COARSE_AMT).toFixed(1) : null;
-            const formulaOk = (heavyAmt != null && heavyAmt > 0 && floatAmt != null && floatAsh != null && coarseModel != null && heavyAsh != null);
-
-            // 总精煤灰分：公式优先（粗灰用递归软测量）；否则 501 直读（501=总混配皮带）
-            let totalAsh = null;
-            if (formulaOk) {
-                totalAsh = +this.calcTotalAsh(heavyAsh, heavyAmt, floatAsh, floatAmt, coarseModel, COARSE_AMT).toFixed(2);
-            } else if (ash501 != null) {
-                totalAsh = +ash501.toFixed(2);
-            } else {
-                totalAsh = null;   // 公式不完整且无在线总灰分 → 留空（常量不得作为实测值出现在导出表里）
-            }
-
-            // 建议密度：仅公式完整(有粗灰数据)时计算；缺粗灰数据时留空（避免仪表加权失真顶到1.60）
-            let rhoNew = null;
-            if (formulaOk && density != null) {
-                if (scheme === 'heavy') {
-                    const totalAmt = heavyAmt + floatAmt + COARSE_AMT;
-                    const targetHeavy = +((target * totalAmt - floatAsh * floatAmt - coarseModel * COARSE_AMT) / heavyAmt).toFixed(3);
-                    const deltaAHeavy = +(heavyAsh - targetHeavy).toFixed(3);
-                    const deltaA = +(deltaAHeavy * heavyAmt / totalAmt).toFixed(3);
-                    rhoNew = (Math.abs(deltaA) <= tol)
-                        ? density
-                        : Math.max(lim.rhoMin, Math.min(lim.rhoMax, +(density - Math.sign(deltaA) * this.expertAdjust(Math.abs(deltaA))).toFixed(3)));
-                } else {
-                    const deltaA = +(totalAsh - target).toFixed(3);
-                    rhoNew = (Math.abs(deltaA) <= tol)
-                        ? density
-                        : Math.max(lim.rhoMin, Math.min(lim.rhoMax, +(density - Math.sign(deltaA) * this.expertAdjust(Math.abs(deltaA))).toFixed(3)));
-                }
-            }
-
-            rows.push([
-                fmtHour(h * 3600000),
-                fmt(SCALE_501, 1), fmt(SCALE_502, 1), fmt(COARSE_AMT, 1), fmt(heavyAsh, 2), fmt(TOTAL_AMT, 1),
-                fmt(ash501, 2), fmt(ash502, 2), fmt(level, 1), fmt(floatAsh, 2), fmt(floatAmt, 1), fmt(totalAsh, 2),
-                fmt(rhoNew, 3), fmt(densityMeasured, 3),
-                fmt(coarseModel, 2), fmt(coarseMeasured, 2),
-            ]);
-            prevForecast = forecast;
-            prevCoarse = curCoarse;
-        }
-
-        // 行存在性由"三表齐全(24h内)"规则决定,不再事后过滤;数据对齐但公式缺项的行
-        // 保留(数据列有意义,建议密度列留空)
-        return { headers: this.BRIEF_HEADERS, rows };
-    },
 
     // ============================================================
     //  密度建议自动执行：每1秒执行一次建议（写入密度计），偏差进死区后自动停步
@@ -2523,55 +2005,6 @@ const App = {
 
     // 决策日志导出（Excel）：每行一条决策 + 其响应，直接作为 K(工况) 标定的输入表。
     // 不做导出的话日志只能通过 GET /api/v1/state 看 JSON，现场拿不到、进不了标定流程。
-    exportDensityDecisionLog() {
-        const log = this.store.densityDecisionLog || [];
-        if (!log.length) { this.showToast('暂无密度决策记录（真实调整密度后才会生成）', 'warning'); return; }
-        const SRC = { heavySamples: '采样记录', heavyAshInput: '在线仪表手动录入' };
-        const head = ['决策时间', '触发', '方案', '目标灰分', '容差',
-                      'ρ旧', 'ρ新', 'Δρ建议', 'ΔA等效', 'K', 'K来源', '重介灰分', '重介灰分来源', '总灰分',
-                      '带煤量', '原煤灰分', '脱粉473', '脱粉474', '系统A', '系统B', '系统401', '系统402',
-                      '工作面', '精磁尾液位', '实测密度',
-                      '响应状态', '响应时间', '滞后(分)', '响应来源', 'ρ实测', '重介灰分实测', 'Δρ实测', 'ΔA实测'];
-        const rows = log.map(e => {
-            const c = e.ctx || {};
-            const r = e.response;
-            const state = !r ? '待补记(未等到人工化验)'
-                        : r.invalidated ? `作废(${r.reason || ''})` : '已闭环';
-            return [
-                e.ts, e.trigger, e.scheme === 'heavy' ? '重介版' : '总灰分版', e.target, e.tol,
-                e.rhoCur, e.rhoNew, e.deltaRho, e.deltaA, e.kUsed, e.kSource, e.heavyAsh,
-                (c.heavyAshSource === 'manual' ? '手动(采样)'
-                    : c.measurementPolicy === 'measured_only' ? '自动(502测量)' : '旧版自动(可能含仿真)'), e.totalAsh,
-                c.coalAmount ?? '', c.rawAsh ?? '', c.desl473 ?? '', c.desl474 ?? '',
-                c.sysA ?? '', c.sysB ?? '', c.sys401 ?? '', c.sys402 ?? '', c.miningFace ?? '', c.levelTail ?? '',
-                c.densityActual ?? '',
-                state, r ? (r.ts || '') : '', r ? (r.lagMin ?? '') : '', r ? (SRC[r.source] || r.source || '') : '',
-                r ? (r.rhoNow ?? '') : '', r ? (r.heavyAshNow ?? '') : '',
-                r ? (r.dRhoActual ?? '') : '', r ? (r.dAActual ?? '') : '',
-            ];
-        });
-        const ws = XLSX.utils.aoa_to_sheet([head, ...rows]);
-        ws['!cols'] = head.map(h => ({ wch: Math.max(10, String(h).length * 2) }));
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, '密度决策日志');
-        // 附一张口径说明，避免拿到表的人误读 invalidated 行
-        const notes = [
-            ['字段', '说明'],
-            ['触发', 'retarget=系统按目标灰分重定密度；density_set=操作员手动设定密度'],
-            ['Δρ建议 / ΔA等效', '决策当时算出的建议修正量与等效总灰分偏差'],
-            ['K / K来源', 'K来源=default 表示数据不可辨识（闭环斜率非正）而回退经验值 0.075'],
-            ['响应状态', '待补记=决策后尚未出现人工化验；作废=窗口内又发生了新的密度决策，累积量无法归属'],
-            ['响应来源', '只取人工化验（采样记录 / 在线仪表手动录入）；不用在线仪表自动值——那是被控量，闭环下 ΔA≈0'],
-            ['滞后(分)', '从决策到取样化验的分钟数，用于判断过程是否已到位'],
-            ['重介灰分来源', '手动(采样)=操作员填的化验值优先；自动(502测量)=采用502读数。'
-                          + '旧版自动记录可能含仿真增量，标定前需核查；新记录不模拟调密后的灰分响应。'],
-            ['实测密度', '决策时的实测密度计读数（人工录入）。**仅记录、不参与建议密度的计算**；'
-                       + '与 ρ旧(在线密度计) 相减即为两台密度计的偏差，可用于标定在线密度计'],
-        ];
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(notes), '口径说明');
-        XLSX.writeFile(wb, `密度决策日志_${rows.length}条.xlsx`);
-        this.showToast(`密度决策日志已导出（${rows.length} 条）`, 'success');
-    },
 
     // 决策之后的第一条「人工化验」重介灰分采样(用于 K 标定的响应量)。
     // 为什么不用在线仪表：502 在线值就是本回路的被控量，闭环下回路会把灰分拉回目标，
@@ -2715,7 +2148,6 @@ const App = {
                 }
                 // diff≈0 → 保持（已到目标密度，等待下一次采样）
             }
-            if (typeof OverviewPage !== 'undefined' && OverviewPage.chart) OverviewPage.refresh();
         }, 1000);
         this.store.densityAutoOn = true;
         this.saveStore();
@@ -2958,19 +2390,6 @@ const App = {
         return '默认(模型)';
     },
 
-    setCoarseAshInput(patch) {
-        if (!this.store.coarseAshInput) this.store.coarseAshInput = { manual: null };
-        if ('manual' in patch) {
-            patch = Object.assign({}, patch);
-            patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
-        }
-        Object.assign(this.store.coarseAshInput, patch);
-        // 注：手动接管不再重置EMA状态——重置会使自动值瞬时变化误触发"自动接管"，让刚设的手工立即失效
-        // 人工改数 → 重置防震荡记忆，方向翻转不停自动执行
-        this._onExternalInput();
-        this.saveStore();
-        this.notifyAmountChange();
-    },
 
     // 粗精煤泥量：手动 > 计算(315筛子量−筛下水量，后续导入表提供)
     resolveCoarseAmount() {
@@ -3023,65 +2442,11 @@ const App = {
         return (this.store.floatCoal || []).length > 0 ? '录入' : '默认(仪表)';
     },
 
-    setFloatAshInput(patch) {
-        if (!this.store.floatAshInput) this.store.floatAshInput = { manual: null };
-        if ('manual' in patch) {
-            patch = Object.assign({}, patch);
-            patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
-        }
-        Object.assign(this.store.floatAshInput, patch);
-        // 人工改数 → 重置防震荡记忆，方向翻转不停自动执行
-        this._onExternalInput();
-        this.saveStore();
-        this.notifyAmountChange();
-    },
 
     // 更新灰分数据（总精煤灰分来源切换/化验录入）
-    setAshInput(key, patch) {
-        if (!this.store.ashInputs) this.store.ashInputs = {};
-        if (!this.store.ashInputs[key]) this.store.ashInputs[key] = { mode: 'auto', manual: null };
-        // 填写人工值时启用人工来源；只有显式清空输入才删除人工值。
-        if (key === 'totalAsh') {
-            if (typeof patch.manual === 'number' && isFinite(patch.manual) && patch.manual >= 0) {
-                this.store.totalAshManualOn = true;
-            } else if (patch.manual === null) {
-                this.store.totalAshManualOn = false;
-            }
-        }
-        if ('manual' in patch) {
-            patch = Object.assign({}, patch);
-            patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
-        }
-        Object.assign(this.store.ashInputs[key], patch);
-        // 人工改数 → 递增外部纪元（自动执行重算目标密度）
-        this._onExternalInput();
-        this.saveStore();
-        this.notifyAmountChange();
-    },
 
-    setTotalAshSource(manualOn) {
-        this.store.totalAshManualOn = !!manualOn;
-        this._onExternalInput();
-        this.saveStore();
-        this._syncTotalAshBtn();
-        this.notifyAmountChange();
-    },
 
     // 来源切换不制造新化验，也不删除已保存的人工值。
-    toggleTotalAshManual() {
-        this.setTotalAshSource(!this.store.totalAshManualOn);
-        this.showToast(this.store.totalAshManualOn
-            ? '已选择人工总灰分；公式核算值单独显示，各组分可继续录入'
-            : '已选择公式总灰分；原人工值已保留，可随时切回', 'info');
-    },
-    _syncTotalAshBtn() {
-        const btn = document.getElementById('btn-totalash-manual');
-        if (!btn) return;
-        const on = !!this.store.totalAshManualOn;
-        btn.textContent = on ? '总灰分修改：开' : '总灰分修改：关';
-        btn.classList.toggle('btn-primary', on);
-        btn.title = on ? '使用人工总灰分；组分可继续录入。切换来源保留人工值' : '使用公式核算总灰分。点击切回已保存的人工值';
-    },
 
     // 质量平衡反推（仅展示）：传实际总灰分得当前反推值，传目标总灰分得所需目标。
     // 不依赖密度，不缓存旧值、不限幅；异常结果应明示，不能改写成看似合理的灰分。
@@ -3173,28 +2538,6 @@ const App = {
         try { return this.resolveInstrument('ash_502'); } catch (e) { return null; }
     },
 
-    setHeavyAshInput(patch) {
-        if (!this.store.heavyAshInput) this.store.heavyAshInput = { manual: null };
-        if ('manual' in patch) {
-            patch = Object.assign({}, patch);
-            if (!Object.prototype.hasOwnProperty.call(patch, 'sampleAt')) patch.sampleAt = null;
-            patch.manualAt = (typeof patch.manual === 'number' && isFinite(patch.manual)) ? Date.now() : null;
-            // 双击填了值 = 明确想用手动值 → 自动切到手动档。
-            // （否则会出现"填了却不生效"的最糟意外；清空值时不动档位，计算值自然接管。）
-            if (typeof patch.manual === 'number' && isFinite(patch.manual)) {
-                patch.heavyAshManualOn = true;
-            }
-        }
-        if ('heavyAshManualOn' in patch) {
-            this.store.heavyAshManualOn = !!patch.heavyAshManualOn;
-            delete patch.heavyAshManualOn;
-        }
-        Object.assign(this.store.heavyAshInput, patch);
-        // 人工改数 → 递增外部纪元（自动执行重算目标密度）
-        this._onExternalInput();
-        this.saveStore();
-        this.notifyAmountChange();
-    },
 
     // ============================================================
     //  多因素回归引擎（MLR 多元线性回归 + PLS 偏最小二乘）

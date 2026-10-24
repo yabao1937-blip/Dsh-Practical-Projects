@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app import models
-from app.routers import assistant, overview
+from app.routers import assistant
 from app.services import resolvers
 from app.services.guidance import build_density_guidance, density_guard_state
 from app.services.migrate import _apply_in_session, _plan
@@ -134,17 +134,16 @@ def test_density_change_does_not_fabricate_ash_response():
 
 
 @pytest.mark.parametrize("case", ["constant", "heavy", "dwell"])
-def test_dashboard_and_assistant_share_guidance(monkeypatch, case):
+def test_assistant_uses_shared_guidance(monkeypatch, case):
     store = case_store(case)
     # 避免依赖真实时钟：驻留场景用同一数据闩锁。
     if case == "dwell":
         store = case_store("latch")
-    monkeypatch.setattr(overview, "load_store", lambda db: store)
     monkeypatch.setattr(assistant, "load_store", lambda db: store)
     engine = create_engine("sqlite://")
     models.Base.metadata.create_all(engine)
     with Session(engine) as db:
-        dashboard = overview.dashboard(db)["guidance"]
+        dashboard, _ = build_density_guidance(store)
         snapshot = assistant.build_snapshot(db)["guidance"]
     for key in ("valid", "hold", "direction", "reason", "scheme", "deltaA"):
         assert snapshot[key] == dashboard[key]
@@ -167,12 +166,6 @@ def test_action_protection_and_source_switch_survive_database_roundtrip():
     engine.dispose()
 
 
-def test_total_ash_workflow_in_frontend():
-    node = shutil.which("node")
-    if not node:
-        pytest.fail("Node.js is required for frontend workflow regression")
-    subprocess.run([node, str(SCRIPT.with_name("verify_total_ash_workflow.js"))],
-                   text=True, encoding="utf-8", capture_output=True, check=True)
 
 
 @pytest.mark.parametrize("manual_on", [True, False])

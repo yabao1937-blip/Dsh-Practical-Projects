@@ -46,12 +46,14 @@ jobs:
         run: pip check
 
       - name: 全量测试（conftest 已把库隔离到临时 SQLite，不碰真实数据）
-        run: python -m pytest -q
+        run: python -m pytest -q tests
 
       - name: 前端数据入口与错误处理回归
         run: |
           node scripts/verify_api_errors.js
-          node scripts/verify_total_ash_workflow.js
+          node scripts/verify_manual_measurement_component.js
+          node scripts/verify_core_workspace.js
+          node scripts/verify_readonly_frontend.js
           node scripts/verify_coarse_models.js
           node scripts/verify_operations.js
           node scripts/verify_telemetry_reconnect.js
@@ -181,9 +183,6 @@ jobs:
             $cases = @(
               @{ name = '镜像写路径'; file = 'scripts/verify_mirror_e2e.js'; allowReal = $null },
               @{ name = '密度决策日志'; file = 'scripts/verify_decision_log.js'; allowReal = '1' },
-              @{ name = '实测密度计(仅展示)'; file = 'scripts/verify_density_actual.js'; allowReal = '1' },
-              @{ name = '重介灰分来源与闭环'; file = 'scripts/verify_heavy_ash_source.js'; allowReal = '1' },
-              @{ name = '新化验不被驻留挡住'; file = 'scripts/verify_dwell_bypass.js'; allowReal = '1' },
               @{ name = '浮精页排除5月数据'; file = 'scripts/verify_float_may_excluded.js'; allowReal = '1' },
               @{ name = '粗精煤泥按日视图'; file = 'scripts/verify_daily_view.js'; allowReal = '1' }
             )

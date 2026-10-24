@@ -1,11 +1,24 @@
 import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from .service import observation_tick, maintenance_tick
 from .statistics import CADENCE, ARCHIVE_CADENCE
 
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    """Run the decision pipeline without the retired report generator."""
+    stop = asyncio.Event()
+    task = asyncio.create_task(run(stop))
+    try:
+        yield
+    finally:
+        stop.set()
+        await task
 
 
 def next_delay(now):

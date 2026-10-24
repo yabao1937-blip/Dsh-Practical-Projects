@@ -162,7 +162,7 @@ async function seed() {
         for (let i = 0; i < 60; i++) {
             try {
                 if (await evalJs("typeof App !== 'undefined' && App.__ready === true && !!App.store"
-                    + " && typeof CollectPage !== 'undefined' && typeof OverviewPage !== 'undefined'")) {
+                    + " && typeof DecisionOverviewPage !== 'undefined'")) {
                     appReady = true; break;
                 }
             } catch (e) { lastErr = e.message; }   // 记下来，别让失败没有信息量

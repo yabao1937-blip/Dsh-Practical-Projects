@@ -27,7 +27,11 @@ def test_state_roundtrip():
 
 def test_state_feeds_dashboard():
     client.put("/api/v1/state", json={**SEED, "_revision": client.get("/api/v1/state").json()["_revision"]})
-    d = client.get("/api/v1/overview/dashboard").json()
+    from app.services.guidance import build_density_guidance
+    from app.services.resolvers import resolve_coarse_ash
+    store = client.get("/api/v1/state").json()
+    guide, _ = build_density_guidance(store)
+    d = {"totalAsh": guide["actualTotal"], "coarseAsh": resolve_coarse_ash(store)}
     # 2026-09 皮带分工改造后:heavyAsh=502在线(8.1) → 公式 totalAsh=8.5488
     assert abs(d["totalAsh"] - 8.5488) < 1e-6
     assert abs(d["coarseAsh"] - 13.67) < 1e-6

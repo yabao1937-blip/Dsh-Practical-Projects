@@ -13,7 +13,7 @@ from app.database import Base, get_db
 from app.hourly_brief.columns import COLUMNS, cell
 from app.hourly_brief.inputs import Inputs, RAW_ASH, COAL_AMOUNT
 from app.hourly_brief.models import HourlyBriefRow, HourlyBriefSchedule
-from app.hourly_brief.service import tick, calculate, build_snapshot
+from legacy_hourly_reference import tick, calculate, build_snapshot
 from app.models import ManualMeasurement, CoarseModel, AutoState, Setting
 from app.services.density import calc_total_ash, compute_density_guidance
 from app.services.modeling import MLR_FEATURES
@@ -177,7 +177,7 @@ def test_auto_manual_subvalues_have_individual_cutoffs(sessions):
 
 
 def test_saved_legacy_model_without_feature_names_is_compatible(sessions):
-    from app.hourly_brief.service import settings_and_model
+    from legacy_hourly_reference import settings_and_model
     with sessions() as db:
         db.add(CoarseModel(method="mlr", is_current=True, trained_at="2026-09-22 09:24:38",
                           feature_names=None, intercept=10, coefs=[.1]+[0]*9))
@@ -273,34 +273,3 @@ def test_density_guard_uses_actual_driver_time_and_updated_settings_block():
     assert "调整过" in cells["suggested_density"]["reason"]
     calculate(cells, {"_unavailable_settings":["ash_target"]}, model(), HOUR)
     assert cells["suggested_density"]["value"] is None
-
-
-def test_get_is_read_only_and_day_filter_uses_beijing_midnight(sessions):
-    from app.main import app
-    def get_test_db():
-        with sessions() as db:
-            yield db
-    app.dependency_overrides[get_db] = get_test_db
-    try:
-        client = TestClient(app)
-        response = client.get("/api/v1/hourly-brief?day=2026-10-08").json()
-        assert response["rows"] == [] and response["next_hour"] is None
-        tick(HOUR - timedelta(minutes=1), sessions)
-        tick(HOUR, sessions)
-        response = client.get("/api/v1/hourly-brief?day=2026-10-08").json()
-        assert response["total"] == 1 and len(response["columns"]) == 17
-        assert client.get("/api/v1/hourly-brief?day=2026-10-07").json()["total"] == 0
-        assert client.get("/api/v1/hourly-brief?limit=99999").status_code == 422
-        assert client.post("/api/v1/hourly-brief").status_code == 405
-        from openpyxl import load_workbook
-        from io import BytesIO
-        export = client.get("/api/v1/hourly-brief/export", params={"hour":iso_time(HOUR)})
-        assert export.status_code == 200 and export.content.startswith(b"PK")
-        workbook = load_workbook(BytesIO(export.content))
-        assert workbook.sheetnames == ["小时推测简报", "数据来源与说明", "人工经验反馈"]
-        assert workbook.worksheets[0].max_column == 19
-        assert workbook.worksheets[0].max_row == 2
-        assert workbook.worksheets[1].max_row == 18
-        assert workbook.worksheets[0]["A2"].value == "2026-10-08 10:00:00"
-    finally:
-        app.dependency_overrides.pop(get_db, None)

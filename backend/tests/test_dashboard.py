@@ -7,6 +7,9 @@ from fastapi.testclient import TestClient
 from app import models
 from app.database import SessionLocal
 from app.main import app
+from app.services.state import load_store
+from app.services.guidance import build_density_guidance
+from app.services.resolvers import resolve_coarse_ash, resolve_float_ash, resolve_amount
 from app.services.migrate import apply
 
 BASE = Path(__file__).resolve().parent.parent / "data"
@@ -32,9 +35,13 @@ def _reset_db():
 def test_dashboard_roundtrip():
     _reset_db()
     apply(SEED)
-    r = client.get("/api/v1/overview/dashboard")
-    assert r.status_code == 200
-    d = r.json()
+    with SessionLocal() as db:
+        store = load_store(db)
+    guide, gain = build_density_guidance(store)
+    d = {"heavyAsh": guide["heavyAsh"], "density": guide["rhoCur"], "totalAsh": guide["actualTotal"],
+         "coarseAsh": resolve_coarse_ash(store), "floatAsh": resolve_float_ash(store),
+         "amounts": {key: resolve_amount(store, key) for key in ("denseAmount", "floatAmount", "coarseAmount", "totalAmount")},
+         "guidance": guide}
     assert d["heavyAsh"] == JS["heavyAsh"]
     assert d["density"] == JS["density"]
     assert abs(d["totalAsh"] - JS["totalAsh"]) < 1e-6

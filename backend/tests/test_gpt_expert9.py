@@ -87,7 +87,7 @@ def test_activation_time_new_table_isolation_and_full_hour_context(artifact,sess
         assert active(db,HOUR) is None  # Training earlier does NOT make model available before activation.
         assert shared_snapshot(db,HOUR)['model']['method']=='mlr'
         new=shared_snapshot(db,HOUR+timedelta(seconds=2))
-        from app.hourly_brief.service import build_snapshot
+        from legacy_hourly_reference import build_snapshot
         brief=build_snapshot(db,HOUR+timedelta(seconds=2))
         assert len(brief['cells'])==17
         assert list(brief['model_inputs'])==FEATURES

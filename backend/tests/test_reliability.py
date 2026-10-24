@@ -11,8 +11,6 @@ from sqlalchemy import create_engine
 from app.main import app
 from app.schema_upgrade import upgrade_schema
 from app.services import resolvers, training
-from test_brief import fixture_store
-from app.services.brief import build_hourly_brief
 
 client = TestClient(app)
 
@@ -22,25 +20,8 @@ def test_legacy_measurement_numbers(raw, expected):
     assert resolvers.measurement_number(raw) == expected
 
 
-def test_future_measurements_do_not_rewrite_past():
-    store = fixture_store()
-    before = build_hourly_brief(store)['rows']
-    store['heavyAshInput'] = {'manual': 20, 'manualAt': 1_900_000_000_000}
-    store['heavySamples'] = [{'timestamp': '2026-08-03 10:00:00', 'ash_content': 10, 'rho': 1.5}]
-    store['calcLogs'].append({'timestamp': '2026-08-03 10:00:00', 'calc_type': 'ash_meter',
-                              'input_json': json.dumps({'belt': '502', 'value': '10.4'})})
-    after = {r[0]: r for r in build_hourly_brief(store)['rows']}
-    assert all(after[row[0]] == row for row in before)
 
 
-def test_historical_channels_expire_independently():
-    store = fixture_store()
-    store['calcLogs'] = store['calcLogs'][:1] + [{
-        'timestamp': '2026-08-02 12:00:00', 'calc_type': 'ash_meter',
-        'input_json': json.dumps({'belt': '501', 'value': 9.5})}]
-    row = build_hourly_brief(store)['rows'][-1]
-    assert row[4] == row[7] == row[12] == ''
-    assert row[6] == row[11] == '9.50'
 
 
 def test_equal_count_concurrent_edit_is_rejected():

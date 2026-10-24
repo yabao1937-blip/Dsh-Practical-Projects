@@ -10,7 +10,7 @@ from sqlalchemy import delete, select
 from app.gpt_coarse.timing import POLICY, level_mean
 from app.services.decision_sources import shared_snapshot, identity
 from app.services.state import load_store
-from app.hourly_brief.service import build_snapshot
+from legacy_hourly_reference import build_snapshot
 from app.telemetry.domain import iso_time, normalize
 from app.telemetry.models import TelemetryReading, TelemetryPoint
 from app.decision_hourly.models import DecisionCycleSample

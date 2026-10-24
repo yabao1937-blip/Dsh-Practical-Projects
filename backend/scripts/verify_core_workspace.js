@@ -4,7 +4,7 @@ const source=name=>fs.readFileSync(path.join(__dirname,'../../frontend/js/'+name
 const classes=(initial=[])=>{const values=new Set(initial);return {add:v=>values.add(v),remove:v=>values.delete(v),contains:v=>values.has(v),toggle(v,on){const next=on ?? !values.has(v);next?values.add(v):values.delete(v);return next;}};};
 const tick=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
 function navigation() {
-    const ids=['page-decision','page-maintenance','page-coarse','page-overview'];
+    const ids=['page-decision','page-maintenance','page-coarse','page-float','page-telemetry'];
     const pages=Object.fromEntries(ids.map(id=>[id,{id,classList:classes(id==='page-decision'?['active']:[])}]));
     const items=ids.map(id=>({dataset:{page:id},classList:classes(),listeners:[],addEventListener(_,fn){this.listeners.push(fn);}}));
     const pending=[],timers=[],toasts=[],initialized=[];
@@ -26,7 +26,7 @@ function navigation() {
     assert.equal(f.pending.length,0,'startup click cannot start a parallel full read');
     f.app._syncReady=true;
     const old=f.app.goToPage('page-coarse');
-    const duplicate=f.app.goToPage('page-overview');
+    const duplicate=f.app.goToPage('page-float');
     assert.equal(f.pending.length,1,'historical navigation shares one full-state request');
     assert.equal(f.pages['page-decision'].classList.contains('active'),true,'core stays visible while loading');
     f.app.goToPage('page-maintenance');
@@ -40,10 +40,13 @@ function navigation() {
     const fail=bad.app.goToPage('page-coarse');bad.pending[0].reject(new Error('unavailable'));await fail;
     assert.equal(bad.pages['page-decision'].classList.contains('active'),true);
     assert.match(bad.toasts.at(-1).text,/核心页面仍可使用/);
-    const retry=bad.app.goToPage('page-overview');bad.pending[1].resolve({coarseCoal:[]});await retry;
-    assert.equal(bad.pages['page-overview'].classList.contains('active'),true,'failed lazy load remains retryable');
+    const retry=bad.app.goToPage('page-float');bad.pending[1].resolve({coarseCoal:[]});await retry;
+    assert.equal(bad.pages['page-float'].classList.contains('active'),true,'failed lazy load remains retryable');
     const gated=navigation();let legacy=0;
-    gated.ctx.FloatPage={refresh(){legacy++;}};gated.ctx.CollectPage={loadHistory(){legacy++;}};gated.ctx.ImportPage={loadLogs(){legacy++;}};
+    gated.app._syncReady=true;gated.app.goToPage('page-telemetry');
+    assert.equal(gated.pending.length,0,'KEP status never downloads the full business history');
+    assert.equal(gated.pages['page-telemetry'].classList.contains('active'),true);
+    gated.ctx.FloatPage={refresh(){legacy++;}};
     gated.app.refreshAllPages();assert.equal(legacy,0,'light startup never refreshes hidden legacy readers');
 
     let analysis=false,fetches=0;

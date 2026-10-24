@@ -29,10 +29,10 @@
 - 页面代码约定：
   - `coarse.js`：粗精煤泥灰分页
   - `float.js`：浮精影响分析页
-  - `import.js`：批量数据导入页
+  - `decision-overview.js`：决策总览核心界面
+  - `manual-measurements.js`：总览独立补录弹窗
   - `app.js`：全局数据 store 与模型
   - `api.js`：双轨数据层（`file://` 仅 localStorage；`http://` 额外整库镜像到后端 `/state`）
-  - `xlsx-lite.js`：无依赖的 xlsx 读取器（浏览器侧解析三表）
 - 同一批数据按不同生产系统重复导入时，同一采样时间只应显示/统计一条（已用 `_uniqueByTime` 处理）。
 - 前端与后端在算法/取值链上必须**逐值一致**（golden 对拍 <1e-6）：
   `backend/app/services/*.py` 与 `frontend/js/app.js` 是同一套公式的两份实现，

@@ -80,24 +80,15 @@ def test_loopback_exempt_from_token(token_on, local_client):
 def test_other_write_endpoints_require_token(token_on, remote_client):
     """不只是 /state：其余写接口同样要 token（逐条点名，避免漏掉某个路由）。"""
     cases = [
-        ("post", "/api/v1/records", {"category": "coarse", "ts": "2026-07-02 08:00:00"}),
         ("post", "/api/v1/samples/heavy-ash", {"ts": "2026-07-02 08:00:00", "rho": 1.5,
                                                "ash_content": 8.0}),
         ("put", "/api/v1/settings/ash_target", {"value": 8.5}),
-        ("put", "/api/v1/inputs/density", {"value": 1.5}),
-        ("post", "/api/v1/manual-entries", {"ts": "2026-07-02 08:00:00", "category": "coarse"}),
-        ("post", "/api/v1/migrate/localstorage", SEED),
     ]
     for method, url, body in cases:
         r = getattr(remote_client, method)(url, json=body)
         assert r.status_code == 401, f"{method.upper()} {url} 未受保护: {r.status_code}"
 
 
-@pytest.mark.parametrize("url", ["/api/v1/records/999999999", "/api/v1/manual-entries/999999999"])
-def test_delete_requires_token_before_record_lookup(token_on, remote_client, url):
-    assert remote_client.delete(url).status_code == 401
-    assert remote_client.delete(url, headers={"X-DMCS-Token": "wrong"}).status_code == 401
-    assert remote_client.delete(url, headers={"X-DMCS-Token": token_on}).status_code == 404
 
 
 def test_force_only_from_loopback(token_on, remote_client):

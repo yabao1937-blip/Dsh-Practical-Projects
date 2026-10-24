@@ -75,6 +75,7 @@ function fixture({collection=true,readOnly=false}={}) {
     vm.runInContext(source,context);
     const manual=vm.runInContext('ManualMeasurements',context), entry=vm.runInContext('DecisionManualEntry',context);
     manual.init();
+    if (panel) manual.mount(panel,'secondary-measurement');
     const input=async(view,field,value)=>{view.el(field).value=value;await view.el(field).dispatch(field==='metric'?'change':'input');};
     return {context,document,manual,entry,calls,control,collect,panel,moves,input,observers};
 }
@@ -93,7 +94,7 @@ function fixture({collection=true,readOnly=false}={}) {
     const first=f.manual.refresh(), second=f.manual.refresh();
     assert.equal(f.calls.metrics,1);f.control.metricsResolve();await Promise.all([first,second]);
     f.control.metricsGate=false;
-    const collectView=f.manual.collectView, originalParent=f.panel.parentElement;
+    const collectView=f.manual.views.find(view=>view.root===f.panel), originalParent=f.panel.parentElement;
     await f.input(collectView,'metric','heavy_clean_coal_ash');
     await f.input(collectView,'time','2026-10-17T08:47');await f.input(collectView,'value','8.35');
     f.entry.open();await f.manual.refresh();
@@ -137,7 +138,7 @@ function fixture({collection=true,readOnly=false}={}) {
     assert.match(f.manual.notice.text,/仅保存记录/);assert.equal(JSON.stringify(f.context.App.store),'{"original":"unchanged"}');
 
     const ro=fixture({readOnly:true});await ro.manual.refresh();ro.entry.open();await ro.manual.refresh();
-    assert.ok(ro.manual.collectView.el('fields').disabled && ro.entry.view.el('submit').disabled);
+    assert.ok(ro.manual.views.find(view=>view.root===ro.panel).el('fields').disabled && ro.entry.view.el('submit').disabled);
     ro.entry.view.el('value').value='8.5';await ro.manual.submit({preventDefault(){}},ro.entry.view);
     assert.equal(ro.calls.saves.length,0,'Read-only mode issues zero save requests, including direct submit');
     assert.match(ro.manual.notice.text,/只读/);assert.equal(ro.entry.view.el('mode').hidden,false);

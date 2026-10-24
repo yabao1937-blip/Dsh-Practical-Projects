@@ -53,13 +53,12 @@ def test_insufficient_points_invalid():
     assert r["k"] is None
 
 
-def test_dashboard_exposes_density_k():
-    from fastapi.testclient import TestClient
-    from app.main import app
-
-    client = TestClient(app)
-    d = client.get("/api/v1/overview/dashboard").json()
-    assert "densityK" in d
-    assert d["densityK"]["valid"] in (True, False)
-    assert "k" in d["densityK"]
-    assert "guidance" in d and "K" in d["guidance"]
+def test_guidance_exposes_density_k():
+    from app.database import SessionLocal
+    from app.services.state import load_store
+    from app.services.guidance import build_density_guidance
+    with SessionLocal() as db:
+        guide, gain = build_density_guidance(load_store(db))
+    assert gain["valid"] in (True, False)
+    assert "k" in gain
+    assert "K" in guide

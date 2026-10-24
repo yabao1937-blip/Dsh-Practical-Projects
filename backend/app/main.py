@@ -16,15 +16,14 @@ from .storage_retention.router import router as retention_router
 from .storage_retention.worker import lifespan as retention_lifespan
 from .gpt_coarse import models as gpt_coarse_models  # noqa: F401
 from .gpt_coarse.router import router as gpt_coarse_router
-from .hourly_brief.worker import lifespan as hourly_brief_lifespan
-from .routers.hourly_brief import router as hourly_brief_router
+from .decision_hourly.worker import lifespan as decision_lifespan
 from .routers.decision import router as decision_router
 from .decision_hourly.router import router as evidence_router
 from .config import APP_VERSION, FRONTEND_DIR, REMOTE_READONLY
 from .database import Base, engine
 from .observability import install_observability
-from .routers import (assistant, health, import_api, inputs, manual_entries, manual_measurements, migration, overview,
-                      records, samples, settings, state, telemetry, training)
+from .routers import (assistant, health, manual_measurements,
+                      samples, settings, state, telemetry, training)
 
 from .schema_upgrade import upgrade_schema
 from .telemetry.views import ensure_sqlite_views
@@ -45,7 +44,7 @@ async def application_lifespan(app):
         yield
     else:
         try:
-            async with hourly_brief_lifespan(app):
+            async with decision_lifespan(app):
                 async with retention_lifespan(engine):
                     yield
         finally:
@@ -72,20 +71,13 @@ install_observability(app)
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(retention_router, prefix="/api/v1")
 app.include_router(gpt_coarse_router, prefix="/api/v1")
-app.include_router(hourly_brief_router, prefix="/api/v1")
 app.include_router(decision_router, prefix="/api/v1")
 app.include_router(evidence_router, prefix="/api/v1")
 app.include_router(assistant.router, prefix="/api/v1")   # AI解读助手(只读)
-app.include_router(migration.router, prefix="/api/v1")
 app.include_router(settings.router, prefix="/api/v1")
-app.include_router(inputs.router, prefix="/api/v1")
-app.include_router(records.router, prefix="/api/v1")
 app.include_router(samples.router, prefix="/api/v1")
-app.include_router(manual_entries.router, prefix="/api/v1")
 app.include_router(manual_measurements.router, prefix="/api/v1")
-app.include_router(overview.router, prefix="/api/v1")
 app.include_router(state.router, prefix="/api/v1")
-app.include_router(import_api.router, prefix="/api/v1")
 app.include_router(training.router, prefix="/api/v1")
 app.include_router(telemetry.router, prefix="/api/v1")
 if REMOTE_READONLY:

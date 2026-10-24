@@ -49,7 +49,7 @@ window.Operations = {
     },
 
     installReconnectControl() {
-        const header = document.querySelector('#page-collect .telemetry-panel .panel-header');
+        const header = document.querySelector('#page-telemetry .telemetry-panel .panel-header');
         if (!header || document.getElementById('telemetry-reconnect')) return;
         const actions = document.createElement('div');
         actions.className = 'page-header-actions';
@@ -283,26 +283,38 @@ window.Operations = {
         if (typeof DecisionOverviewPage !== 'undefined') DecisionOverviewPage.telemetryUpdated();
         const body = document.getElementById('telemetry-tbody');
         if (!body) return;
-        if (!items.length) { body.innerHTML = '<tr><td colspan="6" class="ops-empty">暂无采集数据</td></tr>'; return; }
+        if (!items.length) { body.innerHTML = '<tr><td colspan="4" class="ops-empty">暂无采集数据</td></tr>'; return; }
         const reasons = {good:'可用', no_data:'暂无数据', bad_quality:'坏质量', uncertain_quality:'质量不确定',
             stale:'接收超时', source_stale:'源时间过期', collector_offline:'采集离线', out_of_range:'超出量程',
             invalid_value_type:'类型不匹配', non_finite_value:'数值无效', future_source_time:'源时钟异常'};
         const sorted = items.slice().sort((a, b) => String(a.device || '').localeCompare(String(b.device || ''), 'zh-CN', {numeric:true}) ||
             String(a.tag_name || a.name || '').localeCompare(String(b.tag_name || b.name || ''), 'zh-CN', {numeric:true}));
+        const pointLabel = item => {
+            const split = (item.name || '').indexOf(' · ');
+            const tag = item.tag_name || (split < 0 ? item.name : item.name.slice(0, split)) || item.key;
+            const description = item.description || (split < 0 ? '' : item.name.slice(split + 3));
+            const equipment = String(tag || '').split('/')[0];
+            return description ? [equipment, description].filter(Boolean).join(' · ') : tag;
+        };
+        const labels = sorted.map(pointLabel);
         body.innerHTML = sorted.map(item => {
             const sample = item.sample || {};
             const valid = !this.telemetryFailed && item.available;
-            const value = sample.value == null ? '—' : typeof sample.value === 'boolean' ? (sample.value ? '1' : '0') : String(sample.value);
+            const value = sample.value == null ? '—' : typeof sample.value === 'boolean' ? (sample.value ? '1' : '0') :
+                Number.isFinite(sample.value) ? String(Number(sample.value.toFixed(3))) : String(sample.value);
             const unit = App.telemetryDisplayUnit(item);
             const displayValue = value + (Number.isFinite(sample.value) && unit ? ' ' + unit : '');
             const quality = {good:'Good', uncertain:'Uncertain', bad:'Bad'}[sample.quality] || '—';
             const reason = this.telemetryFailed ? '查询中断' : reasons[item.status] || '不可用';
-            const split = (item.name || '').indexOf(' · ');
-            const tag = item.tag_name || (split < 0 ? item.name : item.name.slice(0, split));
-            const description = item.description || (split < 0 ? '' : item.name.slice(split + 3));
-            return '<tr><td>' + this.escape(item.device || '—') + '</td><td>' + this.escape(tag || '—') + '</td>' +
-                '<td>' + this.escape(description || '—') + '</td><td>' + this.escape(item.item_id || sample.node_id || '—') + '</td>' +
+            const shortLabel = pointLabel(item);
+            const label = labels.filter(name => name === shortLabel).length > 1
+                ? `${shortLabel}（${item.device || item.source_id}）` : shortLabel;
+            // Descriptions can repeat. Stable source/key stays attached to the row;
+            // fixed connection identifiers remain available on hover for diagnostics.
+            const identity = [item.source_id, item.key, item.item_id || sample.node_id].filter(Boolean).join(' / ');
+            return '<tr data-source="' + this.escape(item.source_id || '') + '" data-point="' + this.escape(item.key || '') + '"><td title="' + this.escape(identity) + '">' + this.escape(label) + '</td>' +
                 '<td class="' + (valid ? '' : 'ops-unavailable') + '" title="' + this.escape(quality + ' / ' + reason) + '">' + this.escape(displayValue) + '</td>' +
+                '<td>' + this.escape(valid ? '可用' : reason) + '</td>' +
                 '<td title="' + this.escape(sample.received_at || '') + '">' + this.escape(this.time(sample.received_at)) + '</td></tr>';
         }).join('');
     },

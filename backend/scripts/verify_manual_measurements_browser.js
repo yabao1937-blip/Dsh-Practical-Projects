@@ -4,7 +4,7 @@ const fs = require('node:fs'), path = require('node:path'), net = require('node:
 const {spawn,spawnSync} = require('node:child_process');
 const {chromium} = require(process.env.DMCS_PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname,'../..'), backend = path.join(root,'backend');
-const output = path.join(root,'docs/verification/manual-measurements-20261007');
+const output = path.join(root,'output/legacy-cleanup/manual-browser');
 const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
 async function freePort() {
     const server = net.createServer();
@@ -53,9 +53,9 @@ async function freePort() {
         let releaseMetrics, metricsCalls=0;
         const metricsGate=new Promise(resolve=>{releaseMetrics=resolve;});
         await a.page.route('**/manual-measurements/metrics',async route=>{metricsCalls++;await metricsGate;await route.continue();});
-        await a.page.goto(base+'/#collect');
+        await a.page.goto(base+'/#decision');
         await a.page.waitForFunction(()=>App.__ready);
-        await a.page.locator('[data-page="page-collect"]').click();
+        await a.page.locator('#decision-manual-open').click();
         await a.page.waitForFunction(()=>!!ManualMeasurements.definitionsPromise);
         await a.page.evaluate(()=>{ManualMeasurements.refresh();ManualMeasurements.refresh();});
         releaseMetrics();
@@ -63,13 +63,13 @@ async function freePort() {
         assert.equal(metricsCalls,1,'Concurrent initial refresh must share one metadata request');
         await a.page.evaluate(()=>{clearInterval(Operations.timer);Object.defineProperty(crypto,'randomUUID',{value:undefined,configurable:true});});
         const storeBefore=await a.page.evaluate(()=>JSON.stringify(App.store));
-        assert.equal(await a.page.locator('#measurement-time').inputValue(),'');
+        assert.equal(await a.page.locator('#decision-measurement-time').inputValue(),'');
         async function submit(metric,value,time='') {
-            await a.page.locator('#measurement-metric').selectOption(metric);
-            await a.page.locator('#measurement-value').fill(String(value));
-            await a.page.locator('#measurement-time').fill(time);
-            await a.page.locator('#measurement-submit').click();
-            await a.page.waitForFunction(()=>!ManualMeasurements.busy && document.getElementById('measurement-message').dataset.status==='success');
+            await a.page.locator('#decision-measurement-metric').selectOption(metric);
+            await a.page.locator('#decision-measurement-value').fill(String(value));
+            await a.page.locator('#decision-measurement-time').fill(time);
+            await a.page.locator('#decision-measurement-submit').click();
+            await a.page.waitForFunction(()=>!ManualMeasurements.busy && document.getElementById('decision-measurement-message').dataset.status==='success');
         }
         await submit('heavy_clean_coal_ash',8.63);
         let records=await (await fetch(base+'/api/v1/manual-measurements')).json();
@@ -80,12 +80,12 @@ async function freePort() {
         assert.equal(records.items[0].observed_at,'2026-10-07T01:12:00.000+00:00');
         await submit('raw_coal_slime_content',7.25);
         const b=await newClient();
-        await b.page.goto(base+'/#collect');await b.page.waitForFunction(()=>App.__ready);
-        await b.page.locator('[data-page="page-collect"]').click();
+        await b.page.goto(base+'/#decision');await b.page.waitForFunction(()=>App.__ready);
+        await b.page.locator('#decision-manual-open').click();
         await b.page.waitForFunction(()=>ManualMeasurements.total===3);
-        assert.match(await b.page.locator('#measurement-history').innerText(),/7\.25/);
+        assert.match(await b.page.locator('#decision-measurement-history').innerText(),/7\.25/);
         await b.page.reload();await b.page.waitForFunction(()=>App.__ready);
-        await b.page.locator('[data-page="page-collect"]').click();
+        await b.page.locator('#decision-manual-open').click();
         await b.page.waitForFunction(()=>ManualMeasurements.total===3);
 
         // The server commits but its response is lost: preserve inputs and reuse the request ID.
@@ -93,15 +93,15 @@ async function freePort() {
             if(route.request().method()!=='POST') return route.continue();
             await route.fetch();await route.abort();
         });
-        await a.page.locator('#measurement-metric').selectOption('heavy_clean_coal_ash');
-        await a.page.locator('#measurement-value').fill('8.7');
-        await a.page.locator('#measurement-submit').click();
-        await a.page.waitForFunction(()=>!ManualMeasurements.busy && document.getElementById('measurement-message').dataset.status==='error');
-        assert.equal(await a.page.locator('#measurement-value').inputValue(),'8.7');
+        await a.page.locator('#decision-measurement-metric').selectOption('heavy_clean_coal_ash');
+        await a.page.locator('#decision-measurement-value').fill('8.7');
+        await a.page.locator('#decision-measurement-submit').click();
+        await a.page.waitForFunction(()=>!ManualMeasurements.busy && document.getElementById('decision-measurement-message').dataset.status==='error');
+        assert.equal(await a.page.locator('#decision-measurement-value').inputValue(),'8.7');
         assert.equal((await (await fetch(base+'/api/v1/manual-measurements')).json()).total,4);
         await a.page.unroute('**/api/v1/manual-measurements');
-        await a.page.locator('#measurement-submit').click();
-        await a.page.waitForFunction(()=>!ManualMeasurements.busy && document.getElementById('measurement-message').dataset.status==='success');
+        await a.page.locator('#decision-measurement-submit').click();
+        await a.page.waitForFunction(()=>!ManualMeasurements.busy && document.getElementById('decision-measurement-message').dataset.status==='success');
         assert.equal((await (await fetch(base+'/api/v1/manual-measurements')).json()).total,4);
 
         // Malformed confirmation cannot clear the form or report a successful save.
@@ -110,33 +110,27 @@ async function freePort() {
             const response=await route.fetch(),record=await response.json();
             await route.fulfill({response,json:{...record,value:99.9,observed_at:'invalid'}});
         });
-        await a.page.locator('#measurement-value').fill('8.75');
-        await a.page.locator('#measurement-submit').click();
-        await a.page.waitForFunction(()=>!ManualMeasurements.busy && document.getElementById('measurement-message').dataset.status==='error');
-        assert.equal(await a.page.locator('#measurement-value').inputValue(),'8.75');
+        await a.page.locator('#decision-measurement-value').fill('8.75');
+        await a.page.locator('#decision-measurement-submit').click();
+        await a.page.waitForFunction(()=>!ManualMeasurements.busy && document.getElementById('decision-measurement-message').dataset.status==='error');
+        assert.equal(await a.page.locator('#decision-measurement-value').inputValue(),'8.75');
         await a.page.unroute('**/api/v1/manual-measurements');
-        await a.page.locator('#measurement-submit').click();
-        await a.page.waitForFunction(()=>!ManualMeasurements.busy && document.getElementById('measurement-message').dataset.status==='success');
+        await a.page.locator('#decision-measurement-submit').click();
+        await a.page.waitForFunction(()=>!ManualMeasurements.busy && document.getElementById('decision-measurement-message').dataset.status==='success');
         assert.equal((await (await fetch(base+'/api/v1/manual-measurements')).json()).total,5);
         await submit('raw_coal_slime_content',0);
         assert.equal(await a.page.evaluate(()=>JSON.stringify(App.store)),storeBefore,'The manual form must not change business model inputs');
-        await a.page.locator('#manual-measurements-panel').screenshot({path:path.join(output,'manual-form-desktop.png')});
-        await a.page.locator('#measurement-filter').selectOption('coarse_slime_ash');
+        await a.page.locator('#decision-manual-dialog').screenshot({path:path.join(output,'manual-form-desktop.png')});
+        await a.page.locator('#decision-measurement-filter').selectOption('coarse_slime_ash');
         await a.page.waitForFunction(()=>ManualMeasurements.total===1);
-        assert.match(await a.page.locator('#measurement-history').innerText(),/09:12:00/);
+        assert.match(await a.page.locator('#decision-measurement-history').innerText(),/09:12:00/);
         await a.page.setViewportSize({width:390,height:1000});
-        const bounds=await a.page.evaluate(()=>{
-            const main=document.querySelector('.main-content'),panel=document.getElementById('manual-measurements-panel');
-            return {mainWidth:main.clientWidth,mainScroll:main.scrollWidth,panelWidth:panel.clientWidth,panelScroll:panel.scrollWidth,
-                children:[...document.querySelectorAll('#page-collect > *')].map(e=>({id:e.id,class:e.className,width:e.clientWidth,scroll:e.scrollWidth}))};
-        });
-        assert.ok(bounds.mainScroll<=bounds.mainWidth+1,'The collection page must fit a narrow screen');
-        assert.ok(bounds.panelScroll<=bounds.panelWidth+1,'The new panel must contain horizontal table scrolling');
-        await a.page.locator('#manual-measurements-panel').screenshot({path:path.join(output,'manual-form-mobile.png')});
+        const bounds=await a.page.locator('#decision-manual-dialog').evaluate(panel=>({width:panel.clientWidth,scroll:panel.scrollWidth,left:panel.getBoundingClientRect().left,right:panel.getBoundingClientRect().right}));
+        assert.ok(bounds.scroll<=bounds.width+1,'The dialog contains horizontal table scrolling');
+        assert.ok(bounds.left>=0 && bounds.right<=391,'The manual dialog fits a narrow viewport');
+        await a.page.locator('#decision-manual-dialog').screenshot({path:path.join(output,'manual-form-mobile.png')});
         await a.page.setViewportSize({width:1500,height:1100});
-        await a.page.locator('[data-page="page-decision"]').click();
-        await a.page.locator('#decision-manual-open').click();
-        assert.equal(await a.page.locator('#manual-measurements-panel').evaluate(node=>node.closest('.page').id),'page-collect');
+        assert.equal(await a.page.locator('#page-collect').count(),0,'Retired collection page is absent');
         await a.page.locator('#decision-measurement-metric').selectOption('heavy_clean_coal_ash');
         await a.page.locator('#decision-measurement-value').fill('8.66');
         await a.page.locator('#decision-measurement-time').fill('2026-10-17T08:47');

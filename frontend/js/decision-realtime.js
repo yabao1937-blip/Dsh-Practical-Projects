@@ -55,7 +55,7 @@ const DecisionRealtime = {
         const balance=page.heavyAmountDisplay();
         cells.belt501=this.cell(page,balance.inputs[0].display);
         cells.belt502=this.cell(page,balance.inputs[1].display);
-        const target=typeof CollectPage!=='undefined' ? CollectPage.instruments.find(i=>i.id==='total_ash') : null;
+        const target={min:8.5,max:9.0};
         return {cells,target_min:target?.min ?? 8.5,target_max:target?.max ?? 9.0};
     },
     update(page) {

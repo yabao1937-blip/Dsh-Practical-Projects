@@ -45,11 +45,6 @@
 }
 @media print { .decision-manual-dialog { display:none !important; } }
 @media (max-width: 800px) {
-    #page-collect { min-width: 0; }
-    #page-collect .panel-row { flex-direction: column; }
-    #page-collect .panel-half { min-width: 0; }
-    #page-collect .panel-header, #page-collect .panel-header-info { flex-wrap: wrap; max-width: 100%; }
-    #page-collect #instrument-panel-body { overflow: auto; }
     .manual-measurements-component .measurement-fields { grid-template-columns: 1fr; gap: 0; }
     .manual-measurements-component .panel-header { flex-wrap: wrap; gap: 10px; }
 }

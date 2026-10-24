@@ -38,12 +38,12 @@ const ManualMeasurementComponent = {
 
 const ManualMeasurements = {
     ready:false, busy:false, initialized:false, definitions:[], definitionsPromise:null,
-    offset:0, pageSize:20, total:0, sequence:0, pending:null, views:[], collectView:null,
+    offset:0, pageSize:20, total:0, sequence:0, pending:null, views:[],
     draft:{metric:'',value:'',time:''}, filter:'', notice:{text:'',status:''},
     history:'<tr><td colspan="5">尚未加载补录记录</td></tr>', count:'', historyLoaded:false,
-    current() { return DecisionManualEntry.dialog?.open ? DecisionManualEntry.view : this.collectView || this.views[0]; },
+    current() { return DecisionManualEntry.dialog?.open ? DecisionManualEntry.view : this.views[0]; },
     el(id) { return this.current()?.el(id); },
-    active() { return !document.hidden && (document.getElementById('page-collect')?.classList.contains('active') || !!DecisionManualEntry.dialog?.open); },
+    active() { return !document.hidden && !!DecisionManualEntry.dialog?.open; },
     escape(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
     time(value) {
         const date = new Date(value);
@@ -167,11 +167,7 @@ const ManualMeasurements = {
     init() {
         if (this.initialized) return;
         this.initialized=true;
-        const panel=document.getElementById('manual-measurements-panel');
-        if (panel) this.collectView=this.mount(panel,'measurement');
         DecisionManualEntry.init();
-        const page=document.getElementById('page-collect');
-        if (page) new MutationObserver(() => {if(this.active()) void this.refresh();}).observe(page,{attributes:true,attributeFilter:['class']});
         document.addEventListener('visibilitychange', () => {if(this.active()) void this.refresh();});
         if (this.active()) void this.refresh();
     },

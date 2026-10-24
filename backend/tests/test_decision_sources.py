@@ -13,7 +13,7 @@ from app.models import AutoState, Setting, DecisionSourceRevision, CoarseModel
 from app.routers.decision import router
 from app.services.decision_sources import shared_snapshot, identity, config_view
 from app.hourly_brief.inputs import LEVEL, LOCAL
-from app.hourly_brief.service import build_snapshot, tick
+from legacy_hourly_reference import build_snapshot, tick
 from app.hourly_brief.models import HourlyBriefRow
 from app.telemetry.derived import FOUR_SYSTEM_MEMBERS, DESLIMING_MEMBERS, DENSITY_AVERAGE_MEMBERS
 from app.telemetry.domain import iso_time

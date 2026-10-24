@@ -1,19 +1,23 @@
-"""Immutable hourly calculations. No training, EMA update or device writes."""
+"""Historical report reference for regression tests; never loaded by the app.
+
+Retained to compare the shared input/model contracts against old snapshots.
+All writes in tests use isolated session factories.
+"""
 from copy import deepcopy
 from datetime import timedelta
 
 from sqlalchemy import select, text
 
-from ..database import SessionLocal
-from ..models import CoarseModel, Setting
-from ..services.density import calc_total_ash, compute_density_guidance, DENSITY_GUIDE
-from ..services.guidance import density_guard_state
-from ..services.modeling import MLR_FEATURES, predict_coarse_ash
-from ..services.state import SETTING_TO_STORE
-from ..telemetry.domain import iso_time, parse_time, utc_now
-from .columns import COLUMNS, cell
-from .inputs import Inputs, LOCAL, business_time, numeric
-from .models import HourlyBriefRow, HourlyBriefSchedule
+from app.database import SessionLocal
+from app.models import CoarseModel, Setting
+from app.services.density import calc_total_ash, compute_density_guidance, DENSITY_GUIDE
+from app.services.guidance import density_guard_state
+from app.services.modeling import MLR_FEATURES, predict_coarse_ash
+from app.services.state import SETTING_TO_STORE
+from app.telemetry.domain import iso_time, parse_time, utc_now
+from app.hourly_brief.columns import COLUMNS, cell
+from app.hourly_brief.inputs import Inputs, LOCAL, business_time, numeric
+from app.hourly_brief.models import HourlyBriefRow, HourlyBriefSchedule
 
 
 def next_hour(now):
@@ -130,9 +134,9 @@ def build_snapshot(db, hour, unavailable_reason=None):
     if unavailable_reason:
         return dict(cells={key: cell(reason=unavailable_reason) for key, _, _ in COLUMNS},
                     reason=unavailable_reason, policy="hour-boundary-v2")
-    from ..services.decision_sources import shared_snapshot
+    from app.services.decision_sources import shared_snapshot
     result = shared_snapshot(db, hour)
-    from ..gpt_coarse.runtime import ENGINES, features as expert_features
+    from app.gpt_coarse.runtime import ENGINES, features as expert_features
     method = result['model'].get('method')
     expert = method in ENGINES
     features = MLR_FEATURES

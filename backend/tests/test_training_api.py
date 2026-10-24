@@ -169,9 +169,10 @@ def test_train_coarse_model_range_30d_all():
     """30d/all 范围：插入一条 5月（jun_jul/30d 之外）记录，验证三个范围的样本数。"""
     _reset_db()
     apply(SEED)
-    client.post("/api/v1/records", json={
-        "category": "coarse", "ts": "2026-05-01 10:00:00", "system": "合并",
-        "ash_content": 12.0, "coal_amount": 800.0, "sysA": 1})
+    with SessionLocal() as db:
+        db.add(models.CoalRecord(category="coarse", ts="2026-05-01 10:00:00", system="合并",
+                                ash_content=12.0, coal_amount=800.0, sysA=1))
+        db.commit()
 
     jun = client.post("/api/v1/training/coarse-model", params={"range": "jun_jul"})
     assert jun.status_code == 200 and jun.json()["n"] == 113      # 不含 5月

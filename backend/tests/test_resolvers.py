@@ -113,14 +113,3 @@ def test_real_501_reading_allows_guidance():
                                   "actual_total_is_constant": False}, 8.50)
     assert g["valid"] is True
     assert g["direction"] == "down" and g["rhoNew"] < 1.49
-
-
-def test_brief_501_column_blank_when_no_source():
-    """简报 501 列：无该小时 501 记录时留空，不打印默认常量冒充实测。"""
-    from app.services.brief import build_hourly_brief
-    fixture = json.loads((BASE / "brief_js.json").read_text(encoding="utf-8"))
-    rows = fixture["rows"]
-    assert rows, "夹具应产出若干行"
-    assert all(r[6] == "" for r in rows), "夹具里没有 belt=501 记录，该列应全为空"
-    # 后端在同一夹具上也必须留空（golden 对拍已覆盖逐值一致，这里再钉一下语义）
-    assert build_hourly_brief({})["headers"][6].startswith("501")

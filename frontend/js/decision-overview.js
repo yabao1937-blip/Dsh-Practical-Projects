@@ -778,7 +778,7 @@ const DecisionOverviewPage = {
             n('density','建议密度',s.showAdvice ? this.number(s.guide.rhoNew,3) : '—',s.showAdvice ? (s.ashOk ? '达标保持' : s.guide.direction === 'down' ? '本步建议 · 下调' : '本步建议 · 上调') : s.guide.hold ? '等待新化验 / 新数据' : '暂无有效建议',
                 s.guide.reason,{...densityLayout,y:343,h:207,type:'root',unit:'g/cm³',sampleAt:s.reader.ashMeasurementInfo(s.guide.scheme).sampleAt}),
             n('heavy','重介精煤',ash(s.ashes.heavy),`煤量 ${rate(s.amounts.heavy)}`,'汇总左侧重介精煤灰分和重介精煤量，随左侧数据同步更新。',
-                {...family('heavy',380,170,{w:220,h:148}),type:'component',parent:'density',reference:!s.componentFeeds,page:'page-overview',sampleAt:heavyMeasurement.sampleAt,enteredAt:heavyMeasurement.enteredAt}),
+                {...family('heavy',380,170,{w:220,h:148}),type:'component',parent:'density',reference:!s.componentFeeds,page:null,sampleAt:heavyMeasurement.sampleAt,enteredAt:heavyMeasurement.enteredAt}),
             n('float','浮精',ash(s.ashes.float),`煤量 ${rate(s.amounts.float)}`,'汇总左侧浮精灰分和浮精量，随左侧数据同步更新。',
                 {...family('float',380,612,{w:220,h:148}),type:'component',parent:'density',reference:!s.componentFeeds,page:'page-float',sampleAt:s.floating?.timestamp}),
             n('coarse','粗精煤泥',ash(s.ashes.coarse),`煤量 ${rate(s.amounts.coarse)} · 生产 ${s.engineLabel}`,`${coarseSource}。当前生产采用值与下面的 GPT 原始预测分开显示；共享 EMA 不作为 GPT 预测值。`,
@@ -929,7 +929,7 @@ const DecisionOverviewPage = {
 
     renderGraph() {
         const s = this.snapshot, selected = this.nodes.find(n => n.id === this.selected);
-        const targetAsh = (typeof CollectPage !== 'undefined' ? CollectPage.instruments.find(i => i.id === 'total_ash') : null);
+        const targetAsh = {min:8.5,max:9.0};
         const hourly=this.hourMode(),hourResult=hourly?DecisionHourly.presentation():null;
         const hourlyGaps=hourly?DecisionHourly.dataGaps(hourResult):new Map();
         const densityRoot=this.nodes.find(n=>n.id==='density');
