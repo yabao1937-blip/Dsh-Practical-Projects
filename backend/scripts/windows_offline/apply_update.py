@@ -1,5 +1,6 @@
 """Verified source update; only an explicit, backed-up history setting may change."""
 import argparse
+import ast
 from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
@@ -14,6 +15,13 @@ import sqlite3
 import subprocess
 import time
 from urllib.request import Request, urlopen
+
+
+PERIODIC_QUERY_PATCH = 'periodic-batch-readiness-query-v1'
+PERIODIC_QUERY_PATH = 'backend/app/decision_hourly/service.py'
+PERIODIC_QUERY_BASELINE = 'cbef07c65508d228a1c82487ddb8cd347768ee8c08188d730caf31d746bb6edd'
+PERIODIC_QUERY_PROOF = 'baseline/decision-service.py'
+MAX_QUERY_SOURCE_BYTES = 1024 * 1024
 
 
 def digest(path):
@@ -35,6 +43,82 @@ def safe_path(root,name):
     path = (root/Path(*parts.parts)).resolve()
     if not path.is_relative_to(root): raise ValueError('Path escapes installation')
     return path
+
+
+def periodic_query_body_only(original,updated):
+    """A narrowly reviewed exception, never a general service-module allowlist.
+
+    Keep the original deployed source as a hash-pinned proof. Both ASTs are
+    parsed by the same interpreter; only the body of one top-level synchronous
+    function can differ. Signatures, decorators, imports, writers, constants,
+    class methods, module order and duplicate definitions remain protected.
+    """
+    if any(not isinstance(value,bytes) or len(value) > MAX_QUERY_SOURCE_BYTES
+           for value in (original,updated)):
+        raise ValueError('Periodic query patch source exceeds its bounded size')
+    try:
+        before,after = (ast.parse(value.decode('utf-8-sig'),type_comments=True)
+                        for value in (original,updated))
+    except (SyntaxError,UnicodeError,ValueError,RecursionError) as exc:
+        raise ValueError('Periodic query patch source cannot be parsed') from exc
+    bodies = []
+    for module in (before,after):
+        found = [node for node in module.body
+                 if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef,ast.ClassDef))
+                 and node.name == 'periodic_batch_ready']
+        if len(found) != 1 or not isinstance(found[0],ast.FunctionDef):
+            raise ValueError('Periodic query patch requires exactly one synchronous target function')
+        target = found[0]
+        bodies.append(ast.dump(ast.Module(body=target.body,type_ignores=[]),include_attributes=False))
+        target.body = []
+    if ast.dump(before,include_attributes=False) != ast.dump(after,include_attributes=False):
+        raise ValueError('Periodic query patch changed protected code outside the function body')
+    if bodies[0] == bodies[1]:
+        raise ValueError('Periodic query patch has no function-body change')
+
+
+def _query_source(path,package):
+    if not path.resolve().is_relative_to(package.resolve()) or not path.is_file():
+        raise ValueError('Periodic query patch proof or payload escapes its package')
+    if path.stat().st_size > MAX_QUERY_SOURCE_BYTES:
+        raise ValueError('Periodic query patch source exceeds its bounded size')
+    data = path.read_bytes()
+    if len(data) > MAX_QUERY_SOURCE_BYTES:
+        raise ValueError('Periodic query patch source exceeds its bounded size')
+    return data
+
+
+def verify_periodic_query_patch(package,root,manifest):
+    if 'function_patch' not in manifest:
+        return False
+    if (manifest['function_patch'] != PERIODIC_QUERY_PATCH
+            or manifest.get('profile') != 'query-only-hotfix'
+            or set(manifest.get('files',{})) != {PERIODIC_QUERY_PATH}
+            or any(key in manifest for key in ('collector_history_interval_seconds',
+                                               'snapshot_content_check_policy'))):
+        raise ValueError('Periodic query patch must be a sole, configuration-free query hotfix')
+    info = manifest['files'][PERIODIC_QUERY_PATH]
+    if (not isinstance(info,dict) or set(info) != {'sha256','previous_sha256'}
+            or info['previous_sha256'] != PERIODIC_QUERY_BASELINE):
+        raise ValueError('Periodic query patch baseline hash must match the exact deployed release')
+    # The specialised bundle has precisely one payload path. Inspect one known
+    # directory at a time rather than recursively following package links.
+    current = package/'payload'
+    for part in PurePosixPath(PERIODIC_QUERY_PATH).parts:
+        if not current.is_dir() or current.is_symlink() or set(p.name for p in current.iterdir()) != {part}:
+            raise ValueError('Periodic query patch requires exactly one physical payload file')
+        current /= part
+    original = _query_source(package/PERIODIC_QUERY_PROOF,package)
+    updated = _query_source(safe_path(package/'payload',PERIODIC_QUERY_PATH),package)
+    if hashlib.sha256(original).hexdigest() != PERIODIC_QUERY_BASELINE:
+        raise ValueError('Periodic query patch proof does not match the exact deployed release')
+    if hashlib.sha256(updated).hexdigest() != info['sha256']:
+        raise ValueError('Periodic query patch payload checksum failed')
+    target = safe_path(root,PERIODIC_QUERY_PATH)
+    if not target.is_file() or digest(target) not in {PERIODIC_QUERY_BASELINE,info['sha256']}:
+        raise ValueError('Periodic query patch installed source is not the exact accepted baseline')
+    periodic_query_body_only(original,updated)
+    return True
 
 
 def collector_changed(manifest):
@@ -127,7 +211,8 @@ def verify(package,root,manifest):
         raise ValueError('Unknown update profile')
     snapshot_check_policy(manifest)
     history_configuration_patch(root,manifest)
-    if profile == 'query-only-hotfix' and not set(manifest['files']).issubset({
+    periodic_query_patch = verify_periodic_query_patch(package,root,manifest)
+    if profile == 'query-only-hotfix' and not periodic_query_patch and not set(manifest['files']).issubset({
             'backend/app/decision_hourly/ash_history.py','backend/app/decision_hourly/ash_settlement.py',
             'backend/app/decision_hourly/quality_advice.py','backend/app/routers/health.py',
             'backend/app/gpt_coarse/amount.py','backend/app/routers/decision.py',

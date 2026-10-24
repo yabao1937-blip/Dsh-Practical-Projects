@@ -220,13 +220,16 @@ def periodic_batch_ready(db, now, sources=None, *, cadence_seconds=ARCHIVE_CADEN
     from datetime import datetime, timezone
     from ..telemetry.models import TelemetryReading
     start = datetime.fromtimestamp(int(now.timestamp())//cadence_seconds*cadence_seconds,timezone.utc)
+    required_sources = set(sources or ())
+    # Keep the received_at range as the only SQL predicate. A source-only filter
+    # can select (source_id, point_key, received_at), scanning that source's whole
+    # history because point_key is unconstrained. Filter this small bucket here.
     query = select(TelemetryReading.source_id,TelemetryReading.sample).where(
         TelemetryReading.received_at >= iso_time(start),TelemetryReading.received_at <= iso_time(now))
-    if sources:
-        query = query.where(TelemetryReading.source_id.in_(sources))
-    found = {source for source,sample in db.execute(query) if sample.get('storage_kind') == 'periodic'
+    found = {source for source,sample in db.execute(query) if (not required_sources or source in required_sources)
+             and sample.get('storage_kind') == 'periodic'
              and sample.get('cadence_seconds') == cadence_seconds and not sample.get('runtime_only')}
-    return set(sources) <= found if sources else bool(found)
+    return required_sources <= found if required_sources else bool(found)
 
 
 def observation_tick(now=None, sessions=SessionLocal, *, cadence_seconds=CADENCE):
