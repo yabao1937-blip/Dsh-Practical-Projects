@@ -138,7 +138,7 @@ def test_worker_records_during_slow_maintenance_and_waits_on_shutdown(monkeypatc
     started,release=Event(),Event()
     calls=[]
     def observe(**kwargs):
-        assert kwargs['cadence_seconds'] == 30
+        assert kwargs['cadence_seconds'] == worker.ARCHIVE_CADENCE
         calls.append('observation')
         return HOUR
     def maintain(now):
@@ -174,7 +174,7 @@ def test_worker_requires_committed_observation_and_survives_maintenance_failure(
     observations=[]
     maintenance=[]
     def observe(**kwargs):
-        assert kwargs['cadence_seconds'] == 30
+        assert kwargs['cadence_seconds'] == worker.ARCHIVE_CADENCE
         entered.set()
         assert release.wait(5)
         observations.append(HOUR)

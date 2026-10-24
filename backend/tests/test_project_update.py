@@ -223,8 +223,9 @@ def test_frontend_query_and_business_changes_keep_collector_running():
     assert not update.collector_changed({'profile':'query-only-hotfix','files':{'backend/app/telemetry/worker.py':{}}})
 
 
-def test_explicit_history_patch_requires_collector_restart_even_without_source_dependencies():
-    assert update.collector_changed(dict(files={},collector_history_interval_seconds=30))
+@pytest.mark.parametrize('interval',[30,60])
+def test_explicit_history_patch_requires_collector_restart_even_without_source_dependencies(interval):
+    assert update.collector_changed(dict(files={},collector_history_interval_seconds=interval))
 
 
 @pytest.fixture
@@ -240,7 +241,7 @@ def history_prepared(collector_prepared):
     return package,root,target,manifest,events,configuration,original
 
 
-@pytest.mark.parametrize('value',[None,True,False,30.0,5,60,'30',{},[]])
+@pytest.mark.parametrize('value',[None,True,False,30.0,60.0,5,90,0,'30','60',{},[]])
 def test_history_patch_rejects_manifest_values_before_backup(history_prepared,value):
     package,root,target,manifest,events,configuration,original = history_prepared
     manifest['collector_history_interval_seconds'] = value
@@ -250,8 +251,10 @@ def test_history_patch_rejects_manifest_values_before_backup(history_prepared,va
     assert not (root/'backups').exists()
 
 
-def test_query_hotfix_cannot_patch_history_configuration(history_prepared):
+@pytest.mark.parametrize('interval',[30,60])
+def test_query_hotfix_cannot_patch_history_configuration(history_prepared,interval):
     package,root,target,manifest,events,configuration,original = history_prepared
+    manifest['collector_history_interval_seconds'] = interval
     manifest['profile'] = 'query-only-hotfix'
     with pytest.raises(ValueError,match='standard update'):
         update.apply(package,root,manifest)
@@ -281,8 +284,11 @@ def test_invalid_history_configuration_or_polling_relation_fails_before_backup(h
     assert not (root/'backups').exists()
 
 
-def test_history_configuration_changes_only_after_backup_and_collector_stop(history_prepared,monkeypatch):
+@pytest.mark.parametrize('interval',[30,60])
+def test_history_configuration_changes_only_after_backup_and_collector_stop(history_prepared,monkeypatch,interval):
     package,root,target,manifest,events,configuration,original = history_prepared
+    manifest['collector_history_interval_seconds'] = interval
+    messages = []
     replace = update.replace_configuration
     def change(path,data):
         assert path == configuration and path.read_bytes() == original
@@ -293,29 +299,80 @@ def test_history_configuration_changes_only_after_backup_and_collector_stop(hist
         assert (backup/'configuration/backend/config/kepserver.local.json').read_bytes() == original
         replace(path,data)
     monkeypatch.setattr(update,'replace_configuration',change)
-    backup = update.apply(package,root,manifest)
+    backup = update.apply(package,root,manifest,lambda _,message:messages.append(message))
     # BOM, CRLF, endpoint/credential/point data and even a nested name survive byte for byte.
     assert configuration.read_bytes() == original.replace(
-        b'"history_interval_seconds": 5',b'"history_interval_seconds": 30',1)
+        b'"history_interval_seconds": 5',b'"history_interval_seconds": '+str(interval).encode(),1)
     assert (backup/'configuration/backend/config/kepserver.local.json').read_bytes() == original
     record = json.loads((root/'source-update.json').read_text())
-    assert record['collector_history_interval_seconds'] == 30 and record['collector_restarted'] is True
+    assert record['collector_history_interval_seconds'] == interval and record['collector_restarted'] is True
+    assert any(f'interval set to {interval} seconds' in message for message in messages)
+    if interval == 60:
+        assert not any('set to 30 seconds' in message for message in messages)
     assert not configuration.with_name(configuration.name+'.source-update.tmp').exists()
 
 
 @pytest.mark.parametrize('value',[b'{}',b'{ "poll_seconds": 5 }'])
-def test_history_field_can_be_added_without_rewriting_existing_configuration(prepared,value):
+@pytest.mark.parametrize('interval',[30,60])
+def test_history_field_can_be_added_without_rewriting_existing_configuration(prepared,value,interval):
     _,root,*_ = prepared
     path = root/'backend/config/kepserver.local.json'
     path.parent.mkdir()
     path.write_bytes(value)
-    patch = update.history_configuration_patch(root,dict(collector_history_interval_seconds=30))
+    patch = update.history_configuration_patch(root,dict(collector_history_interval_seconds=interval))
     assert patch['original'] == value and path.read_bytes() == value
-    assert json.loads(patch['updated']) == dict(json.loads(value),history_interval_seconds=30)
+    assert json.loads(patch['updated']) == dict(json.loads(value),history_interval_seconds=interval)
 
 
-def test_no_explicit_history_patch_preserves_exact_configuration(history_prepared):
+@pytest.mark.parametrize('previous,interval',[(30,60),(60,30)])
+def test_history_patch_switches_supported_intervals_without_rewriting_other_bytes(history_prepared,previous,interval):
+    _,root,_,_,_,configuration,original = history_prepared
+    original = original.replace(b'"history_interval_seconds": 5',
+        b'"history_interval_seconds": '+str(previous).encode(),1)
+    configuration.write_bytes(original)
+    patch = update.history_configuration_patch(root,dict(collector_history_interval_seconds=interval))
+    assert configuration.read_bytes() == original
+    assert patch['updated'] == original.replace(b'"history_interval_seconds": '+str(previous).encode(),
+        b'"history_interval_seconds": '+str(interval).encode(),1)
+    assert b'"poll_seconds": 5' in patch['updated']
+    assert b'"credentials": {"password":"fixture-secret", "history_interval_seconds": 5}' in patch['updated']
+
+
+def test_sixty_second_patch_preserves_a_slower_existing_poll_instead_of_overriding_it(prepared):
+    _,root,*_ = prepared
+    configuration = root/'backend/config/kepserver.local.json'
+    configuration.parent.mkdir()
+    original = b'{ "poll_seconds": 35, "history_interval_seconds": 30 }'
+    configuration.write_bytes(original)
+    patch = update.history_configuration_patch(root,dict(collector_history_interval_seconds=60))
+    assert patch['updated'] == original.replace(b'"history_interval_seconds": 30',b'"history_interval_seconds": 60')
+    with pytest.raises(ValueError,match='30 seconds must be at least the polling interval'):
+        update.history_configuration_patch(root,dict(collector_history_interval_seconds=30))
+
+
+@pytest.mark.parametrize('interval',[30,60])
+def test_updater_entry_reports_actual_explicit_interval(prepared,monkeypatch,capsys,interval):
+    import sys
+    package,root,*_ = prepared
+    (package/'update.json').write_text(json.dumps(dict(revision='test',files={},
+        collector_history_interval_seconds=interval,report_url='http://127.0.0.1/unused')))
+    monkeypatch.setattr(update,'__file__',str(package/'apply_update.py'))
+    monkeypatch.setattr(sys,'argv',['apply_update.py','--install-dir',str(root)])
+    monkeypatch.setattr(update,'apply',lambda *args:root/'backups/fixture')
+    monkeypatch.setattr(update,'urlopen',lambda *args,**kwargs:(_ for _ in ()).throw(OSError('offline fixture')))
+    assert update.main() == 0
+    output = capsys.readouterr().out
+    assert f'explicit {interval}-second history setting' in output
+    if interval == 60:
+        assert 'explicit 30-second' not in output
+
+
+@pytest.mark.parametrize('existing_interval',[5,30,60])
+def test_no_explicit_history_patch_preserves_exact_configuration(history_prepared,existing_interval):
     package,root,target,manifest,events,configuration,original = history_prepared
+    original = original.replace(b'"history_interval_seconds": 5',
+        b'"history_interval_seconds": '+str(existing_interval).encode(),1)
+    configuration.write_bytes(original)
     del manifest['collector_history_interval_seconds']
     backup = update.apply(package,root,manifest)
     assert configuration.read_bytes() == original
@@ -324,14 +381,16 @@ def test_no_explicit_history_patch_preserves_exact_configuration(history_prepare
 
 
 @pytest.mark.parametrize('phase',['restart','collector-ready','policy'])
-def test_history_patch_failure_restores_original_config_before_old_services_restart(history_prepared,monkeypatch,phase):
+@pytest.mark.parametrize('interval',[30,60])
+def test_history_patch_failure_restores_original_config_before_old_services_restart(history_prepared,monkeypatch,phase,interval):
     package,root,target,manifest,events,configuration,original = history_prepared
+    manifest['collector_history_interval_seconds'] = interval
     restart_intervals,ready_count = [],0
     def restart(root):
         interval = json.loads(configuration.read_bytes().decode('utf-8-sig'))['history_interval_seconds']
         restart_intervals.append(interval)
         if len(restart_intervals) == 1:
-            assert interval == 30 and target.read_text() == 'new collector code'
+            assert interval == manifest['collector_history_interval_seconds'] and target.read_text() == 'new collector code'
             with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
                 db.execute('INSERT INTO evidence VALUES(2)')
             if phase == 'restart': raise RuntimeError('fixture update failure')
@@ -348,7 +407,7 @@ def test_history_patch_failure_restores_original_config_before_old_services_rest
         monkeypatch.setattr(update,'urlopen',lambda *a,**kw:(_ for _ in ()).throw(RuntimeError('fixture update failure')))
     with pytest.raises(RuntimeError,match='fixture update failure'):
         update.apply(package,root,manifest)
-    assert restart_intervals == [30,5] and configuration.read_bytes() == original
+    assert restart_intervals == [interval,5] and configuration.read_bytes() == original
     assert events[-3:] == ['StopOwnedWeb.ps1','StopOwnedCollector.ps1','lease-expired']
     with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
         assert db.execute('SELECT * FROM evidence').fetchall() == [(1,),(2,)]
@@ -602,3 +661,96 @@ def test_structural_mismatch_aborts_before_any_service_change(prepared,monkeypat
     with pytest.raises(ValueError,match='structural check failed'):
         update.apply(package,root,manifest)
     assert target.read_text() == 'old code' and not calls
+
+
+@pytest.mark.parametrize('policy',[None,False,True,'skip','full',0,{},[]])
+def test_unknown_snapshot_policy_stops_before_backup_or_service_changes(prepared,policy):
+    package,root,_,target,manifest,calls = prepared
+    manifest['snapshot_content_check_policy'] = policy
+    with pytest.raises(ValueError,match='snapshot content check policy'):
+        update.apply(package,root,manifest)
+    assert target.read_text() == 'old code' and not calls
+    assert not (root/'backups').exists()
+
+
+def test_snapshot_deferral_cannot_be_combined_with_no_database_hotfix(prepared):
+    package,root,_,target,manifest,calls = prepared
+    manifest.update(snapshot_content_check_policy='maintenance-window',profile='query-only-hotfix')
+    with pytest.raises(ValueError,match='incompatible snapshot content check policy'):
+        update.apply(package,root,manifest)
+    assert target.read_text() == 'old code' and not calls
+    assert not (root/'backups').exists()
+
+
+def test_explicit_large_snapshot_deferral_keeps_copy_and_structure_without_full_scan(prepared,monkeypatch):
+    package,root,_,target,manifest,calls = prepared
+    manifest['snapshot_content_check_policy'] = 'maintenance-window'
+    # Exercise the real copy/structure path using the fixture DB, not a fake backup.
+    monkeypatch.setattr(update,'MANUAL_CHECK_MIN_BYTES',1)
+    statements = []
+    real_connect = update.sqlite3.connect
+    def connect(*args,**kwargs):
+        database = real_connect(*args,**kwargs)
+        database.set_trace_callback(statements.append)
+        return database
+    monkeypatch.setattr(update.sqlite3,'connect',connect)
+    monkeypatch.setattr(update,'verify_snapshot_content',lambda *a,**kw:pytest.fail('Explicit large deferral must not scan snapshot content'))
+    events = []
+    backup = update.apply(package,root,manifest,lambda *args:events.append(args))
+    assert target.read_text() == 'new code' and calls
+    assert (backup/'dense_medium.db').is_file()
+    assert len([s for s in statements if s.startswith('SELECT type,name,tbl_name,sql')]) == 2
+    assert not any('quick_check' in s.lower() or 'integrity_check' in s.lower() for s in statements)
+    with real_connect(backup/'dense_medium.db') as snapshot:
+        assert snapshot.execute('SELECT * FROM evidence').fetchall() == [(1,)]
+    record = json.loads((root/'source-update.json').read_text(encoding='utf-8'))
+    assert record['snapshot_verification'] == 'deferred_manual'
+    assert record['snapshot_content_check_policy'] == 'maintenance-window'
+    assert record['snapshot_content_check']['passed'] is False
+    assert record['snapshot_content_check']['reason'] == 'maintenance-window'
+    assert record['snapshot_content_check']['budget_seconds'] == 0
+    assert any('protected and unverified' in message for _,message in events)
+
+
+def test_explicit_policy_still_fully_checks_small_snapshots(prepared,monkeypatch):
+    package,root,_,target,manifest,_ = prepared
+    manifest['snapshot_content_check_policy'] = 'maintenance-window'
+    statements = []
+    real_connect = update.sqlite3.connect
+    def connect(*args,**kwargs):
+        database = real_connect(*args,**kwargs)
+        database.set_trace_callback(statements.append)
+        return database
+    monkeypatch.setattr(update.sqlite3,'connect',connect)
+    update.apply(package,root,manifest)
+    assert target.read_text() == 'new code'
+    assert any('quick_check' in statement.lower() for statement in statements)
+    record = json.loads((root/'source-update.json').read_text(encoding='utf-8'))
+    assert record['snapshot_verification'] == 'full'
+    assert record['snapshot_content_check'] is None
+
+
+def test_manual_snapshot_cannot_be_registered_verified_or_replace_stable(prepared,monkeypatch):
+    from app.storage_retention import files
+    from test_retention_producers import install_retention_module, sqlite_file
+    package,root,_,_,manifest,_ = prepared
+    install_retention_module(root)
+    old = sqlite_file(root/'backups/confirmed-stable/dense_medium.db').parent
+    identity = files.installation_identity(root)
+    now = datetime.now(timezone.utc)
+    files.register_verified_backup(root,old,installation_id=identity,backup_id='confirmed-stable',
+        created_at=now-timedelta(days=3),verification=dict(method='sqlite-full-check',result='ok',checked_at=now),stable=True)
+    original_registry = json.loads((root/files.REGISTRY_NAME).read_text(encoding='utf-8'))
+    manifest['snapshot_content_check_policy'] = 'maintenance-window'
+    monkeypatch.setattr(update,'MANUAL_CHECK_MIN_BYTES',1)
+    backup = update.apply(package,root,manifest)
+    state = json.loads((root/files.REGISTRY_NAME).read_text(encoding='utf-8'))
+    entry = state['entries']['source-update:'+backup.name]
+    assert entry['state'] == 'unverified'
+    assert 'verification' not in entry and 'runtime_verified_at' not in entry
+    assert state['stable_backup_id'] == original_registry['stable_backup_id'] == 'confirmed-stable'
+    assert old.exists()
+    # Even a stale/misreported downstream pass flag cannot promote a manual scan.
+    update.register_retention_snapshot(root,backup,{'content_check':'deferred_manual'},{'passed':True},now)
+    state = json.loads((root/files.REGISTRY_NAME).read_text(encoding='utf-8'))
+    assert state['entries']['source-update:'+backup.name]['state'] == 'unverified'

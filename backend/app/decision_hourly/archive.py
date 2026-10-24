@@ -84,7 +84,8 @@ def read_sample(db, slot):
     hour = iso_time(datetime.fromtimestamp(slot*5,timezone.utc).replace(minute=0,second=0,microsecond=0))
     saved = db.get(DecisionEvidenceArchive,hour)
     if not saved:
-        return None
+        from ..storage_retention.reader import cold_rows
+        return next((row for row in cold_rows(db, hour) if row['slot'] == slot), None)
     raw = zlib.decompress(saved.payload)
     if hashlib.sha256(raw).hexdigest() != saved.checksum:
         raise ValueError('逐次证据归档校验失败')
@@ -103,7 +104,8 @@ def archived_rows(db, start, *, project_snapshot=None):
     """
     saved=db.get(DecisionEvidenceArchive,start)
     if not saved:
-        return []
+        from ..storage_retention.reader import cold_rows
+        return cold_rows(db, start, project_snapshot=project_snapshot)
     raw=zlib.decompress(saved.payload)
     if hashlib.sha256(raw).hexdigest()!=saved.checksum:
         raise ValueError('逐次证据归档校验失败')

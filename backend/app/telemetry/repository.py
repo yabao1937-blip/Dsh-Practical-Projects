@@ -1,5 +1,6 @@
 """采集存储：短事务、单来源租约、幂等批次、当前快照和限频历史。"""
 from datetime import timedelta
+from re import fullmatch
 
 from sqlalchemy import select, text
 
@@ -12,6 +13,8 @@ from .retained import (raw_sample, point_memory, remember_point, remember_densit
                        density_rows, density_memory, density_definition, density_history)
 from .density_effective import DENSITY_ITEMS, effective_component, effective_average
 from .density_alerts import density_alarm_checks
+from .realtime import (ALIGNMENT_LEVEL_ITEM, ALIGNMENT_LAG_SECONDS,
+                       ALIGNMENT_LOOKBACK_SECONDS, ALIGNMENT_EVIDENCE_CADENCE)
 
 
 class CollectorBusy(RuntimeError):
@@ -85,6 +88,7 @@ class TelemetryRepository:
             source = self._owned(db, cfg.source_id, owner)
             source.heartbeat_at = iso_time(now)
             source.lease_until = iso_time(now + timedelta(seconds=cfg.lease_seconds))
+            self._persist_alignment_evidence(db, cfg, batch)
             for sample in batch["samples"]:
                 received = sample["received_at"]
                 point = db.get(TelemetryPoint, (cfg.source_id, sample["key"]))
@@ -124,6 +128,53 @@ class TelemetryRepository:
                     source.last_sample_at = received
             remember_density(db, cfg.source_id)
             db.commit()
+
+    @staticmethod
+    def _persist_alignment_evidence(db, cfg, batch):
+        """Persist selected original lag evidence atomically with its minute.
+
+        This never updates a point snapshot, memory, history clock or source
+        clock. Replayed envelopes retain their original raw identities.
+        """
+        evidence = batch.get('alignment_evidence', [])
+        if not isinstance(evidence, list) or len(evidence) > 1:
+            raise ValueError('invalid alignment evidence envelope')
+        if not evidence:
+            return
+        if (batch.get('storage_policy') != 'periodic-v1' or batch.get('storage_kind') != 'periodic'
+                or batch.get('cadence_seconds') != 60):
+            raise ValueError('alignment evidence requires a minute periodic batch')
+        prediction = max(parse_time(sample['received_at']) for sample in batch['samples'])
+        target = prediction - timedelta(seconds=ALIGNMENT_LAG_SECONDS)
+        for entry in evidence:
+            sample = entry.get('sample') if isinstance(entry, dict) else None
+            key = entry.get('point_key') if isinstance(entry, dict) else None
+            parent = next((item for item in batch['samples'] if item.get('key') == key), None)
+            point = db.get(TelemetryPoint, (cfg.source_id, key)) if isinstance(key, str) else None
+            if (not isinstance(sample, dict) or parent is None or point is None
+                    or key not in {p.key for p in cfg.points if p.item_id == ALIGNMENT_LEVEL_ITEM}
+                    or entry.get('source_id') != cfg.source_id or entry.get('item_id') != ALIGNMENT_LEVEL_ITEM
+                    or entry.get('storage_kind') != 'alignment-evidence'
+                    or sample.get('key') != key or sample.get('runtime_only')
+                    or not sample.get('definition_id') or sample.get('definition_id') != parent.get('definition_id')
+                    or sample.get('node_id') != parent.get('node_id') or sample.get('unit') != parent.get('unit')
+                    or sample.get('storage_kind') != 'alignment-evidence'
+                    or sample.get('cadence_seconds') != ALIGNMENT_EVIDENCE_CADENCE):
+                raise ValueError('invalid alignment evidence identity')
+            batch_id = entry.get('batch_id')
+            if not isinstance(batch_id, str) or not fullmatch(r'[a-f0-9]{32}', batch_id):
+                raise ValueError('invalid alignment evidence batch identity')
+            received = parse_time(sample['received_at'])
+            if (parse_time(entry['prediction_at']) != prediction or parse_time(entry['target_at']) != target
+                    or not target-timedelta(seconds=ALIGNMENT_LOOKBACK_SECONDS) <= received <= target):
+                raise ValueError('invalid alignment evidence target window')
+            existing = db.scalar(select(TelemetryReading.id).where(
+                TelemetryReading.source_id == cfg.source_id, TelemetryReading.point_key == key,
+                TelemetryReading.batch_id == batch_id))
+            if existing is None:
+                db.add(TelemetryReading(source_id=cfg.source_id, point_key=key,
+                    batch_id=batch_id, received_at=sample['received_at'], sample=sample))
+        db.flush()
 
     def prune(self, cfg):
         """Legacy maintenance entry point: history never expires, even if called

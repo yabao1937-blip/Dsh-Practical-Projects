@@ -35,7 +35,7 @@ def period(start, end):
 
 
 def density_mean(db, start, end, sources):
-    """Duration-weight retained events using each recorded 5/30s interval."""
+    """Duration-weight retained events using each recorded 5/30/60s interval."""
     choice = (sources.get('resolved_choices') or {}).get('density-current')
     points = []
     if choice:
@@ -84,7 +84,7 @@ def density_mean(db, start, end, sources):
         if active_seconds:
             active[stamp] = (events[stamp][0],active_seconds)
         cursor = max(cursor, right)
-    weighted = any(v[1] == 30 for v in events.values())
+    weighted = any(v[1] > CADENCE for v in events.values())
     value = ((fsum(v*s for v,s in active.values())/covered if weighted else
               fsum(v for v,_ in active.values())/len(active)) if active and covered and not reason else None)
     return dict(**period(start, end), value=value, status='average' if value is not None else 'missing',

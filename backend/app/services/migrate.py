@@ -4,7 +4,7 @@
 """
 import sqlite3
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -339,6 +339,54 @@ def _plan_vector(p: dict) -> dict:
     return vec
 
 
+BACKUP_CONTENT_CHECK_MAX_BYTES = 64 * 1024**2
+BACKUP_CONTENT_CHECK_SECONDS = 2
+
+
+def _certify_migration_backup(path, *, created_at, install_root=None, db_path=None):
+    """Certify only small completed snapshots; never scan a multi-GiB copy."""
+    import time
+    from ..storage_retention.files import (backup_registry_root, installation_identity, register_unverified_backup,
+                                          register_verified_backup)
+    install_root = Path(install_root or Path(__file__).resolve().parents[3])
+    db_path = Path(db_path or (path.parent.parent / "dense_medium.db"))
+    try:
+        root = backup_registry_root(install_root, db_path)
+        identity = installation_identity(install_root)
+    except (OSError, ValueError) as exc:
+        print("[migrate] 备份保留，无法统一认证目录: " + type(exc).__name__)
+        return
+    verified = False
+    reason = "size_exceeds_64MiB_content_check_budget"
+    if path.stat().st_size <= BACKUP_CONTENT_CHECK_MAX_BYTES:
+        deadline = time.monotonic() + BACKUP_CONTENT_CHECK_SECONDS
+        database = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        try:
+            database.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+            try:
+                result = database.execute("PRAGMA quick_check").fetchone()
+            except sqlite3.OperationalError:
+                if time.monotonic() < deadline:
+                    raise
+                reason = "content_check_time_budget_exceeded"
+            else:
+                if result is None or result[0] != "ok":
+                    raise ValueError("Backup content check reported corruption")
+                verified = True
+        finally:
+            database.close()
+    arguments = dict(installation_id=identity, backup_id="migration:"+path.name, created_at=created_at)
+    try:
+        if verified:
+            register_verified_backup(root, path.resolve(strict=True), **arguments,
+                verification={"method": "sqlite-full-check", "result": "ok",
+                              "checked_at": datetime.now(timezone.utc)})
+        else:
+            register_unverified_backup(root, path.resolve(strict=True), **arguments, reason=reason)
+    except (OSError, ValueError) as exc:
+        print("[migrate] 备份保留，认证未完成: " + type(exc).__name__)
+
+
 def backup_database(tag: str = "force") -> str | None:
     """整库覆盖前先做一份一致快照，返回备份文件路径（失败返回 None）。
 
@@ -355,6 +403,7 @@ def backup_database(tag: str = "force") -> str | None:
     if not DATABASE_URL.startswith("sqlite"):
         return None
     src = DATABASE_URL.split("sqlite:///", 1)[-1]
+    created_at = datetime.now(timezone.utc)
     try:
         # 备份放在**该库文件旁边**的 backups/：生产是 backend/data/backups/，
         # 测试库（conftest 隔离到临时目录）则落在临时目录，不会往仓库里写文件。
@@ -378,8 +427,9 @@ def backup_database(tag: str = "force") -> str | None:
                 bck.close()
         finally:
             con.close()
-        # Permanent retention also covers recovery snapshots: a new backup must
-        # never evict an older recovery point.
+        # Certification is independent of copying: large/timeout copies remain
+        # protected unverified recovery snapshots, not deletion candidates.
+        _certify_migration_backup(dest, created_at=created_at, db_path=Path(src))
         return str(dest)
     except Exception as e:
         print(f"[migrate] 备份失败，取消 force 写入: {type(e).__name__}")

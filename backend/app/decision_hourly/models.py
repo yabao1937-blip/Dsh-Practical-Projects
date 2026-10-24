@@ -54,6 +54,9 @@ class DecisionTelemetryPin(Base):
     __tablename__ = 'decision_telemetry_pins'
     reading_id: Mapped[int] = mapped_column(Integer, ForeignKey('telemetry_readings.id', ondelete='RESTRICT'), primary_key=True)
     first_slot: Mapped[int] = mapped_column(Integer)
+    # NULL means legacy usage has not been established by a complete backfill.
+    # first_slot alone is never enough to release a reading used by held values.
+    last_slot: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class DecisionEvidenceArchive(Base):

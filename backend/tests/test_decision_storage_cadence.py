@@ -11,7 +11,7 @@ from app.decision_hourly.models import DecisionCycleSample
 from app.decision_hourly.production_coverage import stopped_intervals, fields
 from app.decision_hourly.quality_advice import density_mean
 from app.decision_hourly.service import prepare_record, save_record, observation_tick
-from app.decision_hourly.statistics import hour_advice, mean_cell, cadence_seconds
+from app.decision_hourly.statistics import ARCHIVE_CADENCE, hour_advice, mean_cell, cadence_seconds
 from app.decision_hourly.ash_settlement import settlement_snapshot
 from app.telemetry.domain import iso_time, normalize
 from app.telemetry.models import TelemetryReading
@@ -266,5 +266,5 @@ def test_thirty_second_maintenance_visits_entire_backlog(monkeypatch,size):
         return {}
     monkeypatch.setattr(settlement,'build_settlement',build)
     for step in range(size):
-        settlement.prepare_due_hours(MetadataOnly(),now+timedelta(seconds=30*step))
+        settlement.prepare_due_hours(MetadataOnly(),now+timedelta(seconds=ARCHIVE_CADENCE*step))
     assert visited == set(starts)

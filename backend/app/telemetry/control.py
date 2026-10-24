@@ -128,6 +128,84 @@ def _save_metadata(path, value):
     temporary.replace(path)
 
 
+def _confirmed_process_exited(pid):
+    """An inaccessible process is unknown, never proof that a log is closed."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    if os.name == "nt":
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == 87  # ERROR_INVALID_PARAMETER: PID absent.
+        try:
+            code = wintypes.DWORD()
+            return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value != 259
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except (OSError, ValueError):
+        pass
+    return False
+
+
+def _log_has_no_writer(path):
+    """On Windows also reject inherited child writers after the parent exits."""
+    if os.name != "nt":
+        return True
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    # Excluding FILE_SHARE_WRITE refuses any existing writer's handle.
+    handle = kernel.CreateFileW(str(path), 0x80000000, 0x1 | 0x4, None, 3, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        return False
+    kernel.CloseHandle(handle)
+    return True
+
+
+def _register_exited_collector_logs(metadata_path, runtime_dir, cfg, config_path):
+    """Certify this producer's old closed logs without touching process control."""
+    from ..storage_retention.files import installation_identity, register_closed_log
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if (metadata.get("source_id") != cfg.source_id or metadata.get("config") != str(config_path)
+                or not metadata.get("process_identity")):
+            return
+        identity = _process_identity(metadata.get("pid"))
+        if identity == metadata["process_identity"]:
+            return  # The exact producer is still alive.
+        if identity is None and not _confirmed_process_exited(metadata.get("pid")):
+            return  # Permission errors and unknown status remain protected.
+        root = Path(runtime_dir).resolve(strict=True)
+        for field, category in (("stdout", "normal"), ("stderr", "error")):
+            supplied = Path(metadata[field])
+            attributes = supplied.lstat()
+            if supplied.is_symlink() or bool(getattr(attributes, "st_file_attributes", 0) & 0x400):
+                continue
+            path = supplied.resolve(strict=True)
+            if (path.parent != root or not path.name.startswith(cfg.source_id + "-")
+                    or not path.name.endswith("." + field + ".log") or not _log_has_no_writer(path)):
+                continue
+            try:
+                register_closed_log(root, path, installation_id=installation_identity(BACKEND.parent),
+                                    category=category, closed_at=utc_now())
+            except (OSError, ValueError):
+                pass  # Existing/unknown registrations remain protected.
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
+
 def ensure_collector_started(config_path=DEFAULT_CONFIG, runtime_dir=DEFAULT_RUNTIME, *, session_factory=None, engine=None):
     try:
         config_path = Path(config_path).resolve()
@@ -152,6 +230,7 @@ def ensure_collector_started(config_path=DEFAULT_CONFIG, runtime_dir=DEFAULT_RUN
             if _pending_process(metadata_path, cfg, config_path):
                 return {"ok": True, "source_id": cfg.source_id, "requested_at": requested_at,
                     "action": "already_starting", "state": "starting"}
+            _register_exited_collector_logs(metadata_path, runtime_dir, cfg, config_path)
             stamp = utc_now().strftime("%Y%m%dT%H%M%S%fZ")
             stdout_path = runtime_dir / f"{cfg.source_id}-{stamp}.stdout.log"
             stderr_path = runtime_dir / f"{cfg.source_id}-{stamp}.stderr.log"

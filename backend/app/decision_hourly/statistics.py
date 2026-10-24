@@ -10,7 +10,8 @@ from ..hourly_brief.inputs import business_time, numeric
 CADENCE = 5
 # Slot ids always retain their original five-second meaning. Storage frequency
 # is recorded on each new row so old and new evidence can coexist unchanged.
-ARCHIVE_CADENCE = 30
+ARCHIVE_CADENCE = 60
+STORAGE_CADENCES = (CADENCE, 30, ARCHIVE_CADENCE)
 EXPECTED = 3600 // CADENCE
 MIN_COVERAGE = .8
 COVERAGE_POLICY = 'coverage-over-80-v1'
@@ -21,7 +22,7 @@ COMPUTED = {'coarse_ash', 'heavy_amount', 'total_ash'}
 def cadence_seconds(value):
     """Only explicit supported metadata extends a historical five-second sample."""
     value = value.get('cadence_seconds') if isinstance(value, dict) else None
-    return int(value) if type(value) in (int, float) and value in (CADENCE, ARCHIVE_CADENCE) else CADENCE
+    return int(value) if type(value) in (int, float) and value in STORAGE_CADENCES else CADENCE
 
 
 def row_at(row):
@@ -62,7 +63,7 @@ def mean_cell(key, candidates, fallback, start, end):
             events[c.get('_event') or event_key(c)] = c
     ordered = sorted(events.values(), key=lambda c:business_time(c.get('_period_at') or c['observed_at']))
     accepted, durations = [], []
-    weighted = any(cadence_seconds(c) == ARCHIVE_CADENCE for c in ordered)
+    weighted = any(cadence_seconds(c) > CADENCE for c in ordered)
     for i, c in enumerate(ordered):
         if not valid(c, key):
             continue
@@ -127,7 +128,7 @@ def hour_advice(rows, start, end, density, max_step=.03, *, weights=None):
     if gap.is_integer():
         gap = int(gap)
     deltas = [delta for _, delta, _, _ in accepted]
-    weighted = any(cadence_seconds(r.snapshot) == ARCHIVE_CADENCE for r,_,_,_ in accepted)
+    weighted = any(cadence_seconds(r.snapshot) > CADENCE for r,_,_,_ in accepted)
     mean = ((fsum(delta*(right-left) for _,delta,left,right in accepted)/seconds if weighted else
              fsum(deltas)/len(deltas)) if deltas and seconds else None)
     coverage = dict(valid_count=count, recorded_count=len(rows), expected_count=EXPECTED,

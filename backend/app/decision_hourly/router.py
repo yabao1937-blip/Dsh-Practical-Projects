@@ -20,6 +20,7 @@ from .archive import read_sample, archived_rows
 from .service import window
 from .evidence import summarize
 from .references import hydrate_rows
+from ..storage_retention.reader import ColdReadError, ColdDetailExpired
 
 router = APIRouter(prefix='/decision/evidence',tags=['GPT 工况与调密跟踪'],route_class=MeasurementRoute)
 
@@ -62,7 +63,12 @@ def segments(start: datetime | None=None,db: Session=Depends(get_db)):
 def sample(slot:int,db:Session=Depends(get_db)):
     if not 0 <= slot <= 50000000000:
         raise HTTPException(422,'采样标识超出范围')
-    found=read_sample(db,slot)
+    try:
+        found=read_sample(db,slot)
+    except ColdDetailExpired as exc:
+        raise HTTPException(410,str(exc)) from exc
+    except ColdReadError as exc:
+        raise HTTPException(503,str(exc)) from exc
     if not found:
         raise HTTPException(404,'该逐次记录不存在或启用前已清理')
     from .models import DecisionCycleContext
@@ -79,7 +85,12 @@ def samples(start:datetime,limit:int=Query(40,ge=1,le=100),offset:int=Query(0,ge
         DecisionCycleSample.sampled_at<iso_time(end)).order_by(DecisionCycleSample.slot.desc())))
     data=[dict(slot=r.slot,sampled_at=r.sampled_at,context_key=r.context_key,snapshot=r.snapshot) for r in hydrate_rows(db,rows)]
     if not data:
-        data=sorted(archived_rows(db,iso_time(start)),key=lambda r:r['slot'],reverse=True)
+        try:
+            data=sorted(archived_rows(db,iso_time(start)),key=lambda r:r['slot'],reverse=True)
+        except ColdDetailExpired as exc:
+            raise HTTPException(410,str(exc)) from exc
+        except ColdReadError as exc:
+            raise HTTPException(503,str(exc)) from exc
     return dict(total=len(data),items=[dict(slot=r['slot'],sampled_at=r['sampled_at'],context_key=r['context_key'],
         statuses={k:r['snapshot'].get('cells',{}).get(k,{}).get('status') for k in ('density','total_ash','suggested_density')},
         values={k:r['snapshot'].get('cells',{}).get(k,{}).get('value') for k in

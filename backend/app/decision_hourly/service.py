@@ -83,10 +83,10 @@ def context_definition(result, store):
 def prepare_record(db, now, result=None, store=None, *, cadence_seconds=CADENCE):
     """Prepare detached evidence; no writes or writer reservation are required."""
     slot = int(now.timestamp())//CADENCE
-    if cadence_seconds == ARCHIVE_CADENCE:
-        first = int(now.timestamp())//ARCHIVE_CADENCE*ARCHIVE_CADENCE//CADENCE
+    if cadence_seconds in (30,60):
+        first = int(now.timestamp())//cadence_seconds*cadence_seconds//CADENCE
         if db.scalar(select(DecisionCycleSample.slot).where(DecisionCycleSample.slot >= first,
-                DecisionCycleSample.slot < first+ARCHIVE_CADENCE//CADENCE).limit(1)) is not None:
+                DecisionCycleSample.slot < first+cadence_seconds//CADENCE).limit(1)) is not None:
             return None
     if db.get(DecisionCycleSample,slot):
         return None
@@ -138,10 +138,11 @@ def save_record(db, prepared):
     now, slot, key = prepared['now'], prepared['slot'], prepared['key']
     if db.get(DecisionCycleSample, slot):
         return False
-    if prepared['snapshot'].get('cadence_seconds') == ARCHIVE_CADENCE:
-        first = slot//(ARCHIVE_CADENCE//CADENCE)*(ARCHIVE_CADENCE//CADENCE)
+    cadence = prepared['snapshot'].get('cadence_seconds')
+    if cadence in (30,60):
+        first = slot//(cadence//CADENCE)*(cadence//CADENCE)
         if db.scalar(select(DecisionCycleSample.slot).where(DecisionCycleSample.slot >= first,
-                DecisionCycleSample.slot < first+ARCHIVE_CADENCE//CADENCE).limit(1)) is not None:
+                DecisionCycleSample.slot < first+cadence//CADENCE).limit(1)) is not None:
             return False
     latest_slot = db.scalar(select(func.max(DecisionCycleSample.slot)))
     if latest_slot is not None and latest_slot > slot:
@@ -204,13 +205,13 @@ def build_hour(db, start, end, now):
         model=rows[-1].snapshot['model'] if rows else {}, context_key=rows[-1].context_key if rows else None,
         coverage=coverage,guidance=guide,density_basis=basis,
         coarse_ash=cells['coarse_ash'],heavy_amount=cells['heavy_amount'],total_ash=cells['total_ash'],suggested_density=advice,
-        notes=['总灰分按 501+502 实际产煤量加权；每批按记录的 5/30 秒时长计权，不跨缺口补齐产量。其他显示指标按有效时长加权。',
+        notes=['总灰分按 501+502 实际产煤量加权；每批按记录的 5/30/60 秒时长计权，不跨缺口补齐产量。其他显示指标按有效时长加权。',
                '手工数据按实际记录条数平均；没有新增时沿用该小时前最近值并显示采样时间。',
                '工况分段保留真实系统组合、均值、波动、方向和持续时间，暂不推断下一工况。',
                PROVISIONAL+'；等待响应实验，不限制未来估计区间宽度，单次执行仍限 ±0.03。'])
 
 
-def periodic_batch_ready(db, now, sources=None):
+def periodic_batch_ready(db, now, sources=None, *, cadence_seconds=ARCHIVE_CADENCE):
     """Wait for this bucket's durable batch, including bad-quality batches.
 
     Reading the five-second runtime cache here would leave dangling archive
@@ -218,13 +219,13 @@ def periodic_batch_ready(db, now, sources=None):
     """
     from datetime import datetime, timezone
     from ..telemetry.models import TelemetryReading
-    start = datetime.fromtimestamp(int(now.timestamp())//ARCHIVE_CADENCE*ARCHIVE_CADENCE,timezone.utc)
+    start = datetime.fromtimestamp(int(now.timestamp())//cadence_seconds*cadence_seconds,timezone.utc)
     query = select(TelemetryReading.source_id,TelemetryReading.sample).where(
         TelemetryReading.received_at >= iso_time(start),TelemetryReading.received_at <= iso_time(now))
     if sources:
         query = query.where(TelemetryReading.source_id.in_(sources))
     found = {source for source,sample in db.execute(query) if sample.get('storage_kind') == 'periodic'
-             and sample.get('cadence_seconds') == ARCHIVE_CADENCE and not sample.get('runtime_only')}
+             and sample.get('cadence_seconds') == cadence_seconds and not sample.get('runtime_only')}
     return set(sources) <= found if sources else bool(found)
 
 
@@ -236,10 +237,10 @@ def observation_tick(now=None, sessions=SessionLocal, *, cadence_seconds=CADENCE
         if db.bind.dialect.name == 'sqlite':
             db.execute(text('BEGIN'))
         revision = configuration_revision(db)
-        if cadence_seconds == ARCHIVE_CADENCE and not periodic_batch_ready(db,now or utc_now()):
+        if cadence_seconds in (30,60) and not periodic_batch_ready(db,now or utc_now(),cadence_seconds=cadence_seconds):
             return None
         prepared = prepare_record(db, now or utc_now(), cadence_seconds=cadence_seconds)
-        if prepared and cadence_seconds == ARCHIVE_CADENCE:
+        if prepared and cadence_seconds in (30,60):
             sources = set()
             for choice in prepared['snapshot'].get('sources',{}).get('resolved_choices',{}).values():
                 try:
@@ -248,7 +249,7 @@ def observation_tick(now=None, sessions=SessionLocal, *, cadence_seconds=CADENCE
                     continue
                 if source != 'manual-measurements':
                     sources.add(source)
-            if not periodic_batch_ready(db,prepared['now'],sources):
+            if not periodic_batch_ready(db,prepared['now'],sources,cadence_seconds=cadence_seconds):
                 return None
     log.info('decision_observation phase=prepare elapsed_ms=%.2f', (time.monotonic()-started)*1000)
     if prepared is None:

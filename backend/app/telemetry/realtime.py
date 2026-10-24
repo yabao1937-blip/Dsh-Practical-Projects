@@ -17,6 +17,54 @@ from .density_effective import valid_density
 RING_SECONDS = 180
 MAX_BATCHES = 128
 MAX_BYTES = 4 * 1024 * 1024
+ALIGNMENT_LEVEL_ITEM = 'TIA_3_5.TIA_3_5.JMCWC/LEVEL_B'
+ALIGNMENT_LAG_SECONDS = 90
+ALIGNMENT_LOOKBACK_SECONDS = 30
+ALIGNMENT_EVIDENCE_CADENCE = 5
+
+
+def select_alignment_evidence(document, cfg, owner, prediction_at):
+    """Capture at most one original level sample with a minute's durable batch.
+
+    The ring remains replaceable; only this selected raw event is made durable.
+    Quality is deliberately not a filter: a bad latest event must remain bad.
+    """
+    if (cfg.history_interval_seconds != 60 or not isinstance(document, dict)
+            or document.get('source_id') != cfg.source_id or document.get('owner') != owner
+            or document.get('state') != 'connected'):
+        return []
+    points = [point for point in cfg.points if point.item_id == ALIGNMENT_LEVEL_ITEM]
+    if len(points) != 1:
+        return []
+    point = points[0]
+    identity = definition_id(point.model_dump())
+    target = prediction_at - timedelta(seconds=ALIGNMENT_LAG_SECONDS)
+    lower = target - timedelta(seconds=ALIGNMENT_LOOKBACK_SECONDS)
+    candidates = []
+    for batch in document.get('batches', []):
+        if batch.get('source_id') != cfg.source_id:
+            continue
+        batch_id = batch.get('batch_id')
+        if not isinstance(batch_id, str) or not re.fullmatch(r'[a-f0-9]{32}', batch_id):
+            continue
+        for sample in batch.get('samples', []):
+            if (sample.get('key') != point.key or sample.get('definition_id') != identity
+                    or sample.get('runtime_only')):
+                continue
+            try:
+                received = parse_time(sample['received_at'])
+                if lower <= received <= target:
+                    candidates.append((received, batch_id, sample))
+            except (KeyError, ValueError, TypeError):
+                continue
+    if not candidates:
+        return []
+    _, batch_id, sample = max(candidates, key=lambda candidate: candidate[0])
+    return [dict(source_id=cfg.source_id, point_key=point.key, batch_id=batch_id,
+        item_id=ALIGNMENT_LEVEL_ITEM, prediction_at=iso_time(prediction_at), target_at=iso_time(target),
+        storage_kind='alignment-evidence',
+        sample=dict(deepcopy(sample), storage_kind='alignment-evidence',
+                    cadence_seconds=ALIGNMENT_EVIDENCE_CADENCE))]
 
 
 def runtime_folder(bind):
@@ -160,6 +208,10 @@ class RuntimePublisher:
     def publish(self, state, code=None, delay=0, batch=None):
         now = utc_now()
         data = self.document
+        if state != 'connected':
+            # A new connection must warm its own lag ring. Display memories are
+            # retained separately, but cannot become alignment evidence.
+            data['batches'] = []
         data.update(state=state, error_code=code, retry_seconds=delay, published_at=iso_time(now))
         if batch:
             data['batches'].append(deepcopy(batch))

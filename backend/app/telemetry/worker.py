@@ -12,7 +12,7 @@ from .opcua import ConfigurationError, OpcUaReader
 from .repository import CollectorBusy, LeaseLost
 from .spool import SpoolError
 from .domain import parse_time
-from .realtime import RuntimePublisher
+from .realtime import RuntimePublisher, select_alignment_evidence
 
 log = logging.getLogger("dmcs.collector")
 
@@ -192,6 +192,10 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
                                         storage_kind='periodic' if periodic or once else 'quality-event')
                                     batch['samples'] = [dict(s, cadence_seconds=cadence,
                                         storage_kind=batch['storage_kind']) for s in samples]
+                                    if (periodic or once) and cfg.history_interval_seconds == 60:
+                                        batch['alignment_evidence'] = select_alignment_evidence(
+                                            runtime.document if runtime is not None else None,
+                                            cfg, owner, max(parse_time(s['received_at']) for s in samples))
                                     spool.enqueue(batch)
                                     if periodic:
                                         last_bucket = bucket

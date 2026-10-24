@@ -6,7 +6,8 @@ current point settings, current model coefficients or the mutable latest-value c
 from copy import deepcopy
 from types import SimpleNamespace
 
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
+from sqlalchemy.dialects.sqlite import insert
 
 from ..models import ManualMeasurement
 from ..telemetry.models import TelemetryReading
@@ -108,11 +109,33 @@ def pack_snapshot(db, snapshot, slot, *, pins=None):
 
 
 def pin_readings(db, used, slot):
-    """Write only the reference identities already verified in a read snapshot."""
-    existing = set()
-    for ids in chunks(used):
-        existing.update(db.scalars(select(DecisionTelemetryPin.reading_id).where(DecisionTelemetryPin.reading_id.in_(ids))))
-    db.add_all([DecisionTelemetryPin(reading_id=i,first_slot=slot) for i in used-existing])
+    """Atomically widen usage bounds; never infer release safety from first use.
+
+    A newer observation may arrive while historical pin usage is being backfilled.
+    SQLite's conflict update preserves both bounds regardless of that ordering.
+    Release additionally requires a globally completed legacy backfill, which is
+    deliberately owned by the retention controller rather than this function.
+    """
+    pin_reading_bounds(db, {reading_id: (slot, slot) for reading_id in used})
+
+
+def pin_reading_bounds(db, bounds):
+    """Bulk-upsert prevalidated per-reading bounds, including legacy backfills."""
+    values = sorted(bounds.items())
+    for offset in range(0, len(values), 200):
+        # Three values per row stay below SQLite's older 999-variable limit.
+        statement = insert(DecisionTelemetryPin).values([
+            dict(reading_id=reading_id, first_slot=lower, last_slot=upper)
+            for reading_id, (lower, upper) in values[offset:offset+200]])
+        statement = statement.on_conflict_do_update(
+            index_elements=[DecisionTelemetryPin.reading_id],
+            set_=dict(first_slot=func.min(DecisionTelemetryPin.first_slot, statement.excluded.first_slot),
+                      last_slot=func.max(func.coalesce(DecisionTelemetryPin.last_slot,
+                                                       statement.excluded.last_slot),
+                                         statement.excluded.last_slot)))
+        # Returning also refreshes pins already loaded in this Session.
+        db.scalars(statement.returning(DecisionTelemetryPin),
+                   execution_options={'populate_existing': True}).all()
 
 
 def resolve_snapshots(db, snapshots):

@@ -3,6 +3,7 @@ from collections import Counter
 from datetime import datetime, timezone, timedelta
 from math import fsum, sqrt
 from bisect import bisect_right
+from copy import deepcopy
 
 from ..hourly_brief.inputs import business_time, numeric
 from ..telemetry.domain import iso_time
@@ -54,13 +55,13 @@ def flow_event(row):
 
 
 def quality_boundaries(db, rows, end):
-    """Rare durable quality events can terminate a previously saved 30s period."""
+    """Rare durable quality events can terminate a saved 30/60s period."""
     if db is None:
         return {}
     from sqlalchemy import select, tuple_
     from ..telemetry.models import TelemetryReading
     identities = {(c.get('source_id'),c.get('point_key')) for r in rows
-        if cadence_seconds(r.snapshot) == 30 for c in quality_sources(r)
+        if cadence_seconds(r.snapshot) > CADENCE for c in quality_sources(r)
         if c.get('source_id') and c.get('point_key')}
     if not identities:
         return {}
@@ -83,13 +84,17 @@ def quality_sources(row):
 
 
 def weights(rows, end, *, db=None):
-    """Each archived batch covers its explicit 5/30s cadence, never a gap/hour."""
+    """Each archived batch covers its explicit 5/30/60s cadence, never a gap/hour."""
+    if rows and all(hasattr(row, '_settlement_weight') for row in rows):
+        # Permanent chemistry frames carry the original quality-event clipping.
+        # They are not telemetry and must not consult deleted raw history.
+        return {row.slot: deepcopy(row._settlement_weight) for row in rows}
     seen, result = set(), {}
     boundaries = quality_boundaries(db,rows,end)
     for i, row in enumerate(rows):
         event, reason = flow_event(row)
         seconds = row_seconds(row, end, rows[i+1] if i+1 < len(rows) else None)
-        if cadence_seconds(row.snapshot) == 30:
+        if cadence_seconds(row.snapshot) > CADENCE:
             left = at(row).timestamp()
             for c in quality_sources(row):
                 times = boundaries.get((c.get('source_id'),c.get('point_key')),[])
@@ -161,7 +166,7 @@ def statistics(rows, key, w):
     if not accepted:
         return dict(mean=None, mass_mean=None, count=0)
     values = [c['value'] for _, c in accepted]
-    weighted = any(cadence_seconds(r.snapshot) == 30 for r,_ in accepted)
+    weighted = any(cadence_seconds(r.snapshot) > CADENCE for r,_ in accepted)
     actual_durations = [w[r.slot].get('duration_seconds',w[r.slot]['seconds']) for r,_ in accepted]
     durations = actual_durations if weighted else [1.]*len(accepted)
     seconds = fsum(durations)

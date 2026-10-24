@@ -381,6 +381,9 @@ def default_manager():
 
 def create_router(manager=None):
     router = APIRouter(prefix='/readonly-db', tags=['只读测试数据连接'])
+    # Cold verification performs disk I/O; reject concurrent reads immediately
+    # instead of queuing them behind live telemetry or the SQL snapshot pool.
+    cold_slots = threading.BoundedSemaphore(1)
 
     def authorized(request):
         current = manager if manager is not None else default_manager()
@@ -404,6 +407,58 @@ def create_router(manager=None):
         # Reuse the same exact-IP/token check; callers cannot choose file paths.
         from .live_cache import transport_view
         return invoke(request, lambda current, owner: transport_view(current.path))
+
+    def cold(request, kind):
+        from ..storage_retention.reader import (ColdDetailExpired, ColdReadError, ColdReadLimit,
+                                                transport_read, validate_transport_request)
+        try:
+            # Authenticate before validating any untrusted query argument.
+            current, _owner = authorized(request)
+            if len(request.url.query.encode('utf-8')) > 4096:
+                raise BridgeError('readonly_request_limit', 413)
+            params = dict(request.query_params)
+            allowed = {'start'} if kind == 'decisions' else {'source_id', 'point_key', 'before_id', 'limit'}
+            if set(params)-allowed or len(params) != len(request.query_params.multi_items()):
+                raise BridgeError('readonly_request_rejected')
+            if kind == 'decisions':
+                if set(params) != {'start'} or len(params['start']) > 64:
+                    raise BridgeError('readonly_request_rejected')
+            else:
+                if not {'source_id', 'point_key'} <= params.keys():
+                    raise BridgeError('readonly_request_rejected')
+                try:
+                    params['limit'] = int(params.get('limit', 100))
+                    if 'before_id' in params:
+                        params['before_id'] = int(params['before_id'])
+                except (TypeError, ValueError):
+                    raise BridgeError('readonly_request_rejected') from None
+            try:
+                params = validate_transport_request(kind, params)
+            except ColdReadError:
+                raise BridgeError('readonly_request_rejected') from None
+            if not cold_slots.acquire(blocking=False):
+                raise BridgeError('readonly_cold_busy', 429)
+            try:
+                return transport_read(current.path, kind, params)
+            finally:
+                cold_slots.release()
+        except ColdDetailExpired:
+            raise HTTPException(410, detail={'error_code': 'readonly_detail_expired'}) from None
+        except ColdReadLimit:
+            raise HTTPException(413, detail={'error_code': 'readonly_result_limit'}) from None
+        except ColdReadError:
+            raise HTTPException(503, detail={'error_code': 'readonly_cold_unavailable'}) from None
+        except BridgeError as error:
+            raise HTTPException(error.status, detail={'error_code': error.code},
+                headers={'Retry-After': '1'} if error.status == 429 else None) from None
+
+    @router.get('/cold/decisions')
+    def cold_decisions(request: Request):
+        return cold(request, 'decisions')
+
+    @router.get('/cold/telemetry')
+    def cold_telemetry(request: Request):
+        return cold(request, 'telemetry')
 
     @router.post('/transactions/{identifier}/queries')
     async def query(identifier: str, request: Request):

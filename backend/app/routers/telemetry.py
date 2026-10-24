@@ -10,6 +10,9 @@ from ..auth import require_write
 from ..telemetry.control import CollectorStartError, ensure_collector_started
 from ..telemetry.models import TelemetryReading
 from ..telemetry.repository import latest_view
+from ..storage_retention.reader import (
+    ColdDetailExpired, ColdReadError, ColdReadLimit, cold_history, cold_history_ceiling,
+)
 
 router = APIRouter(prefix="/telemetry", tags=["工业数据采集"])
 
@@ -49,6 +52,38 @@ def history(source_id: str = Query(..., min_length=1, max_length=64),
         TelemetryReading.point_key == point_key)
     if before_id:
         query = query.where(TelemetryReading.id < before_id)
-    rows = list(db.scalars(query.order_by(TelemetryReading.id.desc()).limit(limit + 1)))
-    return {"items": [{"id": row.id, **row.sample} for row in rows[:limit]],
-            "next_before_id": rows[limit - 1].id if len(rows) > limit else None}
+    hot_rows = list(db.scalars(query.order_by(TelemetryReading.id.desc()).limit(limit + 1)))
+    cold_rows = []
+    partial_reason = None
+    try:
+        floor_id = hot_rows[limit].id if len(hot_rows) > limit else None
+        ceiling = cold_history_ceiling(db, source_id, point_key, before_id=before_id) \
+            if floor_id is not None else None
+        # The online page and its lookahead are already complete when no cold
+        # reading can sort ahead of that lookahead. Do not open old bundles.
+        if floor_id is None or ceiling is None or ceiling > floor_id:
+            cold_rows = cold_history(db, source_id, point_key, before_id=before_id,
+                limit=limit + 1, floor_id=floor_id)
+    except ColdDetailExpired:
+        if not hot_rows:
+            raise HTTPException(status_code=410, detail={"error_code": "cold_detail_expired",
+                "message": "历史明细已超过保留期限。"}) from None
+        partial_reason = "cold_detail_expired"
+    except ColdReadLimit:
+        if not hot_rows:
+            raise HTTPException(status_code=503, detail={"error_code": "cold_history_unavailable",
+                "message": "历史归档读取量超过单次限制，请缩小查询范围。"}) from None
+        partial_reason = "cold_read_limit"
+    except ColdReadError:
+        raise HTTPException(status_code=503, detail={"error_code": "cold_history_unavailable",
+            "message": "历史归档暂时无法读取，请稍后重试。"}) from None
+    # A verified monthly archive can overlap the online database while deletion
+    # is pending. Original reading IDs remain the cursor across both tiers.
+    samples = {row["id"]: row["sample"] for row in cold_rows}
+    samples.update((row.id, row.sample) for row in hot_rows)
+    rows = sorted(samples.items(), reverse=True)
+    result = {"items": [{"id": reading_id, **sample} for reading_id, sample in rows[:limit]],
+        "next_before_id": rows[limit - 1][0] if len(rows) > limit else None}
+    if partial_reason:
+        result.update(cold_partial=True, cold_partial_reason=partial_reason)
+    return result

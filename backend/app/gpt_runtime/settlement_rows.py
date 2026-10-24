@@ -17,7 +17,8 @@ from ..decision_hourly.references import resolve_snapshots
 from ..telemetry.domain import iso_time
 
 
-_TOP = ('storage_version', 'evidence_policy', 'sources', 'coarse_ash', 'heavy_amount', 'total_ash')
+_TOP = ('storage_version', 'evidence_policy', 'sources', 'coarse_ash', 'heavy_amount', 'total_ash',
+        'cadence_seconds', 'quality_sources')
 _CELLS = ('belt501', 'belt502', 'float_ash', 'float_amount', 'coarse_amount')
 
 
@@ -58,6 +59,10 @@ def _snapshot(row):
 
 def load_rows(db, start):
     """Match the normal loader, including hot-over-archive slot precedence."""
+    from ..storage_retention.basis import load_basis_rows
+    permanent = load_basis_rows(db, start)
+    if permanent is not None:
+        return permanent
     end = start+timedelta(hours=1)
     rows = {row['slot']: SimpleNamespace(**row) for row in archived_rows(db, iso_time(start),
         project_snapshot=settlement_snapshot)}

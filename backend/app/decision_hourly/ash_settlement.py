@@ -45,6 +45,10 @@ def settlement_snapshot(snapshot):
 
 
 def load_rows(db, start):
+    from ..storage_retention.basis import load_basis_rows
+    permanent = load_basis_rows(db, start)
+    if permanent is not None:
+        return permanent
     end = start+timedelta(hours=1)
     rows = {r['slot']: SimpleNamespace(**r) for r in archived_rows(db, iso_time(start),
         project_snapshot=settlement_snapshot)}
@@ -208,6 +212,9 @@ def build_settlement(db, start, now=None, basis=None, source=None, *, rows=None,
             manual_applied=use_manual))
     choices = {json.dumps(r.snapshot.get('sources', {}).get('resolved_choices', {}), sort_keys=True) for r in rows}
     sources = rows[0].snapshot.get('sources') if rows else None
+    if stopped is None:
+        from ..storage_retention.basis import load_basis_stopped
+        stopped = load_basis_stopped(db, start)
     if stopped is None:
         saved = db.get(DecisionAshSettlement, iso_time(start))
         prior = saved.snapshot if saved else {}

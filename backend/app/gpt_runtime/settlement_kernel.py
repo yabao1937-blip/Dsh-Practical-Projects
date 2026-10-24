@@ -61,6 +61,10 @@ def _sources(value):
 
 
 def kernel_snapshot(snapshot):
+    if 'cadence_seconds' in snapshot or 'quality_sources' in snapshot:
+        # The legacy SQL projection omits cadence/quality boundary evidence.
+        # Preserve new 30-second and event semantics with the lossless loader.
+        raise _UnsupportedKernel()
     packed = snapshot.get('storage_version') == VERSION
     result = {key: deepcopy(snapshot[key]) for key in ('storage_version', 'evidence_policy') if key in snapshot}
     if 'sources' in snapshot:
@@ -181,7 +185,8 @@ def _resolve(db, snapshots):
 def _archive(db, start):
     saved = db.get(DecisionEvidenceArchive, iso_time(start))
     if saved is None:
-        return []
+        from ..storage_retention.reader import cold_rows
+        return cold_rows(db, start, project_snapshot=kernel_snapshot)
     raw = zlib.decompress(saved.payload)
     if hashlib.sha256(raw).hexdigest() != saved.checksum:
         raise ValueError('逐次证据归档校验失败')
@@ -190,6 +195,17 @@ def _archive(db, start):
 
 def load_kernel_rows(db, start):
     """Return only shared settlement-kernel inputs, with no database writes."""
+    from ..storage_retention.basis import load_basis_rows
+    permanent = load_basis_rows(db, start)
+    if permanent is not None:
+        return permanent
+    modern = db.scalar(select(DecisionCycleSample.slot).where(
+        DecisionCycleSample.sampled_at >= iso_time(start),
+        DecisionCycleSample.sampled_at < iso_time(start+timedelta(hours=1)),
+        (func.json_type(DecisionCycleSample.snapshot, '$.cadence_seconds').is_not(None)) |
+        (func.json_type(DecisionCycleSample.snapshot, '$.quality_sources').is_not(None))).limit(1))
+    if modern is not None:
+        return lossless_rows(db, start)
     try:
         archived = _archive(db, start)
         hot = list(db.execute(select(DecisionCycleSample.slot, DecisionCycleSample.sampled_at,

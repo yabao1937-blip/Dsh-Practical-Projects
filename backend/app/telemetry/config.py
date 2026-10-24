@@ -42,10 +42,11 @@ class CollectorConfig(BaseModel):
     timeout_seconds: float = Field(default=10, ge=0.1, le=30)
     retry_min_seconds: float = Field(default=1, ge=0.1, le=30)
     retry_max_seconds: float = Field(default=30, ge=0.1, le=120)
-    history_interval_seconds: float = Field(default=30, ge=1, le=3600)
+    history_interval_seconds: float = Field(default=60, ge=1, le=3600)
     # Compatibility with deployed config files; positive legacy values no longer
-    # enable deletion. All raw history is retained permanently (0 = no expiry).
-    retention_days: int = Field(default=0, ge=0, le=90, description="永久保留；旧保留天数自动转换为 0")
+    # enable raw deletion. The separate verified retention worker owns 30/365-day
+    # archival; a collector can never delete referenced history by itself.
+    retention_days: int = Field(default=0, ge=0, le=90, description="采集器不直接清理；由独立归档维护按30/365天策略处理")
     security: Literal["Basic256Sha256", "None"] = "Basic256Sha256"
     allow_insecure: bool = False
     application_uri: str = "urn:dmcs:collector"

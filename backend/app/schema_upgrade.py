@@ -67,6 +67,11 @@ def upgrade_schema(engine):
                 conn.exec_driver_sql("ALTER TABLE manual_measurements ADD COLUMN time_basis VARCHAR(32) NOT NULL DEFAULT 'legacy-lag-2h'")
             if cols:
                 conn.exec_driver_sql('CREATE INDEX IF NOT EXISTS ix_manual_measurement_effective_latest ON manual_measurements(metric,time_basis,observed_at,id)')
+            cols = {r[1] for r in conn.exec_driver_sql('PRAGMA table_info(decision_telemetry_pins)')}
+            if cols and 'last_slot' not in cols:
+                # Metadata-only additive upgrade. Historical JSON scanning runs
+                # later, one hour at a time, before retention may release pins.
+                conn.exec_driver_sql('ALTER TABLE decision_telemetry_pins ADD COLUMN last_slot INTEGER')
             conn.commit()
         except Exception:
             conn.rollback()

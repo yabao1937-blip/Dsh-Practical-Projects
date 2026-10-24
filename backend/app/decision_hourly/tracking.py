@@ -94,6 +94,8 @@ def assess_window(db,action,start,end):
     from .models import DecisionCycleSample
     from .references import hydrate_rows
     from .evidence import SEGMENT_POLICY, statistics, weights
+    from ..storage_retention.reader import ColdDetailExpired, ColdReadError
+    from ..storage_retention.basis import load_basis_rows
     first=min(start,business_time(action.evidence['before']['sampled_at']))
     last=max(end,business_time(action.evidence['after']['sampled_at']))
     if (last-first).total_seconds()>3600:
@@ -102,8 +104,17 @@ def assess_window(db,action,start,end):
         DecisionCycleSample.sampled_at<=iso_time(last)).order_by(DecisionCycleSample.slot)))
     cursor=first.replace(minute=0,second=0,microsecond=0)
     by_slot={r.slot:r for r in hydrate_rows(db,rows)}
+    frozen_weights = {}
     while cursor<=last:
-        for r in archived_rows(db,iso_time(cursor)):
+        try:
+            archived = archived_rows(db,iso_time(cursor))
+        except ColdDetailExpired:
+            return dict(status='insufficient',reason='逐次工况明细已按一年保留策略过期；调密操作、人工化验与小时统计仍保留，不能重新推断单次响应')
+        except ColdReadError as exc:
+            return dict(status='insufficient',reason='关联工况证据暂不可用，人工记录正常保存；'+str(exc))
+        for frame in load_basis_rows(db,cursor) or []:
+            frozen_weights[frame.slot] = frame._settlement_weight
+        for r in archived:
             if iso_time(first)<=r['sampled_at']<=iso_time(last):
                 by_slot.setdefault(r['slot'],SimpleNamespace(**r))
         cursor+=timedelta(hours=1)
@@ -111,6 +122,17 @@ def assess_window(db,action,start,end):
     if len(rows)<2:
         return dict(status='insufficient',reason='缺少采样关联区间的逐次工况证据')
     w=weights(rows,last+timedelta(seconds=cadence_seconds(rows[-1].snapshot)),db=db)
+    # Old cold evidence no longer has live raw quality events. Reuse the original
+    # quality-clipped weights, clipped only to this explicitly requested window.
+    stop=last+timedelta(seconds=cadence_seconds(rows[-1].snapshot))
+    for row in rows:
+        if row.slot in frozen_weights:
+            original=frozen_weights[row.slot]
+            duration=max(0.,(stop-business_time(row.sampled_at)).total_seconds())
+            seconds=min(original['seconds'],duration)
+            w[row.slot]={**original,'seconds':seconds,
+                'duration_seconds':min(original['duration_seconds'],duration),
+                'mass_t':original['mass_t']*seconds/original['seconds'] if original['seconds'] else 0.}
     factors={key:statistics(rows,key,w) for key in SEGMENT_POLICY['thresholds']}
     warnings=[]
     if len({digest(state(r)) for r in rows})>1:

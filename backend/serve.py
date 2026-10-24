@@ -15,6 +15,8 @@ import os
 import pathlib
 import sys
 
+from app.storage_retention.files import RotatingWebLog
+
 from client_mode import client_url
 from remote_mode import settings as remote_settings
 _remote_readonly = remote_settings()
@@ -25,11 +27,8 @@ if not _remote_readonly and (_client_target := client_url()):
 log_path = pathlib.Path(os.environ.get("DMCS_LOG")
                         or (pathlib.Path(os.environ.get("TEMP") or ".") / "dmcs_server.log"))
 log_path.parent.mkdir(parents=True, exist_ok=True)
-# 新文件先写 UTF-8 BOM：否则 Windows 记事本/PowerShell 5.1 会按 GBK 打开，中文日志全是乱码
-if not log_path.exists() or log_path.stat().st_size == 0:
-    with open(log_path, "wb") as _seed:
-        _seed.write(b"\xef\xbb\xbf")
-_log = open(log_path, "a", encoding="utf-8", buffering=1)      # 行缓冲，崩溃前的行也能落盘
+# 保持当前日志地址，已关闭分卷另存并认证为90天错误日志。
+_log = RotatingWebLog(log_path, pathlib.Path(__file__).resolve().parent.parent)
 sys.stdout = sys.stderr = _log
 
 
@@ -38,6 +37,8 @@ def _say(msg):
 
 
 _say("serve.py 启动：pid=%d，cwd=%s，日志=%s" % (os.getpid(), os.getcwd(), log_path))
+if _log.last_rotation_error:
+    _say("日志分卷暂缓，当前日志已保留：" + _log.last_rotation_error)
 try:
     import uvicorn
 except Exception as exc:                                        # 依赖缺失也要留痕
@@ -54,3 +55,4 @@ except BaseException as exc:                                     # 含 KeyboardI
     raise
 finally:
     _say("serve.py 结束：pid=%d" % os.getpid())
+    _log.close()
