@@ -255,3 +255,30 @@ def test_density_trend_pairs_manual_setpoint_with_suggested_advice(client,sessio
     month=client.get('/api/v1/decision/evidence/density-trend',params={'limit':720})
     assert month.status_code==200 and month.json()['items'].__len__()==720
     assert client.get('/api/v1/decision/evidence/density-trend',params={'limit':721}).status_code==422
+
+
+def test_density_trend_custom_range_aligns_and_validates(client,sessions,monkeypatch):
+    monkeypatch.setattr('app.decision_hourly.router.utc_now',lambda:HOUR)
+    with sessions.begin() as db:
+        seed_anchor(db,START,1.48)
+        db.add(DecisionCycleHour(start=iso_time(START),end=iso_time(HOUR),generated_at=iso_time(HOUR),
+            snapshot=dict(suggested_density=dict(value=1.5,status='calculated',reason='均值'))))
+    custom=client.get('/api/v1/decision/evidence/density-trend',params={
+        'start':iso_time(START+timedelta(minutes=30)),'end':iso_time(HOUR+timedelta(minutes=90))})
+    assert custom.status_code==200,custom.text
+    result=custom.json()
+    # Minutes floor to hour boundaries; the future part clamps to the current hour.
+    assert result['items'].__len__()==1 and result['items'][0]['start']==iso_time(START)
+    assert result['period']==dict(start=iso_time(START),end=iso_time(HOUR))
+    assert result['items'][0]['setpoint']['value']==1.48 and result['items'][0]['suggested']['value']==1.5
+    only_start=client.get('/api/v1/decision/evidence/density-trend',params={'start':iso_time(START)})
+    assert only_start.status_code==422 and '同时' in only_start.json()['detail']
+    naive=client.get('/api/v1/decision/evidence/density-trend',params={
+        'start':'2026-10-08T01:00:00','end':iso_time(HOUR)})
+    assert naive.status_code==422
+    reversed_range=client.get('/api/v1/decision/evidence/density-trend',params={
+        'start':iso_time(HOUR),'end':iso_time(START)})
+    assert reversed_range.status_code==422
+    too_long=client.get('/api/v1/decision/evidence/density-trend',params={
+        'start':iso_time(HOUR-timedelta(days=91)),'end':iso_time(HOUR)})
+    assert too_long.status_code==422 and '90' in too_long.json()['detail']

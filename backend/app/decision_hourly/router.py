@@ -107,7 +107,8 @@ def actions(limit:int=Query(20,ge=1,le=100),offset:int=Query(0,ge=0,le=100000),d
 
 
 @router.get('/density-trend')
-def density_trend(limit:int=Query(168,ge=6,le=720),db:Session=Depends(get_db)):
+def density_trend(limit:int=Query(168,ge=6,le=720),start:datetime|None=Query(None),
+        end:datetime|None=Query(None),db:Session=Depends(get_db)):
     """Hourly operator setpoint vs suggested density for the trend chart.
 
     Setpoint standing in an hour = the last tracked change's after value, else
@@ -115,18 +116,40 @@ def density_trend(limit:int=Query(168,ge=6,le=720),db:Session=Depends(get_db)):
     Hours with neither source stay empty instead of fabricating a carried value.
     Only the required JSON fields are projected: full hour snapshots would exceed
     the read-only proxy's result limit over 30-day windows.
+    Without start/end a rolling window of `limit` hours back from now is used;
+    a custom range is aligned to whole hours, clamped to the past and capped.
     """
     import json
     now=utc_now()
-    end=now.astimezone(LOCAL).replace(minute=0,second=0,microsecond=0)
-    start=end-timedelta(hours=limit)
+    current_end=now.astimezone(LOCAL).replace(minute=0,second=0,microsecond=0)
+    if start is None and end is None:
+        end_hour=current_end
+        start_hour=end_hour-timedelta(hours=limit)
+    else:
+        if start is None or end is None:
+            raise HTTPException(422,'自定义范围请同时提供开始和结束时间')
+        for stamp,name in ((start,'开始'),(end,'结束')):
+            if stamp.tzinfo is None:
+                raise HTTPException(422,f'{name}时间须包含时区')
+            if stamp.second or stamp.microsecond:
+                raise HTTPException(422,f'{name}时间最小单位为分钟')
+        start_hour=start.astimezone(LOCAL).replace(minute=0,second=0,microsecond=0)
+        end_hour=end.astimezone(LOCAL).replace(minute=0,second=0,microsecond=0)
+        if end_hour<=start_hour:
+            raise HTTPException(422,'结束时间须晚于开始时间（按小时对齐后至少 1 小时）')
+        if end_hour-start_hour>timedelta(days=90):
+            raise HTTPException(422,'自定义范围最长 90 天，请缩小时间段')
+        if end_hour>current_end:
+            end_hour=current_end
+        if end_hour<=start_hour:
+            raise HTTPException(422,'所选范围尚未过去，暂无可统计的完整小时')
     hours={r[0]:(json.loads(r[1]) if r[1] else {}) for r in db.execute(select(
         DecisionCycleHour.start,DecisionCycleHour.snapshot['suggested_density'].as_string()).where(
-        DecisionCycleHour.start>=iso_time(start),DecisionCycleHour.start<iso_time(end)))}
+        DecisionCycleHour.start>=iso_time(start_hour),DecisionCycleHour.start<iso_time(end_hour)))}
     anchors={r[0]:dict(value=r[1],components=json.loads(r[2]) if r[2] else {}) for r in db.execute(select(
         GptHourlyDensityAnchor.start,GptHourlyDensityAnchor.snapshot['basis']['value'].as_float(),
         GptHourlyDensityAnchor.snapshot['basis']['components'].as_string()).where(
-        GptHourlyDensityAnchor.start>=iso_time(start),GptHourlyDensityAnchor.start<iso_time(end)))}
+        GptHourlyDensityAnchor.start>=iso_time(start_hour),GptHourlyDensityAnchor.start<iso_time(end_hour)))}
     channel=None
     for key in sorted(anchors,reverse=True):
         parts=anchors[key]['components']
@@ -141,14 +164,14 @@ def density_trend(limit:int=Query(168,ge=6,le=720),db:Session=Depends(get_db)):
     for detected,action_channel,before,after in db.execute(select(DensityAction.detected_at,DensityAction.channel,
             DensityAction.evidence['before']['pair']['setpoint']['value'].as_float(),
             DensityAction.evidence['after']['pair']['setpoint']['value'].as_float()).where(
-            DensityAction.detected_at>=iso_time(start),DensityAction.detected_at<iso_time(end)).order_by(DensityAction.detected_at)):
+            DensityAction.detected_at>=iso_time(start_hour),DensityAction.detected_at<iso_time(end_hour)).order_by(DensityAction.detected_at)):
         if channel and action_channel!=channel:
             continue
         stamp=business_time(detected).replace(minute=0,second=0,microsecond=0)
         by_hour.setdefault(iso_time(stamp),[]).append(dict(at=detected,channel=action_channel,before=before,after=after))
     items=[]
-    cursor=start
-    while cursor<end:
+    cursor=start_hour
+    while cursor<end_hour:
         key=iso_time(cursor)
         acts=by_hour.get(key,[])
         anchor=anchors.get(key)
@@ -167,7 +190,7 @@ def density_trend(limit:int=Query(168,ge=6,le=720),db:Session=Depends(get_db)):
             actions=acts))
         cursor+=timedelta(hours=1)
     return dict(policy='density-trend-v1',generated_at=iso_time(now),
-        channel=channel or '全部通道',period=dict(start=iso_time(start),end=iso_time(end)),
+        channel=channel or '全部通道',period=dict(start=iso_time(start_hour),end=iso_time(end_hour)),
         total_actions=sum(len(acts) for acts in by_hour.values()),items=items)
 
 

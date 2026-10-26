@@ -61,6 +61,19 @@ const url = process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000';
         await page.locator('[data-t-range="720"]').click();
         await page.waitForFunction(() => (document.getElementById('density-trend-canvas')._hits || []).length === 720);
         assert.match(await page.locator('#density-trend-caption').innerText(), /近30天 · 720 小时/);
+        // Custom range: last 48 complete hours via the pickers.
+        await page.evaluate(() => {
+            const local = offset => new Date(Date.now() + offset + 8 * 3600000)
+                .toISOString().slice(0, 16);
+            document.getElementById('density-trend-start').value = local(-50 * 3600000);
+            document.getElementById('density-trend-end').value = local(-2 * 3600000);
+        });
+        await page.locator('#density-trend-query').click();
+        await page.waitForFunction(() => (document.getElementById('density-trend-canvas')._hits || []).length === 48);
+        assert.match(await page.locator('#density-trend-caption').innerText(), /自定义 48 小时/);
+        // A preset click returns to rolling windows.
+        await page.locator('[data-t-range="168"]').click();
+        await page.waitForFunction(() => (document.getElementById('density-trend-canvas')._hits || []).length === 168);
         await page.screenshot({path:path.join(output,'density-trend-page.png'),fullPage:false});
         // The tracking dialog must be restored: no chart inside it.
         await page.locator('.nav-item[data-page="page-decision"]').click();

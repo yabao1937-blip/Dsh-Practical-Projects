@@ -481,6 +481,10 @@
                     <div class="filter-group" id="density-trend-ranges">
                         <button type="button" class="btn" data-t-range="168" aria-pressed="true">近7天</button>
                         <button type="button" class="btn" data-t-range="720" aria-pressed="false">近30天</button>
+                        <input type="datetime-local" id="density-trend-start" step="60" aria-label="自定义开始时间" title="自定义开始时间（北京时间）">
+                        <span>至</span>
+                        <input type="datetime-local" id="density-trend-end" step="60" aria-label="自定义结束时间" title="自定义结束时间（北京时间）">
+                        <button type="button" class="btn" id="density-trend-query">查询</button>
                         <button type="button" class="btn" id="density-trend-refresh">刷新</button>
                     </div>
                 </div>

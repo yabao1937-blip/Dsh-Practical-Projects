@@ -1,6 +1,6 @@
 /* Dedicated page: operator setpoint vs suggested density, hourly point-line chart. */
 const DensityTrendPage = {
-    hours: 168, inited: false, seq: 0, series: null, meta: null, actions: null,
+    hours: 168, range: null, inited: false, seq: 0, series: null, meta: null, actions: null,
     seriesOf(items) {
         // Pure shape for the point-line chart: null keeps the gap visible.
         return (items || []).map((item, index) => ({index, label: item.label,
@@ -19,10 +19,18 @@ const DensityTrendPage = {
         this.inited = true;
         document.querySelectorAll('#density-trend-ranges [data-t-range]').forEach(button =>
             button.addEventListener('click', () => {
-                if (Number(button.dataset.tRange) === this.hours) return;
+                if (Number(button.dataset.tRange) === this.hours && !this.range) return;
                 this.hours = Number(button.dataset.tRange);
+                this.range = null;
                 this.refresh();
             }));
+        document.getElementById('density-trend-query')?.addEventListener('click', () => {
+            const start = document.getElementById('density-trend-start').value;
+            const end = document.getElementById('density-trend-end').value;
+            if (!start || !end) { this.status('自定义范围请同时选择开始和结束时间。'); return; }
+            this.range = {start: start + ':00+08:00', end: end + ':00+08:00'};
+            this.refresh();
+        });
         document.getElementById('density-trend-refresh')?.addEventListener('click', () => this.refresh());
         this.resizeObserver = new ResizeObserver(() => { if (this.series) this.draw(); });
         this.resizeObserver.observe(document.getElementById('density-trend-plot'));
@@ -35,8 +43,11 @@ const DensityTrendPage = {
         const seq = ++this.seq;
         this.status('正在读取趋势数据…');
         try {
+            const path = this.range
+                ? '/density-trend?start=' + encodeURIComponent(this.range.start) + '&end=' + encodeURIComponent(this.range.end)
+                : '/density-trend?limit=' + this.hours;
             const [trend, actions] = await Promise.all([
-                Api.decisionEvidence('/density-trend?limit=' + this.hours),
+                Api.decisionEvidence(path),
                 Api.decisionEvidence('/actions?limit=50').catch(() => null),
             ]);
             if (seq !== this.seq) return;
@@ -45,15 +56,17 @@ const DensityTrendPage = {
             this.actions = actions;
             this.status('');
             document.querySelectorAll('#density-trend-ranges [data-t-range]').forEach(button => {
-                const selected = Number(button.dataset.tRange) === this.hours;
+                const selected = !this.range && Number(button.dataset.tRange) === this.hours;
                 button.classList.toggle('btn-primary', selected);
                 button.setAttribute('aria-pressed', String(selected));
             });
             const set = this.series.filter(s => s.setpoint !== null).length;
             const advice = this.series.filter(s => s.suggested !== null).length;
-            const label = this.hours === 168 ? '近7天' : '近30天';
+            const label = this.range
+                ? `自定义 ${this.series.length} 小时（${new Date(trend.period.start).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23', minute: '2-digit'})} 至 ${new Date(trend.period.end).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23', minute: '2-digit'})}）`
+                : `${this.hours === 168 ? '近7天' : '近30天'} · ${this.series.length} 小时`;
             document.getElementById('density-trend-caption').textContent =
-                `${label} · ${this.series.length} 小时 · 人工设定 ${set} 小时 · 建议密度 ${advice} 小时 · 调密 ${trend.total_actions} 次（${trend.channel === '全部通道' ? '全部通道' : 'MD_SET ' + trend.channel}）`;
+                `${label} · 人工设定 ${set} 小时 · 建议密度 ${advice} 小时 · 调密 ${trend.total_actions} 次（${trend.channel === '全部通道' ? '全部通道' : 'MD_SET ' + trend.channel}）`;
             this.renderActions();
             this.draw();
         } catch (error) {
