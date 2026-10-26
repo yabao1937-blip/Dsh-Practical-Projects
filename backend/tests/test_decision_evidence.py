@@ -13,7 +13,7 @@ from app.auth import require_write
 from app.database import get_db
 from app.decision_hourly.evidence import POLICY, MASS, summarize
 from app.decision_hourly.tracking import observe
-from app.decision_hourly.models import DecisionCycleHour, DecisionCycleSample, DecisionCycleContext, DensityAction, DensityActionEntry
+from app.decision_hourly.models import DecisionCycleHour, DecisionCycleSample, DecisionCycleContext, DensityAction, DensityActionEntry, GptHourlyDensityAnchor
 from app.decision_hourly.archive import archive_old_hour, read_sample
 from app.decision_hourly.ash_history import read_ash_hours
 from app.decision_hourly.router import router
@@ -215,3 +215,40 @@ def test_samples_and_segments_queries_are_read_only(client,sessions):
         assert client.get('/api/v1/decision/evidence/hours').json()['current_start']
         assert client.get('/api/v1/decision/evidence/samples',params={'start':iso_time(START)}).json()['total']==0
         assert list(db.connection().connection.driver_connection.iterdump())==before
+
+
+def seed_anchor(db,start,value,channel='A304'):
+    basis=dict(value=value,status='good',unit='g/cm³',
+        components={channel:dict(item_id=f'TIA_4_1.TIA_4_1.{channel}/MD_SET',value=value,status='good')})
+    db.add(GptHourlyDensityAnchor(start=iso_time(start),captured_at=iso_time(start),snapshot=dict(basis=basis)))
+
+
+def test_density_trend_pairs_manual_setpoint_with_suggested_advice(client,sessions,monkeypatch):
+    monkeypatch.setattr('app.decision_hourly.router.utc_now',lambda:HOUR)
+    with sessions.begin() as db:
+        db.add(DecisionCycleHour(start=iso_time(START),end=iso_time(HOUR),generated_at=iso_time(HOUR),
+            snapshot=dict(suggested_density=dict(value=1.5,status='calculated',reason='上一小时各次建议取平均'))))
+        db.add(DecisionCycleHour(start=iso_time(START-timedelta(hours=1)),end=iso_time(START),
+            generated_at=iso_time(START),snapshot=dict(suggested_density=dict(value=None,status='held',reason='输入沿用，暂缓调密'))))
+        seed_anchor(db,START,1.48)
+        seed_anchor(db,START-timedelta(hours=1),1.47)
+        db.add(DensityAction(id='manual-move',channel='A304',detected_at=iso_time(START+timedelta(minutes=30)),
+            evidence=dict(before={'pair':{'setpoint':{'value':1.48}}},after={'pair':{'setpoint':{'value':1.52}}})))
+        db.add(DensityAction(id='other-channel',channel='A303',detected_at=iso_time(START+timedelta(minutes=40)),
+            evidence=dict(before={'pair':{'setpoint':{'value':1.4}}},after={'pair':{'setpoint':{'value':1.9}}})))
+    response=client.get('/api/v1/decision/evidence/density-trend',params={'limit':6})
+    assert response.status_code==200,response.text
+    result=response.json()
+    assert result['policy']=='density-trend-v1' and result['channel']=='A304'
+    assert result['total_actions']==1  # the A303 move is filtered to the anchor's channel
+    items={item['start']:item for item in result['items']}
+    moved=items[iso_time(START)]
+    assert moved['setpoint']==dict(value=1.52,origin='action',unit='g/cm³')
+    assert moved['suggested']['value']==1.5 and moved['suggested']['status']=='calculated'
+    assert moved['actions'][0]['before']==1.48 and moved['actions'][0]['after']==1.52
+    anchored=items[iso_time(START-timedelta(hours=1))]
+    assert anchored['setpoint']==dict(value=1.47,origin='anchor',unit='g/cm³')
+    assert anchored['suggested']['value'] is None and '暂缓' in anchored['suggested']['reason']
+    assert items[iso_time(START-timedelta(hours=5))]['setpoint']['value'] is None
+    assert items[iso_time(START-timedelta(hours=5))]['suggested']['status']=='no_hour'
+    assert result['items']==sorted(result['items'],key=lambda item:item['start'])

@@ -1,6 +1,6 @@
 /* GPT-only evidence, never updates App.store, a model, or a device. */
 const DecisionEvidence = {
-    dialog:null, seq:0, selected:null, result:null, offset:0, start:'', mode:'segments', busy:false,
+    dialog:null, seq:0, selected:null, result:null, offset:0, start:'', mode:'segments', busy:false, trendHours:72,
     drafts:new Map(), requests:new Map(),
     labels:{raw_ash:'原煤灰分',coal_amount:'入洗原煤量',level:'精磁尾液位',density:'实测密度',heavy_ash:'重介精煤灰分',float_ash:'浮精灰分',coarse_ash:'粗精煤泥灰分',coarse_amount:'粗精煤泥量',heavy_amount:'重介精煤量',float_amount:'浮精量',total_ash:'总灰分',belt501:'501 带煤量',belt502:'502 带煤量',reagent:'药剂量',raw_slime:'原煤煤泥含量',suggested_density:'建议密度'},
     esc(value) {return DecisionAshHistory.escape(value);},
@@ -25,6 +25,7 @@ const DecisionEvidence = {
             if(tab) {this.saveDraft();this.mode=tab.dataset.eTab;this.offset=0;this.selected=null;this.load();}
             if(e.target.closest('[data-e-refresh]')) {this.saveDraft();this.load();}
             const action=e.target.closest('[data-e-action]');if(action) {this.saveDraft();this.selected=action.dataset.eAction;this.loadAction();}
+            const range=e.target.closest('[data-e-range]');if(range&&range.dataset.eRange!==String(this.trendHours)) {this.trendHours=Number(range.dataset.eRange);this.offset=0;this.load();}
             if(e.target.closest('[data-e-back]')) {this.saveDraft();this.selected=null;this.load();}
             const sample=e.target.closest('[data-e-sample]');if(sample) this.loadSample(sample.dataset.eSample);
             const page=e.target.closest('[data-e-page]');if(page) {this.offset=Math.max(0,this.offset+Number(page.dataset.ePage));this.load();}
@@ -82,12 +83,15 @@ const DecisionEvidence = {
             }
             const path=this.mode==='segments'?'/segments'+(this.start?'?start='+encodeURIComponent(this.start):''):
                 this.mode==='samples'?'/samples?start='+encodeURIComponent(this.hourStart())+'&offset='+this.offset:'/actions?limit=20&offset='+this.offset;
-            const result=await Api.decisionEvidence(path);
+            const requests=[Api.decisionEvidence(path)];
+            if(this.mode==='actions'&&!this.selected)
+                requests.push(Api.decisionEvidence('/density-trend?limit='+this.trendHours).catch(error=>({error:error.message})));
+            const [result,trend]=await Promise.all(requests);
             if(seq!==this.seq||!this.dialog.open)return;
             this.result=result;this.status('');
             if(this.mode==='segments')this.renderSegments(result);
             else if(this.mode==='samples')this.renderSamples(result);
-            else this.renderActions(result);
+            else this.renderActions(result,trend);
         } catch(error){if(seq===this.seq){this.content('');this.status(error.message);}}
     },
     renderSegments(r) {
@@ -113,8 +117,101 @@ const DecisionEvidence = {
             target.scrollIntoView({block:'nearest',behavior:'smooth'});
         }catch(error){if(seq===this.seq)this.status(error.message);}
     },
-    renderActions(r) {
-        this.content(`<p class="evidence-note">自动记录 A303/A304 设定值变化，待人工确认操作来源及建议采纳情况；只读采集，不下发设备指令。</p><table><thead><tr><th>发现时间 / 设备</th><th>设定变化</th><th></th></tr></thead><tbody>${r.items.map(x=>`<tr><td>${this.esc(this.time(x.detected_at))}<small>${this.esc(x.channel)}</small></td><td>${this.num(x.before)} → ${this.num(x.after)}</td><td><button data-e-action="${this.esc(x.id)}">跟踪</button></td></tr>`).join('')}</tbody></table>${r.total?this.pager(r.total,20):'<p>尚未检测到设定值变化。功能启用后的变化会自动记录。</p>'}`);
+    trendSeries(items) {
+        // Pure shape for the point-line chart: null keeps the gap visible.
+        return (items||[]).map((item,index)=>({index,label:item.label,
+            setpoint:Number.isFinite(item.setpoint?.value)?item.setpoint.value:null,
+            setpointOrigin:item.setpoint?.origin||null,
+            suggested:Number.isFinite(item.suggested?.value)?item.suggested.value:null,
+            suggestedReason:item.suggested?.reason||'',actions:item.actions||[]}));
+    },
+    renderActions(r,trend) {
+        const series=this.trendSeries(trend?.items),channel=this.esc(trend?.channel||'');
+        const ranges=[24,72,168].map(h=>`<button data-e-range="${h}" aria-pressed="${h===this.trendHours}">${h===168?'7天':h+'小时'}</button>`).join('');
+        const chart=trend?.error?`<p class="evidence-note">趋势数据读取失败：${this.esc(trend.error)}</p>`:
+            `<div class="evidence-trend-plot"><canvas id="evidence-density-trend" tabindex="0" role="img" aria-label="人工设定密度与建议密度逐小时趋势图，方向键查看数值"></canvas><div class="evidence-trend-tooltip" hidden></div></div>
+             <p class="evidence-note">● 人工设定密度（MD_SET ${channel||'全部通道'}）　◌╌ 建议密度（小时均值）　◎ 该小时发生调密。设定取该小时最后一次检测到的变化值，无变化时取该小时首个有效 MD_SET；缺数据小时留空不外推。</p>`;
+        this.content(`<div class="evidence-trend-card"><div class="evidence-trend-head"><b>人工调密 与 建议密度 趋势</b><span class="evidence-trend-range">${ranges}</span></div>${chart}</div>
+          <p class="evidence-note">自动记录 A303/A304 设定值变化，待人工确认操作来源及建议采纳情况；只读采集，不下发设备指令。</p><table><thead><tr><th>发现时间 / 设备</th><th>设定变化</th><th></th></tr></thead><tbody>${r.items.map(x=>`<tr><td>${this.esc(this.time(x.detected_at))}<small>${this.esc(x.channel)}</small></td><td>${this.num(x.before)} → ${this.num(x.after)}</td><td><button data-e-action="${this.esc(x.id)}">跟踪</button></td></tr>`).join('')}</tbody></table>${r.total?this.pager(r.total,20):'<p>尚未检测到设定值变化。功能启用后的变化会自动记录。</p>'}`);
+        if(!trend?.error)this.drawTrend(series);
+    },
+    trendPalette() {
+        const style=getComputedStyle(document.getElementById('decision-workspace')||document.body);
+        const get=(key,fallback)=>style.getPropertyValue(key).trim()||fallback;
+        return {ink:get('--ds-ink','#22303f'),muted:get('--ds-muted','#7b8794'),rule:get('--ds-rule','#d6dde5'),
+            blue:get('--dc-blue','#2f6fed'),orange:get('--dc-orange','#f2994a'),red:get('--dc-red','#d64545')};
+    },
+    drawTrend(series) {
+        const canvas=this.dialog.querySelector('#evidence-density-trend');
+        if(!canvas)return;
+        const plot=canvas.parentElement,rect=plot.getBoundingClientRect();
+        const w=Math.max(280,rect.width),h=230,dpr=Math.min(window.devicePixelRatio||1,2);
+        canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);
+        canvas.style.width=w+'px';canvas.style.height=h+'px';
+        const ctx=canvas.getContext('2d');
+        if(!ctx)return;
+        ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+        ctx.font='11px Microsoft YaHei, sans-serif';
+        const c=this.trendPalette();
+        const values=series.flatMap(s=>[s.setpoint,s.suggested]).filter(Number.isFinite);
+        if(!values.length) {
+            ctx.fillStyle=c.muted;ctx.textAlign='center';ctx.fillText('暂无设定密度与建议密度数据',w/2,h/2);
+            canvas._hits=[];return;
+        }
+        const left=58,right=20,top=22,bottom=42,xWidth=w-left-right,yHeight=h-top-bottom;
+        let min=Math.min(...values),max=Math.max(...values),span=max-min||0.02;
+        min-=span*.15;max+=span*.15;
+        const y=value=>top+yHeight-(value-min)/(max-min)*yHeight;
+        ctx.lineWidth=1;ctx.strokeStyle=c.rule;ctx.fillStyle=c.muted;ctx.textAlign='right';
+        for(let i=0;i<=5;i++) {
+            const value=min+(max-min)*i/5,py=y(value);
+            ctx.beginPath();ctx.moveTo(left,py);ctx.lineTo(w-right,py);ctx.stroke();
+            ctx.fillText(value.toFixed(3),left-7,py+4);
+        }
+        ctx.textAlign='left';ctx.fillText('g/cm³',left,12);
+        const n=series.length,x=index=>left+(n===1?.5:index/(n-1))*xWidth;
+        const step=Math.max(1,Math.ceil(n/Math.max(2,Math.floor(xWidth/92))));
+        ctx.textAlign='center';
+        for(let i=0;i<n;i+=step)ctx.fillText(series[i].label,x(i),h-bottom+20);
+        ctx.textAlign='center';ctx.fillText('小时 · 每小时一点',left+xWidth/2,h-6);
+        const line=(field,color,dash)=>{
+            ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2;ctx.setLineDash(dash);
+            ctx.beginPath();let started=false;
+            series.forEach((s,i)=>{if(!Number.isFinite(s[field])){started=false;return;}
+                started?ctx.lineTo(x(i),y(s[field])):ctx.moveTo(x(i),y(s[field]));started=true;});
+            ctx.stroke();ctx.setLineDash([]);
+            series.forEach((s,i)=>{if(!Number.isFinite(s[field]))return;
+                ctx.beginPath();ctx.arc(x(i),y(s[field]),2.7,0,Math.PI*2);ctx.fill();});
+        };
+        line('suggested',c.orange,[5,4]);
+        line('setpoint',c.blue,[]);
+        series.forEach((s,i)=>{if(!s.actions.length||!Number.isFinite(s.setpoint))return;
+            ctx.strokeStyle=c.red;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x(i),y(s.setpoint),5.5,0,Math.PI*2);ctx.stroke();});
+        canvas._hits=series.map((s,i)=>({x:x(i),y:y(Number.isFinite(s.setpoint)?s.setpoint:(Number.isFinite(s.suggested)?s.suggested:min)),
+            text:`${s.label}:00 小时\n人工设定 ${s.setpoint===null?'—':s.setpoint.toFixed(3)} g/cm³${s.actions.length?`（该小时调密 ${s.actions.length} 次：${s.actions.map(a=>`${this.num(a.before)}→${this.num(a.after)}`).join('，')}）`:s.setpointOrigin==='anchor'?'（本小时无调整）':''}\n建议密度 ${s.suggested===null?'—':s.suggested.toFixed(3)} g/cm³${s.suggested===null&&s.suggestedReason?`（${this.esc(s.suggestedReason)}）`:''}\n建议−设定 ${Number.isFinite(s.suggested)&&Number.isFinite(s.setpoint)?(s.suggested-s.setpoint).toFixed(3):'—'}`}));
+        const tooltip=plot.querySelector('.evidence-trend-tooltip');
+        const show=(hit,px,py)=>{tooltip.textContent=hit.text;tooltip.hidden=false;
+            tooltip.style.left=Math.max(4,Math.min(px+12,w-tooltip.offsetWidth-4))+'px';
+            tooltip.style.top=Math.max(4,Math.min(py+10,h-tooltip.offsetHeight-4))+'px';};
+        const nearest=px=>{let best=null,distance=Infinity;
+            for(const hit of canvas._hits||[]){const d=Math.abs(hit.x-px);if(d<distance){best=hit;distance=d;}}
+            return best&&distance<=24?best:null;};
+        canvas.onmousemove=event=>{const r=canvas.getBoundingClientRect();const hit=nearest(event.clientX-r.left);
+            hit?show(hit,event.clientX-r.left,event.clientY-r.top):tooltip.hidden=true;};
+        canvas.onmouseleave=()=>{if(!canvas.matches(':focus-visible'))tooltip.hidden=true;};
+        canvas.onpointerdown=event=>{canvas._tap={x:event.clientX,y:event.clientY};};
+        canvas.onpointerup=event=>{const tap=canvas._tap;canvas._tap=null;
+            if(tap&&Math.hypot(event.clientX-tap.x,event.clientY-tap.y)<10){const r=canvas.getBoundingClientRect();
+                const hit=nearest(event.clientX-r.left);hit?show(hit,event.clientX-r.left,event.clientY-r.top):tooltip.hidden=true;}};
+        canvas.onkeydown=event=>{
+            const hits=canvas._hits||[];if(!hits.length)return;
+            const keys={ArrowLeft:-1,ArrowRight:1,Home:'first',End:'last',Escape:'close'};
+            if(!(event.key in keys))return;
+            event.preventDefault();
+            if(event.key==='Escape'){tooltip.hidden=true;return;}
+            canvas._index=Math.max(0,Math.min(hits.length-1,
+                event.key==='first'?0:event.key==='last'?hits.length-1:(canvas._index??0)+keys[event.key]));
+            const hit=hits[canvas._index];show(hit,hit.x,hit.y);};
     },
     saveDraft() {
         if(this.busy||!this.selected||!this.dialog)return;

@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "hours": 72,
+  "setpointHours": 71,
+  "suggestedHours": 69,
+  "actionHours": 3,
+  "channel": "A304",
+  "canvas": {
+    "width": 520,
+    "height": 230,
+    "opaque": 1817
+  },
+  "tooltipSeries": true,
+  "rangeSwitch": true,
+  "storeUnchanged": true,
+  "apiMutationsBlocked": true,
+  "pageErrors": []
+}

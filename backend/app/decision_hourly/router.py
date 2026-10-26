@@ -10,11 +10,11 @@ from sqlalchemy.orm import Session
 
 from ..auth import require_write
 from ..database import get_db
-from ..hourly_brief.inputs import business_time,LOCAL
+from ..hourly_brief.inputs import business_time,numeric,LOCAL
 from ..routers.manual_measurements import MeasurementRoute
 from ..models import ManualMeasurement
 from ..telemetry.domain import iso_time, utc_now
-from .models import DecisionCycleHour, DecisionCycleSample, DensityAction, DensityActionEntry
+from .models import DecisionCycleHour, DecisionCycleSample, DensityAction, DensityActionEntry, GptHourlyDensityAnchor
 from .tracking import action_view,assess_window
 from .archive import read_sample, archived_rows
 from .service import window
@@ -104,6 +104,66 @@ def actions(limit:int=Query(20,ge=1,le=100),offset:int=Query(0,ge=0,le=100000),d
         dict(id=r.id,detected_at=r.detected_at,channel=r.channel,
              before=r.evidence['before']['pair']['setpoint'].get('value'),
              after=r.evidence['after']['pair']['setpoint'].get('value')) for r in rows])
+
+
+@router.get('/density-trend')
+def density_trend(limit:int=Query(72,ge=6,le=336),db:Session=Depends(get_db)):
+    """Hourly operator setpoint vs suggested density for the trend chart.
+
+    Setpoint standing in an hour = the last tracked change's after value, else
+    the hour's MD_SET anchor (first valid, same channel as the density source).
+    Hours with neither source stay empty instead of fabricating a carried value.
+    """
+    now=utc_now()
+    end=now.astimezone(LOCAL).replace(minute=0,second=0,microsecond=0)
+    start=end-timedelta(hours=limit)
+    hours={r.start:r for r in db.scalars(select(DecisionCycleHour).where(
+        DecisionCycleHour.start>=iso_time(start),DecisionCycleHour.start<iso_time(end)))}
+    anchors={r.start:r for r in db.scalars(select(GptHourlyDensityAnchor).where(
+        GptHourlyDensityAnchor.start>=iso_time(start),GptHourlyDensityAnchor.start<iso_time(end)))}
+    channel=None
+    for key in sorted(anchors,reverse=True):
+        parts=(anchors[key].snapshot.get('basis') or {}).get('components') or {}
+        for part in (parts.values() if isinstance(parts,dict) else parts):
+            item=part.get('item_id') or ''
+            if '/MD_SET' in item:
+                channel=item.split('.')[-1].split('/')[0]
+                break
+        if channel:
+            break
+    by_hour={}
+    for r in db.scalars(select(DensityAction).where(DensityAction.detected_at>=iso_time(start),
+            DensityAction.detected_at<iso_time(end)).order_by(DensityAction.detected_at)):
+        if channel and r.channel!=channel:
+            continue
+        stamp=business_time(r.detected_at).replace(minute=0,second=0,microsecond=0)
+        by_hour.setdefault(iso_time(stamp),[]).append(dict(at=r.detected_at,channel=r.channel,
+            before=(r.evidence.get('before',{}).get('pair',{}).get('setpoint') or {}).get('value'),
+            after=(r.evidence.get('after',{}).get('pair',{}).get('setpoint') or {}).get('value')))
+    items=[]
+    cursor=start
+    while cursor<end:
+        key=iso_time(cursor)
+        acts=by_hour.get(key,[])
+        anchor=anchors.get(key)
+        if acts and numeric(acts[-1]['after']):
+            value,origin=acts[-1]['after'],'action'
+        elif anchor and numeric((anchor.snapshot.get('basis') or {}).get('value')):
+            value,origin=anchor.snapshot['basis']['value'],'anchor'
+        else:
+            value,origin=None,None
+        hour=hours.get(key)
+        advice=(hour.snapshot.get('suggested_density') or {}) if hour else {}
+        items.append(dict(start=key,end=iso_time(cursor+timedelta(hours=1)),
+            label=f'{cursor.astimezone(LOCAL):%m-%d %H}',
+            setpoint=dict(value=value,origin=origin,unit='g/cm³'),
+            suggested=dict(value=advice.get('value'),reason=advice.get('reason',''),
+                status=advice.get('status') if hour else 'no_hour'),
+            actions=acts))
+        cursor+=timedelta(hours=1)
+    return dict(policy='density-trend-v1',generated_at=iso_time(now),
+        channel=channel or '全部通道',period=dict(start=iso_time(start),end=iso_time(end)),
+        total_actions=sum(len(acts) for acts in by_hour.values()),items=items)
 
 
 def find_action(db,identifier):
