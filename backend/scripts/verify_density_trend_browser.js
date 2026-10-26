@@ -23,6 +23,16 @@ const url = process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000';
         await page.locator('.nav-item[data-page="page-density-trend"]').click();
         await page.waitForFunction(()=>DensityTrendPage.meta?.policy==='density-trend-v2');
         await page.waitForFunction(()=>document.getElementById('density-trend-canvas')._hits.length>0);
+        const markers=await page.evaluate(()=>{
+            const canvas=document.getElementById('density-trend-canvas'),ctx=canvas.getContext('2d'),original=ctx.arc;
+            let drawn=0;ctx.arc=function(...args){drawn++;return original.apply(this,args);};
+            try{DensityTrendPage.draw();}finally{ctx.arc=original;}
+            return {drawn,changes:DensityTrendPage.series.A304.filter(p=>p.origin==='change'&&p.value!==null).length,
+                observations:DensityTrendPage.series.A304.length,
+                suggested:DensityTrendPage.series.advice.filter((p,i,all)=>DensityTrendPage.showPoint(all[i-1],p)).length};
+        });
+        assert.equal(markers.drawn,markers.changes+markers.suggested,'only density changes have markers');
+        assert.ok(markers.changes<markers.observations,'repeated observations retain lines without dots');
         await page.locator('#density-trend-canvas').focus();await page.keyboard.press('End');
         assert.equal(await page.evaluate(()=>{const c=document.getElementById('density-trend-canvas');return c._index===c._hits.length-1;}),true);
         await page.keyboard.press('Home');assert.equal(await page.evaluate(()=>document.getElementById('density-trend-canvas')._index),0);
@@ -57,7 +67,7 @@ const url = process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000';
         await page.screenshot({path:path.join(output,'live-dark.png')});
         assert.deepEqual(errors,[]);assert.equal(mutationAttempts,0);
         const report={passed:true,liveData:true,apiMs,counts,monthCount,archiveAvailable:data.archive_available,
-            trueAdviceCount:data.suggestions.length,exactRanges:true,keyboard:true,edgeCases:edge,mutationAttempts,pageErrors:errors};
+            trueAdviceCount:data.suggestions.length,exactRanges:true,keyboard:true,changeMarkers:markers,edgeCases:edge,mutationAttempts,pageErrors:errors};
         fs.writeFileSync(path.join(output,'result-page.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
     } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

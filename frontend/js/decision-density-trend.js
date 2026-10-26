@@ -21,6 +21,11 @@ const DensityTrendPage = {
         const hour = p => Math.floor(Date.parse(p.apply_start || p.at) / 3600000);
         return b.t >= a.t && b.t - a.t <= 75 * 60000 && hour(b) - hour(a) <= 1;
     },
+    showPoint(previous, point) {
+        if (point.value === null) return false;
+        if (point.key === 'A304') return point.origin === 'change';
+        return this.connected(previous, point) && Math.abs(point.value - previous.value) >= .0005;
+    },
     init() {
         if (this.inited) return;
         this.inited = true;
@@ -160,11 +165,15 @@ const DensityTrendPage = {
                 previous=p;
             }
             ctx.stroke();ctx.setLineDash([]);
-            for (const p of points) {
+            previous=null;
+            for (const [index,p] of points.entries()) {
+                const marked=this.showPoint(previous,p);
+                const isolated=!this.connected(previous,p) && !(points[index+1] && this.connected(p,points[index+1]));
+                previous=p;
                 if (p.value===null) continue;
-                const px=x(p.t),py=y(p.value), radius=points.length>600?1.8:2.8;
-                ctx.beginPath();ctx.arc(px,py,radius,0,2*Math.PI);ctx.fill();
-                if (p.origin==='change') {ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(px,py,5,0,2*Math.PI);ctx.stroke();}
+                const px=x(p.t),py=y(p.value);
+                if (marked) {ctx.beginPath();ctx.arc(px,py,3.5,0,2*Math.PI);ctx.fill();}
+                else if (isolated) {ctx.beginPath();ctx.moveTo(px-4,py);ctx.lineTo(px+4,py);ctx.stroke();}
                 canvas._hits.push({...p,x:px,y:py,text:this.detail(p)});
             }
         }

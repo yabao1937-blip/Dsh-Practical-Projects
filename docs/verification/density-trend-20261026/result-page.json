@@ -1,7 +1,7 @@
 {
   "passed": true,
   "liveData": true,
-  "apiMs": 153,
+  "apiMs": 164,
   "counts": {
     "A304": 175
   },
@@ -10,6 +10,12 @@
   "trueAdviceCount": 0,
   "exactRanges": true,
   "keyboard": true,
+  "changeMarkers": {
+    "drawn": 9,
+    "changes": 9,
+    "observations": 175,
+    "suggested": 0
+  },
   "edgeCases": {
     "gap": true,
     "route": true,
