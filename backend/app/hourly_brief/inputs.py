@@ -241,6 +241,30 @@ class Inputs:
     def default(key, reason=""):
         return cell(INSTRUMENT_DEFAULT[key], "在线仪表默认值", status="default", reason=reason, default_key=key)
 
+    def float_plate_cell(self):
+        """Flotation amount from filter-press plate counters (2026-10-26 口径).
+
+        Uses the last complete hour [H-1h, H) at boundary H; falls back to the
+        legacy chain when the window lacks usable counter data.
+        """
+        from ..telemetry.float_output import DERIVATION, PLATE_TONNES, float_rate_stats
+        try:
+            stats = float_rate_stats(self.db, self.hour)
+        except Exception:
+            # A counter-history read must never break the whole snapshot
+            # (e.g. the read-only test server proxying the host database).
+            return None
+        if stats is None:
+            return None
+        detail = "、".join(f"{label} {plates:.0f} 板" for label, plates in stats["plates"].items()) or "四台均无新增板"
+        start_bj, end_bj = stats["start"].astimezone(LOCAL), stats["end"].astimezone(LOCAL)
+        return cell(round(stats["tonnes"], 1), "压滤机板数折算", iso_time(stats["end"]), "calculated",
+            f"{start_bj:%m-%d %H:%M}–{end_bj:%H:%M} 四台板数正增量 {stats['total_plates']:.0f} 板 × "
+            f"{PLATE_TONNES:g} t/板；采样覆盖率 {stats['coverage']:.0%}；{detail}",
+            unit="t/h", derivation=DERIVATION, plates=dict(stats["plates"]),
+            coverage=round(stats["coverage"], 3),
+            window=dict(start=iso_time(stats["start"]), end=iso_time(stats["end"])))
+
     def collect(self, with_density=True):
         result = {
             "raw_ash": self.telemetry(RAW_ASH, zero_hold=True, unit="%"),
@@ -281,6 +305,7 @@ class Inputs:
                     "502 点位单位尚未确认，使用默认值" if self.point(HEAVY_AMOUNT) else "未接入已确认单位的重介量测点")
         result["float_ash"] = self.manual("float_clean_coal_ash", [("floatAshInput",)],
             record=("float", "ash_content", None)) or self.default("float_ash")
-        result["float_amount"] = self.manual(auto_paths=[("amountInputs", "floatAmount")],
+        result["float_amount"] = self.float_plate_cell() or self.manual(
+            auto_paths=[("amountInputs", "floatAmount")],
             record=("float", "coal_amount", None)) or cell(reason="无浮精量手工记录或默认值")
         return result

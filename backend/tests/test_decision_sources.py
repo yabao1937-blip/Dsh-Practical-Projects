@@ -267,11 +267,74 @@ def test_recently_imported_model_is_not_known_before_import(sessions, seeded):
         assert build_snapshot(db,HOUR)['cells']['coarse_ash']['value'] is None
 
 
-def float_belt_row(when, ash):
+def float_belt_row(when, ash, amount=None):
     from app.models import CoalRecord
     local = when.astimezone(LOCAL).replace(tzinfo=None, microsecond=0)
     return CoalRecord(category='float', ts=local.strftime('%Y-%m-%d %H:%M:%S'), system='default',
-                      source='manual', ash_content=ash, created_at=local)
+                      source='manual', ash_content=ash, coal_amount=amount, created_at=local)
+
+
+def seed_plates(db, plates=2, label='A415'):
+    """One counter point whose hour window rises by `plates` plates at 5-second cadence."""
+    from uuid import uuid4
+    from app.telemetry import float_output
+    from app.telemetry.models import TelemetryPoint, TelemetryReading
+    item = dict(float_output.PLATE_MEMBERS)[label]
+    db.add(TelemetryPoint(source_id='kepserver-main', key='tag_plates', enabled=True,
+                          config=dict(item_id=item, name=f'{label}/PLATE_CNT')))
+    start = HOUR-timedelta(hours=1)
+    for i in range(719):
+        stamp = iso_time(start+timedelta(seconds=(i+1)*5))
+        db.add(TelemetryReading(source_id='kepserver-main', point_key='tag_plates', batch_id=uuid4().hex,
+            received_at=stamp, sample=dict(key='tag_plates', value=100+(plates if i >= 360 else 0),
+                                           quality='good', received_at=stamp)))
+
+
+def test_plate_derived_float_amount_feeds_decision(sessions, seeded):
+    from app.telemetry import float_output
+    from app.telemetry.float_output import DERIVATION
+    float_output._cache.clear()
+    with sessions.begin() as db:
+        seed_plates(db, plates=2)
+    with sessions() as db:
+        live = shared_snapshot(db)
+        cell = live['cells']['float_amount']
+        assert cell['value'] == 26.0 and cell['status'] == 'calculated'
+        assert cell['derivation'] == DERIVATION and cell['source'] == '压滤机板数折算'
+        assert cell['plates'] == {'A415': 2.0} and cell['coverage'] >= 0.8
+        assert live['heavy_amount']['value'] == 449  # 260+240−26−25 replaces the fixed 40.
+        assert live['total_ash']['value'] == pytest.approx((8.5*449+9*26+9.2*25)/500)
+        assert build_snapshot(db, HOUR)['cells']['float_amount'] == live['cells']['float_amount']
+
+
+def test_belt_record_cannot_mask_plate_float_amount(sessions, seeded):
+    from app.telemetry import float_output
+    from app.hourly_brief.inputs import Inputs
+    from app.services.decision_sources import collect_shared, config_view
+    float_output._cache.clear()
+    with sessions.begin() as db:
+        seed_plates(db, plates=1)
+        db.add(float_belt_row(HOUR-timedelta(seconds=30), None, amount=77.7))
+    with sessions() as db:
+        inputs = Inputs(db, HOUR, live=True, authoritative=True)
+        cells = collect_shared(inputs, config_view(db, inputs.hour, inputs))
+        assert cells['float_amount']['derivation'] == float_output.DERIVATION
+        assert cells['float_amount']['value'] == 13.0
+
+
+def test_belt_record_still_feeds_float_amount_without_plate_data(sessions, seeded):
+    from app.telemetry import float_output
+    from app.hourly_brief.inputs import Inputs
+    from app.services.decision_sources import collect_shared, config_view
+    float_output._cache.clear()
+    with sessions.begin() as db:
+        db.add(float_belt_row(HOUR-timedelta(seconds=30), None, amount=77.7))
+    with sessions() as db:
+        inputs = Inputs(db, HOUR, live=True, authoritative=True)
+        cells = collect_shared(inputs, config_view(db, inputs.hour, inputs))
+        # The fresher belt record wins by observation time; no plate derivation.
+        assert cells['float_amount']['value'] == 77.7
+        assert not cells['float_amount'].get('derivation')
 
 
 def collect_float_cells(db):

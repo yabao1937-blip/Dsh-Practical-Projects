@@ -9,6 +9,7 @@ from ..hourly_brief.inputs import Inputs, LOCAL, business_time
 from ..models import ManualMeasurement, CoalRecord
 from ..services.decision_sources import NODE_CELLS, GROUPS, config_view, collect_shared
 from ..telemetry.derived import DENSITY_AVERAGE_MEMBERS
+from ..telemetry.float_output import DERIVATION as PLATE_DERIVATION
 from ..telemetry.domain import iso_time
 from ..telemetry.models import TelemetryReading
 from ..telemetry.retained import raw_sample, usable_at_receipt
@@ -130,7 +131,8 @@ def historical_cells(db, start, end, rows, *, weights=None):
                 elif c.get('source') in ('历史浮精记录','手工记录') and c.get('record_id'):
                     copy['_event'] = f'record:{c["record_id"]}'
                 series[key].append(copy)
-            if c.get('status') in ('manual','historical','default') and valid(c,key):
+            if (c.get('status') in ('manual','historical','default')
+                    or c.get('derivation') == PLATE_DERIVATION) and valid(c,key):
                 old = fallback.get(key,{})
                 if (c.get('observed_at') or '') >= (old.get('observed_at') or ''):
                     fallback[key] = deepcopy(c)
@@ -162,6 +164,10 @@ def historical_cells(db, start, end, rows, *, weights=None):
     amount_policies = {(r.snapshot['cells'].get('coarse_amount', {}).get('derivation') or {}).get('version') for r in rows}
     if len(amount_policies) > 1:
         result['coarse_amount'].update(value=None,status='missing',reason='小时内粗精煤泥量计算口径变化，暂不混合均值')
+    float_bases = {c.get('derivation') or '' for c in series.get('float_amount') or []}
+    if len(float_bases) > 1 and 'float_amount' in result:
+        result['float_amount'].update(value=None, status='missing',
+            reason='小时内浮精量口径变化（压滤机板数折算/沿用值），暂不混合均值')
     densities = [c for c in series['density'] if valid(c,'density') and c.get('observed_at') and
                  start <= business_time(c['observed_at']) < end]
     basis = max(densities,key=lambda c:c['observed_at'],default={})

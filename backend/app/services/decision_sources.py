@@ -8,6 +8,7 @@ from ..models import DecisionSourceRevision, CoalRecord, CoarseModel, Setting
 from ..hourly_brief.columns import cell
 from ..hourly_brief.inputs import Inputs, RAW_ASH, COAL_AMOUNT, LEVEL, LOCAL, business_time, numeric
 from ..telemetry.derived import STATUS_GROUPS, DENSITY_AVERAGE_MEMBERS
+from ..telemetry.float_output import DERIVATION as PLATE_DERIVATION
 from ..telemetry.density_effective import effective_component, effective_average, DENSITY_ITEMS
 from ..telemetry.domain import definition_id, iso_time, utc_now
 from .manual_measurements import POINT_METRICS
@@ -139,7 +140,11 @@ def collect_shared(inputs, config):
         if not inputs.manual(auto_paths=[('floatAshInput',)]) and not newer_manual and numeric(row.ash_content):
             cells['float_ash'] = cell(row.ash_content, '历史浮精记录', iso_time(business_time(row.ts)),
                 'historical', record_id=row.id, created_at=iso_time(business_time(row.created_at)))
-        if not inputs.manual(auto_paths=[('amountInputs','floatAmount')]) and numeric(row.coal_amount):
+        # Plate-derived flotation output is the authoritative live source; an
+        # older belt record must not mask it (same rule as the manual assay).
+        if (not inputs.manual(auto_paths=[('amountInputs', 'floatAmount')])
+                and cells.get('float_amount', {}).get('derivation') != PLATE_DERIVATION
+                and numeric(row.coal_amount)):
             cells['float_amount'] = cell(row.coal_amount, '历史浮精记录', iso_time(business_time(row.ts)), 'historical', record_id=row.id)
     for node, key in NODE_CELLS.items():
         choice = config['resolved_choices'][node]
