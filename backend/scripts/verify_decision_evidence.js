@@ -29,15 +29,9 @@ async function main(){
     await assert.rejects(api.decisionEvidence('/actions/x/entries',{client_id:'x'}),/尚未确认/);
     context.fetch=async()=>({ok:true,json:async()=>({entries:[{client_id:'x'}]})});
     assert.equal((await api.decisionEvidence('/actions/x/entries',{client_id:'x'})).entries[0].client_id,'x');
-    // Trend series shaping: gaps stay null, origins and action counts survive.
-    const series=e.trendSeries([{label:'10-26 09',setpoint:{value:1.48,origin:'anchor'},suggested:{value:1.5,reason:''},actions:[{before:1.48,after:1.52}]},
-        {label:'10-26 10',setpoint:{value:null,origin:null},suggested:{value:null,reason:'输入沿用，暂缓调密'},actions:[]}]);
-    assert.equal(series[0].setpoint,1.48);assert.equal(series[0].setpointOrigin,'anchor');
-    assert.equal(series[0].suggested,1.5);assert.equal(series[0].actions.length,1);
-    assert.equal(series[1].setpoint,null);assert.equal(series[1].suggested,null);
-    assert.equal(series[1].suggestedReason,'输入沿用，暂缓调密');
-    assert.deepEqual(e.trendSeries([]),[]);
-    assert.deepEqual(e.trendSeries(undefined),[]);
-    console.log('Evidence UI: pending-close draft retention, stable retry identifier, server hour, confirmed save response and trend series shaping passed.');
+    // The trend chart moved to its own page; the dialog must stay chart-free.
+    assert.equal(typeof e.trendSeries,'undefined');
+    assert.equal(typeof e.drawTrend,'undefined');
+    console.log('Evidence UI: pending-close draft retention, stable retry identifier, server hour, confirmed save response and chart-free dialog passed.');
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

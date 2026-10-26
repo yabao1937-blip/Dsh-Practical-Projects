@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="css/decision-overview.css?v=20">
     <link rel="stylesheet" href="css/decision-ash-history.css?v=3">
     <link rel="stylesheet" href="css/decision-evidence.css?v=1">
+    <link rel="stylesheet" href="css/decision-density-trend.css?v=1">
     <link rel="stylesheet" href="css/manual-measurements.css?v=3">
     <link rel="stylesheet" href="css/gpt-expert9.css?v=1">
     <link rel="stylesheet" href="css/core-workspace.css?v=1">
@@ -37,6 +38,9 @@
                 </a>
                 <a href="#" class="nav-item" data-page="page-float">
                     <span class="nav-icon">&#9660;</span>浮精影响分析
+                </a>
+                <a href="#" class="nav-item" data-page="page-density-trend">
+                    <span class="nav-icon">&#8857;</span>密度趋势对比
                 </a>
                 <a href="#" class="nav-item" data-page="page-maintenance" id="maintenance-nav" hidden>系统维护</a>
             </nav>
@@ -467,6 +471,44 @@
             </div>
         </section>
 
+        <section class="page" id="page-density-trend" aria-labelledby="density-trend-title">
+            <div class="page-header">
+                <div>
+                    <h2 id="density-trend-title">人工调密 与 建议密度 趋势</h2>
+                    <p>设定密度（MD_SET）与小时建议密度逐小时对比 · 北京时间</p>
+                </div>
+                <div class="page-header-actions">
+                    <div class="filter-group" id="density-trend-ranges">
+                        <button type="button" class="btn" data-t-range="168" aria-pressed="true">近7天</button>
+                        <button type="button" class="btn" data-t-range="720" aria-pressed="false">近30天</button>
+                        <button type="button" class="btn" id="density-trend-refresh">刷新</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card density-trend-card">
+                <p class="density-trend-caption" id="density-trend-caption">正在读取…</p>
+                <div class="density-trend-plot" id="density-trend-plot">
+                    <canvas id="density-trend-canvas" tabindex="0" role="img"
+                        aria-label="人工设定密度与建议密度逐小时趋势图，方向键查看数值"></canvas>
+                    <div class="density-trend-tooltip" hidden></div>
+                </div>
+                <p class="density-trend-legend">● 人工设定密度（MD_SET）&nbsp;&nbsp;◌╌ 建议密度（小时均值）&nbsp;&nbsp;◎ 该小时发生调密</p>
+                <p class="density-trend-note">设定取该小时最后一次检测到的设定变化值，无变化时取该小时首个有效 MD_SET；建议为该小时调密建议均值；缺数据小时留空不外推。自动记录 A303/A304 设定值变化，只读采集，不下发设备指令。</p>
+                <p id="density-trend-status" role="status" aria-live="polite"></p>
+            </div>
+
+            <div class="card">
+                <h3 class="density-trend-table-title">近期调密记录</h3>
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>发现时间</th><th>设备</th><th>设定变化 (g/cm³)</th><th>幅度</th></tr></thead>
+                        <tbody id="density-trend-actions"><tr><td colspan="4">正在读取…</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
 
 
 
@@ -501,6 +543,7 @@
     <script src="js/decision-realtime.js?v=5"></script>
     <script src="js/decision-hourly.js?v=11"></script>
     <script src="js/decision-evidence.js?v=1"></script>
+    <script src="js/decision-density-trend.js?v=1"></script>
     <script src="js/manual-measurements.js?v=4"></script>
     <script src="js/coarse.js?v=24"></script>
     <script src="js/float.js?v=15"></script>

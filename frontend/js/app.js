@@ -842,7 +842,7 @@ const App = {
         if (!item || !sec) return;
         const navigation = this._navigation = (this._navigation || 0) + 1;
         if (this._syncReady === false) { this._pendingPage = pageId; return; }
-        if (this.isReadOnlyTest() && !['page-decision','page-maintenance','page-telemetry'].includes(pageId) && !this._readOnlyFullStateLoaded) {
+        if (this.isReadOnlyTest() && !['page-decision','page-maintenance','page-telemetry','page-density-trend'].includes(pageId) && !this._readOnlyFullStateLoaded) {
             this.showToast('正在按需读取主机历史数据…', 'info');
             return this.ensureReadOnlyHistory().then(() => {
                 if (navigation === this._navigation) this.goToPage(pageId);
@@ -873,12 +873,18 @@ const App = {
                 case 'page-float':
                     if (typeof FloatPage !== 'undefined') FloatPage.init();
                     break;
+                case 'page-density-trend':
+                    if (typeof DensityTrendPage !== 'undefined') DensityTrendPage.init();
+                    break;
             }
         } else {
             // 已初始化的页面，切换回来时重新加载数据并刷新图表
             switch (pageId) {
                 case 'page-decision':
                     if (typeof DecisionOverviewPage !== 'undefined') DecisionOverviewPage.refresh();
+                    break;
+                case 'page-density-trend':
+                    if (typeof DensityTrendPage !== 'undefined' && DensityTrendPage.inited) DensityTrendPage.refresh();
                     break;
                 case 'page-coarse':
                     if (CoarsePage.trendChart) {
