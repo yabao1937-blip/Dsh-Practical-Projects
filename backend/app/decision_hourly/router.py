@@ -107,23 +107,29 @@ def actions(limit:int=Query(20,ge=1,le=100),offset:int=Query(0,ge=0,le=100000),d
 
 
 @router.get('/density-trend')
-def density_trend(limit:int=Query(72,ge=6,le=336),db:Session=Depends(get_db)):
+def density_trend(limit:int=Query(168,ge=6,le=720),db:Session=Depends(get_db)):
     """Hourly operator setpoint vs suggested density for the trend chart.
 
     Setpoint standing in an hour = the last tracked change's after value, else
     the hour's MD_SET anchor (first valid, same channel as the density source).
     Hours with neither source stay empty instead of fabricating a carried value.
+    Only the required JSON fields are projected: full hour snapshots would exceed
+    the read-only proxy's result limit over 30-day windows.
     """
+    import json
     now=utc_now()
     end=now.astimezone(LOCAL).replace(minute=0,second=0,microsecond=0)
     start=end-timedelta(hours=limit)
-    hours={r.start:r for r in db.scalars(select(DecisionCycleHour).where(
+    hours={r[0]:(json.loads(r[1]) if r[1] else {}) for r in db.execute(select(
+        DecisionCycleHour.start,DecisionCycleHour.snapshot['suggested_density'].as_string()).where(
         DecisionCycleHour.start>=iso_time(start),DecisionCycleHour.start<iso_time(end)))}
-    anchors={r.start:r for r in db.scalars(select(GptHourlyDensityAnchor).where(
+    anchors={r[0]:dict(value=r[1],components=json.loads(r[2]) if r[2] else {}) for r in db.execute(select(
+        GptHourlyDensityAnchor.start,GptHourlyDensityAnchor.snapshot['basis']['value'].as_float(),
+        GptHourlyDensityAnchor.snapshot['basis']['components'].as_string()).where(
         GptHourlyDensityAnchor.start>=iso_time(start),GptHourlyDensityAnchor.start<iso_time(end)))}
     channel=None
     for key in sorted(anchors,reverse=True):
-        parts=(anchors[key].snapshot.get('basis') or {}).get('components') or {}
+        parts=anchors[key]['components']
         for part in (parts.values() if isinstance(parts,dict) else parts):
             item=part.get('item_id') or ''
             if '/MD_SET' in item:
@@ -132,14 +138,14 @@ def density_trend(limit:int=Query(72,ge=6,le=336),db:Session=Depends(get_db)):
         if channel:
             break
     by_hour={}
-    for r in db.scalars(select(DensityAction).where(DensityAction.detected_at>=iso_time(start),
-            DensityAction.detected_at<iso_time(end)).order_by(DensityAction.detected_at)):
-        if channel and r.channel!=channel:
+    for detected,action_channel,before,after in db.execute(select(DensityAction.detected_at,DensityAction.channel,
+            DensityAction.evidence['before']['pair']['setpoint']['value'].as_float(),
+            DensityAction.evidence['after']['pair']['setpoint']['value'].as_float()).where(
+            DensityAction.detected_at>=iso_time(start),DensityAction.detected_at<iso_time(end)).order_by(DensityAction.detected_at)):
+        if channel and action_channel!=channel:
             continue
-        stamp=business_time(r.detected_at).replace(minute=0,second=0,microsecond=0)
-        by_hour.setdefault(iso_time(stamp),[]).append(dict(at=r.detected_at,channel=r.channel,
-            before=(r.evidence.get('before',{}).get('pair',{}).get('setpoint') or {}).get('value'),
-            after=(r.evidence.get('after',{}).get('pair',{}).get('setpoint') or {}).get('value')))
+        stamp=business_time(detected).replace(minute=0,second=0,microsecond=0)
+        by_hour.setdefault(iso_time(stamp),[]).append(dict(at=detected,channel=action_channel,before=before,after=after))
     items=[]
     cursor=start
     while cursor<end:
@@ -148,17 +154,16 @@ def density_trend(limit:int=Query(72,ge=6,le=336),db:Session=Depends(get_db)):
         anchor=anchors.get(key)
         if acts and numeric(acts[-1]['after']):
             value,origin=acts[-1]['after'],'action'
-        elif anchor and numeric((anchor.snapshot.get('basis') or {}).get('value')):
-            value,origin=anchor.snapshot['basis']['value'],'anchor'
+        elif anchor and numeric(anchor['value']):
+            value,origin=anchor['value'],'anchor'
         else:
             value,origin=None,None
-        hour=hours.get(key)
-        advice=(hour.snapshot.get('suggested_density') or {}) if hour else {}
+        advice=hours.get(key) or {}
         items.append(dict(start=key,end=iso_time(cursor+timedelta(hours=1)),
             label=f'{cursor.astimezone(LOCAL):%m-%d %H}',
             setpoint=dict(value=value,origin=origin,unit='g/cm³'),
             suggested=dict(value=advice.get('value'),reason=advice.get('reason',''),
-                status=advice.get('status') if hour else 'no_hour'),
+                status=advice.get('status') if key in hours else 'no_hour'),
             actions=acts))
         cursor+=timedelta(hours=1)
     return dict(policy='density-trend-v1',generated_at=iso_time(now),

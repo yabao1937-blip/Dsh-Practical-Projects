@@ -252,3 +252,6 @@ def test_density_trend_pairs_manual_setpoint_with_suggested_advice(client,sessio
     assert items[iso_time(START-timedelta(hours=5))]['setpoint']['value'] is None
     assert items[iso_time(START-timedelta(hours=5))]['suggested']['status']=='no_hour'
     assert result['items']==sorted(result['items'],key=lambda item:item['start'])
+    month=client.get('/api/v1/decision/evidence/density-trend',params={'limit':720})
+    assert month.status_code==200 and month.json()['items'].__len__()==720
+    assert client.get('/api/v1/decision/evidence/density-trend',params={'limit':721}).status_code==422

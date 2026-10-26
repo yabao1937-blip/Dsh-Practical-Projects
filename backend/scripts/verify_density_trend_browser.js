@@ -8,9 +8,9 @@ const output = path.join(root,'docs/verification/density-trend-20261026');
 const url = process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8767';
 
 (async () => {
-    const trend = await (await fetch(url+'/api/v1/decision/evidence/density-trend?limit=72')).json();
+    const trend = await (await fetch(url+'/api/v1/decision/evidence/density-trend?limit=168')).json();
     assert.equal(trend.policy,'density-trend-v1');
-    assert.equal(trend.items.length,72);
+    assert.equal(trend.items.length,168);
     const withSetpoint = trend.items.filter(i => i.setpoint.value !== null);
     const withSuggested = trend.items.filter(i => i.suggested.value !== null);
     const withActions = trend.items.filter(i => i.actions.length);
@@ -64,10 +64,10 @@ const url = process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8767';
         assert.ok(hover && !hover.hidden, 'tooltip did not open');
         assert.ok(hover.text.includes('人工设定 1.') && hover.text.includes('建议密度 1.'), hover.text);
         assert.ok(hover.text.includes('建议−设定'), hover.text);
-        // Range switch refetches a different window length.
-        await page.locator('[data-e-range="24"]').click();
-        await page.waitForFunction(() => document.getElementById('evidence-density-trend')?._hits?.length === 24);
-        assert.equal(await page.evaluate(() => DecisionEvidence.trendHours),24);
+        // Range switch to the 30-day window refetches 720 hourly points.
+        await page.locator('[data-e-range="720"]').click();
+        await page.waitForFunction(() => document.getElementById('evidence-density-trend')?._hits?.length === 720);
+        assert.equal(await page.evaluate(() => DecisionEvidence.trendHours),720);
         await page.screenshot({path:path.join(output,'density-trend.png')});
         assert.equal(await page.evaluate(() => JSON.stringify(App.store)),storeBefore);
         assert.deepEqual(errors,[]);

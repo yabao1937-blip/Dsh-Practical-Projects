@@ -1,6 +1,6 @@
 /* GPT-only evidence, never updates App.store, a model, or a device. */
 const DecisionEvidence = {
-    dialog:null, seq:0, selected:null, result:null, offset:0, start:'', mode:'segments', busy:false, trendHours:72,
+    dialog:null, seq:0, selected:null, result:null, offset:0, start:'', mode:'segments', busy:false, trendHours:168,
     drafts:new Map(), requests:new Map(),
     labels:{raw_ash:'原煤灰分',coal_amount:'入洗原煤量',level:'精磁尾液位',density:'实测密度',heavy_ash:'重介精煤灰分',float_ash:'浮精灰分',coarse_ash:'粗精煤泥灰分',coarse_amount:'粗精煤泥量',heavy_amount:'重介精煤量',float_amount:'浮精量',total_ash:'总灰分',belt501:'501 带煤量',belt502:'502 带煤量',reagent:'药剂量',raw_slime:'原煤煤泥含量',suggested_density:'建议密度'},
     esc(value) {return DecisionAshHistory.escape(value);},
@@ -127,7 +127,7 @@ const DecisionEvidence = {
     },
     renderActions(r,trend) {
         const series=this.trendSeries(trend?.items),channel=this.esc(trend?.channel||'');
-        const ranges=[24,72,168].map(h=>`<button data-e-range="${h}" aria-pressed="${h===this.trendHours}">${h===168?'7天':h+'小时'}</button>`).join('');
+        const ranges=[168,720].map(h=>`<button data-e-range="${h}" aria-pressed="${h===this.trendHours}">${h===168?'近7天':'近30天'}</button>`).join('');
         const chart=trend?.error?`<p class="evidence-note">趋势数据读取失败：${this.esc(trend.error)}</p>`:
             `<div class="evidence-trend-plot"><canvas id="evidence-density-trend" tabindex="0" role="img" aria-label="人工设定密度与建议密度逐小时趋势图，方向键查看数值"></canvas><div class="evidence-trend-tooltip" hidden></div></div>
              <p class="evidence-note">● 人工设定密度（MD_SET ${channel||'全部通道'}）　◌╌ 建议密度（小时均值）　◎ 该小时发生调密。设定取该小时最后一次检测到的变化值，无变化时取该小时首个有效 MD_SET；缺数据小时留空不外推。</p>`;
@@ -175,18 +175,19 @@ const DecisionEvidence = {
         for(let i=0;i<n;i+=step)ctx.fillText(series[i].label,x(i),h-bottom+20);
         ctx.textAlign='center';ctx.fillText('小时 · 每小时一点',left+xWidth/2,h-6);
         const line=(field,color,dash)=>{
-            ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2;ctx.setLineDash(dash);
+            ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=n>240?1.4:2;ctx.setLineDash(dash);
             ctx.beginPath();let started=false;
             series.forEach((s,i)=>{if(!Number.isFinite(s[field])){started=false;return;}
                 started?ctx.lineTo(x(i),y(s[field])):ctx.moveTo(x(i),y(s[field]));started=true;});
             ctx.stroke();ctx.setLineDash([]);
+            const radius=n>240?1.7:2.7;
             series.forEach((s,i)=>{if(!Number.isFinite(s[field]))return;
-                ctx.beginPath();ctx.arc(x(i),y(s[field]),2.7,0,Math.PI*2);ctx.fill();});
+                ctx.beginPath();ctx.arc(x(i),y(s[field]),radius,0,Math.PI*2);ctx.fill();});
         };
         line('suggested',c.orange,[5,4]);
         line('setpoint',c.blue,[]);
         series.forEach((s,i)=>{if(!s.actions.length||!Number.isFinite(s.setpoint))return;
-            ctx.strokeStyle=c.red;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x(i),y(s.setpoint),5.5,0,Math.PI*2);ctx.stroke();});
+            ctx.strokeStyle=c.red;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x(i),y(s.setpoint),n>240?4:5.5,0,Math.PI*2);ctx.stroke();});
         canvas._hits=series.map((s,i)=>({x:x(i),y:y(Number.isFinite(s.setpoint)?s.setpoint:(Number.isFinite(s.suggested)?s.suggested:min)),
             text:`${s.label}:00 小时\n人工设定 ${s.setpoint===null?'—':s.setpoint.toFixed(3)} g/cm³${s.actions.length?`（该小时调密 ${s.actions.length} 次：${s.actions.map(a=>`${this.num(a.before)}→${this.num(a.after)}`).join('，')}）`:s.setpointOrigin==='anchor'?'（本小时无调整）':''}\n建议密度 ${s.suggested===null?'—':s.suggested.toFixed(3)} g/cm³${s.suggested===null&&s.suggestedReason?`（${this.esc(s.suggestedReason)}）`:''}\n建议−设定 ${Number.isFinite(s.suggested)&&Number.isFinite(s.setpoint)?(s.suggested-s.setpoint).toFixed(3):'—'}`}));
         const tooltip=plot.querySelector('.evidence-trend-tooltip');

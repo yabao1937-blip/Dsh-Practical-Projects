@@ -1,14 +1,14 @@
 {
   "passed": true,
-  "hours": 72,
-  "setpointHours": 71,
-  "suggestedHours": 69,
+  "hours": 168,
+  "setpointHours": 166,
+  "suggestedHours": 163,
   "actionHours": 3,
   "channel": "A304",
   "canvas": {
     "width": 520,
     "height": 230,
-    "opaque": 1817
+    "opaque": 2956
   },
   "tooltipSeries": true,
   "rangeSwitch": true,
