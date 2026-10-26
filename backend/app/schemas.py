@@ -55,8 +55,8 @@ class HeavySampleIn(BaseModel):
 
 
 # ---------- Single-value manual process measurements ----------
-ManualMetric = Literal["heavy_clean_coal_ash", "raw_coal_slime_content", "coarse_slime_amount", "coarse_slime_ash"]
-ManualEntryMetric = Literal["heavy_clean_coal_ash", "raw_coal_slime_content", "coarse_slime_ash"]
+ManualMetric = Literal["heavy_clean_coal_ash", "raw_coal_slime_content", "coarse_slime_amount", "coarse_slime_ash", "float_clean_coal_ash"]
+ManualEntryMetric = Literal["heavy_clean_coal_ash", "raw_coal_slime_content", "coarse_slime_ash", "float_clean_coal_ash"]
 
 
 class ManualMeasurementIn(BaseModel):

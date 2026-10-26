@@ -1,8 +1,17 @@
 """SQLite 原位升级：保留历史行和索引，事务失败则完整回滚。"""
 import re
 
+BASE_METRICS = ['heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_amount']
+# Every catalog state this code generation may find in the wild, oldest first.
+KNOWN_METRIC_SETS = [
+    BASE_METRICS,
+    BASE_METRICS + ['coarse_slime_ash'],
+    BASE_METRICS + ['coarse_slime_ash', 'float_clean_coal_ash'],
+]
+METRIC_LABELS = {'coarse_slime_ash': '粗精煤泥灰分', 'float_clean_coal_ash': '浮精灰分'}
 
-def update_manual_metric_constraint(conn, include_ash=True):
+
+def update_manual_metric_constraint(conn, include_ash=True, include_float_ash=False):
     """Expand the SQLite catalog without losing old readings or their identities.
 
     Called inside the startup/Alembic transaction. A downgrade never drops assays.
@@ -13,15 +22,16 @@ def update_manual_metric_constraint(conn, include_ash=True):
     match = re.search(r'CONSTRAINT ck_manual_measurement_metric CHECK\s*\(metric IN \(([^)]*)\)\)', ddl)
     if not match:
         raise RuntimeError('无法识别手工补录指标约束，未修改数据库')
-    old = ['heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_amount']
     allowed = re.findall(r"'([^']+)'", match[1])
-    if set(allowed) not in (set(old), set(old + ['coarse_slime_ash'])):
+    if sorted(allowed) not in [sorted(s) for s in KNOWN_METRIC_SETS]:
         raise RuntimeError('手工补录指标约束与预期不符，未修改数据库')
-    if ('coarse_slime_ash' in allowed) == include_ash:
+    wanted = BASE_METRICS + (['coarse_slime_ash'] if include_ash else []) \
+        + (['float_clean_coal_ash'] if include_float_ash else [])
+    if set(wanted) == set(allowed):
         return
-    if not include_ash and conn.exec_driver_sql("SELECT 1 FROM manual_measurements WHERE metric='coarse_slime_ash' LIMIT 1").first():
-        raise RuntimeError('已有粗精煤泥灰分记录，不能降级删除该指标')
-    wanted = old + (['coarse_slime_ash'] if include_ash else [])
+    for metric in set(allowed) - set(wanted):
+        if conn.exec_driver_sql(f"SELECT 1 FROM manual_measurements WHERE metric='{metric}' LIMIT 1").first():
+            raise RuntimeError(f'已有{METRIC_LABELS.get(metric, metric)}记录，不能降级删除该指标')
     new_ddl = ddl[:match.start(1)] + ', '.join(repr(key) for key in wanted) + ddl[match.end(1):]
     new_ddl, count = re.subn(r'^CREATE TABLE "?manual_measurements"?\s*\(',
                            'CREATE TABLE manual_measurements_upgrade (', new_ddl, count=1)
@@ -61,7 +71,7 @@ def upgrade_schema(engine):
             if 'client_id' not in cols:
                 conn.exec_driver_sql('ALTER TABLE heavy_samples ADD COLUMN client_id VARCHAR(64)')
             conn.exec_driver_sql('CREATE UNIQUE INDEX IF NOT EXISTS uq_heavy_client_id ON heavy_samples(client_id)')
-            update_manual_metric_constraint(conn)
+            update_manual_metric_constraint(conn, include_float_ash=True)
             cols = {r[1] for r in conn.exec_driver_sql('PRAGMA table_info(manual_measurements)')}
             if cols and 'time_basis' not in cols:
                 conn.exec_driver_sql("ALTER TABLE manual_measurements ADD COLUMN time_basis VARCHAR(32) NOT NULL DEFAULT 'legacy-lag-2h'")

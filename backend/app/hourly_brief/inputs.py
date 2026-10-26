@@ -279,7 +279,7 @@ class Inputs:
             else:
                 result["heavy_amount"] = self.default("scale_502",
                     "502 点位单位尚未确认，使用默认值" if self.point(HEAVY_AMOUNT) else "未接入已确认单位的重介量测点")
-        result["float_ash"] = self.manual(auto_paths=[("floatAshInput",)],
+        result["float_ash"] = self.manual("float_clean_coal_ash", [("floatAshInput",)],
             record=("float", "ash_content", None)) or self.default("float_ash")
         result["float_amount"] = self.manual(auto_paths=[("amountInputs", "floatAmount")],
             record=("float", "coal_amount", None)) or cell(reason="无浮精量手工记录或默认值")

@@ -131,7 +131,12 @@ def collect_shared(inputs, config):
     # Historical/imported float assays are also visible in the overview. Respect their receipt time.
     row = latest_record(inputs, 'float')
     if row:
-        if not inputs.manual(auto_paths=[('floatAshInput',)]) and numeric(row.ash_content):
+        prior = cells.get('float_ash') or {}
+        # A manual flotation ash entry competes with 表2 by observation time;
+        # an older belt record must not mask a newer manual assay.
+        newer_manual = (prior.get('metric') == 'float_clean_coal_ash' and prior.get('observed_at')
+                        and business_time(prior['observed_at']) >= business_time(row.ts))
+        if not inputs.manual(auto_paths=[('floatAshInput',)]) and not newer_manual and numeric(row.ash_content):
             cells['float_ash'] = cell(row.ash_content, '历史浮精记录', iso_time(business_time(row.ts)),
                 'historical', record_id=row.id, created_at=iso_time(business_time(row.created_at)))
         if not inputs.manual(auto_paths=[('amountInputs','floatAmount')]) and numeric(row.coal_amount):

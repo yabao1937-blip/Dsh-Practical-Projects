@@ -10,6 +10,10 @@ METRICS = {
     "raw_coal_slime_content": {"name": "原煤煤泥含量", "unit": "%", "maximum": 100},
     "coarse_slime_amount": {"name": "粗精煤泥量", "unit": "t/h", "maximum": None},
     "coarse_slime_ash": {"name": "粗精煤泥灰分", "unit": "%", "maximum": 100, "archive_only": True},
+    # 2026-10-26: participates in decisions. Competes with 表2 float records
+    # (coal_records category='float') by production/observation time; the latest
+    # valid sample wins in the decision overview and hourly chain.
+    "float_clean_coal_ash": {"name": "浮精灰分", "unit": "%", "maximum": 100},
 }
 # Retain the old amount definition for historical reads and legacy point users.
 ENTRY_METRICS = {key: value for key, value in METRICS.items() if key != "coarse_slime_amount"}

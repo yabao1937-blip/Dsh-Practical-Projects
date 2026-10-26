@@ -72,9 +72,11 @@ const ManualMeasurements = {
             el('filter').value=this.filter;
             el('unit').textContent=definition ? `（${definition.unit}）` : '';
             const heavy=definition?.key === 'heavy_clean_coal_ash';
-            el('purpose').hidden=!definition?.archive_only && !heavy;
+            const floatAsh=definition?.key === 'float_clean_coal_ash';
+            el('purpose').hidden=!definition?.archive_only && !heavy && !floatAsh;
             el('purpose').textContent=definition?.archive_only ? '仅保存记录，不参与实时计算。' :
-                heavy ? '填写实际生产所属时间，不再减两小时；同一小时取最新采样，晚补后更新小时灰分及后续沿用值。' : '';
+                heavy ? '填写实际生产所属时间，不再减两小时；同一小时取最新采样，晚补后更新小时灰分及后续沿用值。' :
+                floatAsh ? '填写采样时间，与表2浮精记录按时间取最新，参与总灰分与建议密度计算。' : '';
             if (definition?.maximum != null) el('value').max=definition.maximum;
             else el('value').removeAttribute('max');
             el('fields').disabled=this.busy || !writable;

@@ -265,3 +265,60 @@ def test_recently_imported_model_is_not_known_before_import(sessions, seeded):
             created_at=(HOUR+timedelta(seconds=1)).astimezone(LOCAL).replace(tzinfo=None)))
     with sessions() as db:
         assert build_snapshot(db,HOUR)['cells']['coarse_ash']['value'] is None
+
+
+def float_belt_row(when, ash):
+    from app.models import CoalRecord
+    local = when.astimezone(LOCAL).replace(tzinfo=None, microsecond=0)
+    return CoalRecord(category='float', ts=local.strftime('%Y-%m-%d %H:%M:%S'), system='default',
+                      source='manual', ash_content=ash, created_at=local)
+
+
+def collect_float_cells(db):
+    from app.hourly_brief.inputs import Inputs
+    from app.services.decision_sources import collect_shared, config_view
+    inputs = Inputs(db, HOUR, live=True, authoritative=True)
+    return inputs, collect_shared(inputs, config_view(db, inputs.hour, inputs))
+
+
+def test_manual_float_ash_participates_in_total_ash(sessions, seeded):
+    # Baseline: the seeded store manual float value 9 feeds the three-part total ash.
+    with sessions() as db:
+        live = shared_snapshot(db)
+        assert live['cells']['float_ash']['value'] == 9
+        assert live['total_ash']['value'] == pytest.approx((8.5*435+9*40+9.2*25)/500)
+    # A newer manual flotation assay replaces the older store value in the decision.
+    with sessions.begin() as db:
+        add_manual(db, 12.5, HOUR-timedelta(minutes=1), HOUR-timedelta(seconds=30), 'float_clean_coal_ash')
+    with sessions() as db:
+        live = shared_snapshot(db)
+        cell = live['cells']['float_ash']
+        assert cell['value'] == 12.5 and cell['status'] == 'manual' and cell['metric'] == 'float_clean_coal_ash'
+        assert live['total_ash']['value'] == pytest.approx((8.5*435+12.5*40+9.2*25)/500)
+
+
+def test_manual_float_ash_competes_with_belt_records_by_time(sessions, seeded, monkeypatch):
+    with sessions.begin() as db:
+        db.delete(db.get(AutoState, 'floatAshInput'))
+    # Older manual assay + belt record: the belt record stays visible (pre-change rule).
+    with sessions.begin() as db:
+        add_manual(db, 12.5, HOUR-timedelta(minutes=5), HOUR-timedelta(minutes=4), 'float_clean_coal_ash')
+        db.add(float_belt_row(HOUR-timedelta(seconds=20), 11.2))
+    with sessions() as db:
+        inputs, cells = collect_float_cells(db)
+        assert cells['float_ash']['source'] == '历史浮精记录' and cells['float_ash']['value'] == 11.2
+        assert inputs.collect()['float_ash']['value'] == 11.2
+    # A manual assay newer than the belt record wins; the older record cannot mask it.
+    with sessions.begin() as db:
+        add_manual(db, 13.8, HOUR-timedelta(seconds=10), HOUR-timedelta(seconds=5), 'float_clean_coal_ash')
+    with sessions() as db:
+        inputs, cells = collect_float_cells(db)
+        assert cells['float_ash']['value'] == 13.8 and cells['float_ash']['metric'] == 'float_clean_coal_ash'
+        assert inputs.collect()['float_ash']['value'] == 13.8
+    # A later belt record overtakes the manual assay again: latest sample wins.
+    with sessions.begin() as db:
+        db.add(float_belt_row(HOUR-timedelta(seconds=4), 10.8))
+    with sessions() as db:
+        inputs, cells = collect_float_cells(db)
+        assert cells['float_ash']['source'] == '历史浮精记录' and cells['float_ash']['value'] == 10.8
+        assert inputs.collect()['float_ash']['value'] == 10.8
