@@ -25,6 +25,22 @@ def cadence_seconds(value):
     return int(value) if type(value) in (int, float) and value in STORAGE_CADENCES else CADENCE
 
 
+BASIS_WINDOW_SECONDS = 30  # Legacy hour-end tail for five-second observations.
+
+
+def hour_end_basis_window(cadences):
+    """The hour-end density basis window scales with the observation cadence.
+
+    The fixed 30-second tail predates 60-second decision sampling: one sample
+    per minute can never land inside it, so the hour-end basis -- and with it
+    every hourly advice value -- became structurally missing. Keep the legacy
+    30 seconds at the five-second cadence; otherwise widen to 1.5x the widest
+    stored cadence so the newest observation inside the hour always qualifies.
+    """
+    widest = max(cadences) if cadences else CADENCE
+    return max(BASIS_WINDOW_SECONDS, int(widest * 1.5))
+
+
 def row_at(row):
     value = getattr(row, 'sampled_at', None)
     return business_time(value) if value else datetime.fromtimestamp(row.slot*CADENCE, timezone.utc)
@@ -144,8 +160,9 @@ def hour_advice(rows, start, end, density, max_step=.03, *, weights=None):
     if len({r.context_key for r in rows}) > 1:
         reasons.append('小时内数据来源、模型或调密参数发生变化，暂不合并建议')
     at = business_time(density.get('observed_at')) if density.get('observed_at') else None
-    if not valid(density, 'density') or not at or not 0 < (end-at).total_seconds() <= 30:
-        reasons.append('小时末 30 秒内没有有效实测密度')
+    window = hour_end_basis_window({cadence_seconds(r.snapshot) for r in rows})
+    if not valid(density, 'density') or not at or not 0 < (end-at).total_seconds() <= window:
+        reasons.append(f'小时末 {window} 秒内没有有效实测密度')
     limit = min(.03, max_step) if numeric(max_step) and max_step > 0 else .03
     delta = max(-limit, min(limit, mean)) if mean is not None else None
     value = round(density['value']+delta, 3) if not reasons and delta is not None else None
@@ -192,7 +209,8 @@ def refresh_coverage_policy(result):
         end = business_time(result['period']['end'])
         at = business_time(density.get('observed_at')) if density.get('observed_at') else None
         step = guide.get('maxStep', .03)
-        if (valid(density,'density') and at and 0 < (end-at).total_seconds() <= 30
+        window = hour_end_basis_window(coverage.get('storage_cadences_seconds') or [CADENCE])
+        if (valid(density,'density') and at and 0 < (end-at).total_seconds() <= window
                 and numeric(delta) and numeric(step) and 0 < step <= .03 and abs(delta) <= step):
             value = round(density['value']+delta, 3)
         else:
