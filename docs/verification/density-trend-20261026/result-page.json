@@ -1,17 +1,20 @@
 {
   "passed": true,
-  "hours": 168,
-  "setpointHours": 158,
-  "canvas": {
-    "width": 1416,
-    "height": 440,
-    "opaque": 3490
+  "liveData": true,
+  "apiMs": 153,
+  "counts": {
+    "A304": 175
   },
-  "caption": "近7天 · 168 小时 · 人工设定 158 小时 · 建议密度 44 小时 · 调密 9 次（MD_SET A304）",
-  "actionRows": 28,
-  "tooltipDelta": true,
-  "range720": true,
-  "dialogChartFree": true,
-  "apiMutationsBlocked": true,
+  "monthCount": 28,
+  "archiveAvailable": false,
+  "trueAdviceCount": 0,
+  "exactRanges": true,
+  "keyboard": true,
+  "edgeCases": {
+    "gap": true,
+    "route": true,
+    "missing": true
+  },
+  "mutationAttempts": 0,
   "pageErrors": []
 }

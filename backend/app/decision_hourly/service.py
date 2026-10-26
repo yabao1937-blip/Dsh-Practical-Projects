@@ -311,6 +311,8 @@ def maintenance_tick(now, sessions=SessionLocal):
     archive_tick(iso_time(start-timedelta(days=7)),sessions)
     from .ash_settlement import settlement_tick
     settlement_tick(now, sessions)
+    from .advice_archive import archive_tick as archive_advice
+    archive_advice(sessions)
 
 
 def tick(now=None, sessions=SessionLocal):

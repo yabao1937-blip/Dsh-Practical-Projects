@@ -21,6 +21,49 @@ ALIGNMENT_LEVEL_ITEM = 'TIA_3_5.TIA_3_5.JMCWC/LEVEL_B'
 ALIGNMENT_LAG_SECONDS = 90
 ALIGNMENT_LOOKBACK_SECONDS = 30
 ALIGNMENT_EVIDENCE_CADENCE = 5
+BOUNDARY_ITEMS = {f'TIA_4_1.TIA_4_1.{channel}/{kind}' for channel in ('A303', 'A304') for kind in ('MD', 'MD_SET')}
+
+
+def select_hour_boundary_evidence(document, cfg, owner, prediction_at):
+    """Keep the latest original pre-hour density pair, including bad quality."""
+    boundary = prediction_at.replace(minute=0, second=0, microsecond=0)
+    if (cfg.history_interval_seconds != 60 or not 0 <= (prediction_at-boundary).total_seconds() < 60
+            or not isinstance(document, dict) or document.get('owner') != owner
+            or document.get('source_id') != cfg.source_id or document.get('state') != 'connected'):
+        return []
+    result = []
+    for channel in ('A303', 'A304'):
+        points = [p for p in cfg.points if p.item_id in {f'TIA_4_1.TIA_4_1.{channel}/MD', f'TIA_4_1.TIA_4_1.{channel}/MD_SET'}]
+        if len(points) != 2 or len({p.item_id for p in points}) != 2:
+            continue
+        keys = {p.key for p in points}
+        candidates = []
+        for batch in document.get('batches', []):
+            if batch.get('source_id') != cfg.source_id or not re.fullmatch(r'[a-f0-9]{32}', batch.get('batch_id') or ''):
+                continue
+            samples = [s for s in batch.get('samples', []) if s.get('key') in keys]
+            try:
+                latest = max(parse_time(s['received_at']) for s in samples)
+                if boundary-timedelta(seconds=30) <= latest < boundary:
+                    candidates.append((latest, batch['batch_id'], samples))
+            except (KeyError, TypeError, ValueError):
+                continue
+        if not candidates:
+            continue
+        received, batch_id, samples = max(candidates, key=lambda c:c[0])
+        if len(samples) != 2 or {s['key'] for s in samples} != keys:
+            continue
+        by_key = {s['key']:s for s in samples}
+        if any(by_key[p.key].get('runtime_only') or by_key[p.key].get('definition_id') != definition_id(p.model_dump())
+               or parse_time(by_key[p.key]['received_at']) != received for p in points):
+            continue
+        for point in points:
+            result.append(dict(source_id=cfg.source_id, point_key=point.key, item_id=point.item_id,
+                point_config=point.model_dump(),
+                batch_id=batch_id, captured_at=iso_time(prediction_at), hour_end_at=iso_time(boundary),
+                storage_kind='hour-boundary-evidence', sample=dict(deepcopy(by_key[point.key]),
+                storage_kind='hour-boundary-evidence', cadence_seconds=5)))
+    return result
 
 
 def select_alignment_evidence(document, cfg, owner, prediction_at):

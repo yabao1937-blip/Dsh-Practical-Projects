@@ -49,6 +49,16 @@ class GptHourlyDensityAnchor(Base):
     snapshot: Mapped[dict] = mapped_column(JSON)
 
 
+class GptHourlyDensityAdvice(Base):
+    """Actual hourly-card results, append-only on a changed result or basis."""
+    __tablename__ = 'gpt_hourly_density_advice'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    apply_start: Mapped[str] = mapped_column(String(32), index=True)
+    generated_at: Mapped[str] = mapped_column(String(32), index=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+
+
 class DecisionTelemetryPin(Base):
     """Keep authoritative readings as long as hot OR compressed decisions cite them."""
     __tablename__ = 'decision_telemetry_pins'

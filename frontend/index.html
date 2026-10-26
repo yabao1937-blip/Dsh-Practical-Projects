@@ -473,43 +473,43 @@
 
         <section class="page" id="page-density-trend" aria-labelledby="density-trend-title">
             <div class="page-header">
-                <div>
-                    <h2 id="density-trend-title">人工调密 与 建议密度 趋势</h2>
-                    <p>设定密度（MD_SET）与小时建议密度逐小时对比 · 北京时间</p>
-                </div>
-                <div class="page-header-actions">
-                    <div class="filter-group" id="density-trend-ranges">
-                        <button type="button" class="btn" data-t-range="168" aria-pressed="true">近7天</button>
-                        <button type="button" class="btn" data-t-range="720" aria-pressed="false">近30天</button>
-                        <input type="datetime-local" id="density-trend-start" step="60" aria-label="自定义开始时间" title="自定义开始时间（北京时间）">
-                        <span>至</span>
-                        <input type="datetime-local" id="density-trend-end" step="60" aria-label="自定义结束时间" title="自定义结束时间（北京时间）">
-                        <button type="button" class="btn" id="density-trend-query">查询</button>
-                        <button type="button" class="btn" id="density-trend-refresh">刷新</button>
-                    </div>
-                </div>
+                <div><h2 id="density-trend-title">调密趋势对比</h2><p>人工设定与本小时建议，放在同一条时间轴上查看</p></div>
+                <div class="page-header-actions"><div class="filter-group" id="density-trend-ranges">
+                    <button type="button" class="btn" data-t-range="168" aria-pressed="true">近7天</button>
+                    <button type="button" class="btn" data-t-range="720" aria-pressed="false">近30天</button>
+                    <button type="button" class="btn" id="density-trend-custom" aria-expanded="false">自选时间</button>
+                    <button type="button" class="btn" id="density-trend-refresh">刷新</button>
+                    <button type="button" class="btn" id="density-trend-theme">深色视图</button>
+                </div></div>
             </div>
-
+            <div id="density-trend-custom-fields" hidden>
+                <label>开始<input type="datetime-local" id="density-trend-start" step="60" aria-label="自定义开始时间"></label><span>至</span>
+                <label>结束<input type="datetime-local" id="density-trend-end" step="60" aria-label="自定义结束时间"></label>
+                <button type="button" class="btn btn-primary" id="density-trend-query">查询</button><span>北京时间 · 最长90天</span>
+            </div>
             <div class="card density-trend-card">
+                <div class="density-trend-chart-heading"><h3>设定密度 / 小时建议</h3><span>g/cm³ · 北京时间</span></div>
                 <p class="density-trend-caption" id="density-trend-caption">正在读取…</p>
+                <div class="density-trend-legend" aria-label="显示的曲线">
+                    <button type="button" data-density-series="A304" aria-pressed="true"><i></i>A304 设定</button>
+                    <button type="button" data-density-series="advice" aria-pressed="true"><i></i>本小时建议</button>
+                    <span>点击图例显隐 · 悬停查看记录</span>
+                </div>
                 <div class="density-trend-plot" id="density-trend-plot">
-                    <canvas id="density-trend-canvas" tabindex="0" role="img"
-                        aria-label="人工设定密度与建议密度逐小时趋势图，方向键查看数值"></canvas>
+                    <canvas id="density-trend-canvas" tabindex="0" role="img" aria-label="人工设定与真实小时建议趋势图，左右方向键查看记录，Home 和 End 跳至首尾"></canvas>
                     <div class="density-trend-tooltip" hidden></div>
                 </div>
-                <p class="density-trend-legend">● 人工设定密度（MD_SET）&nbsp;&nbsp;◌╌ 建议密度（小时均值）&nbsp;&nbsp;◎ 该小时发生调密</p>
-                <p class="density-trend-note">设定取该小时最后一次检测到的设定变化值，无变化时取该小时首个有效 MD_SET；建议为该小时调密建议均值；缺数据小时留空不外推。自动记录 A303/A304 设定值变化，只读采集，不下发设备指令。</p>
+                <p id="density-trend-archive-note" class="density-trend-archive-note"></p>
+                <p class="density-trend-note">设定曲线保留已记录的每次变化及小时基准观测；圆环表示检测到调密。连线仅连接观测点，不代表中间时刻的实测值。无记录时段留空。实际操作发生在前后两次观测之间，是否为人工操作需结合现场确认。</p>
                 <p id="density-trend-status" role="status" aria-live="polite"></p>
             </div>
-
             <div class="card">
-                <h3 class="density-trend-table-title">近期调密记录</h3>
-                <div class="table-scroll">
-                    <table class="data-table">
-                        <thead><tr><th>发现时间</th><th>设备</th><th>设定变化 (g/cm³)</th><th>幅度</th></tr></thead>
-                        <tbody id="density-trend-actions"><tr><td colspan="4">正在读取…</td></tr></tbody>
-                    </table>
-                </div>
+                <h3 class="density-trend-table-title">所选时段的调密记录</h3>
+                <div class="table-scroll"><table class="data-table">
+                    <thead><tr><th>检测时间</th><th>设备</th><th>设定变化 (g/cm³)</th><th>幅度</th></tr></thead>
+                    <tbody id="density-trend-actions"><tr><td colspan="4">正在读取…</td></tr></tbody>
+                </table></div>
+                <div class="density-trend-pagination"><button type="button" class="btn" id="density-trend-prev">上一页</button><span id="density-trend-page-info"></span><button type="button" class="btn" id="density-trend-next">下一页</button></div>
             </div>
         </section>
 

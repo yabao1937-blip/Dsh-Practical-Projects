@@ -78,26 +78,22 @@ def test_duplicate_reading_does_not_manufacture_hour_coverage():
     assert output['value'] is None and coverage['valid_count']==1
 
 
-def test_hour_end_basis_window_scales_with_observation_cadence():
-    # 60-second sampling: one row per minute at :05, so the newest density
-    # observation inside the hour is ~55s before the end. The basis window
-    # widens to 1.5x the cadence (90s) so hourly advice is not structurally
-    # missing the way a fixed 30-second tail made it.
+@pytest.mark.parametrize('cadence',[5,30,60])
+@pytest.mark.parametrize('age,accepted',[(29.999,True),(30,True),(30.001,False),(55,False),(90,False),(0,False),(-1,False)])
+def test_hour_end_basis_window_is_fixed(cadence,age,accepted):
     rows=[]
-    for i in range(60):
-        when=START+timedelta(seconds=i*60+5)
+    for i in range(3600//cadence):
+        when=START+timedelta(seconds=i*cadence)
         rows.append(SimpleNamespace(slot=int(when.timestamp())//5,sampled_at=iso_time(when),
-            context_key='one',fingerprint=str(i),snapshot=dict(cadence_seconds=60,
+            context_key='one',fingerprint=str(i),snapshot=dict(cadence_seconds=cadence,
                 suggested_density=dict(value=1.52,status='calculated'),
                 cells={'density':dict(value=1.5,status='good')})))
-    basis=dict(value=1.5,status='good',observed_at=iso_time(HOUR-timedelta(seconds=55)))
+    basis=dict(value=1.5,status='good',observed_at=iso_time(HOUR-timedelta(seconds=age)))
     output,coverage,_=hour_advice(rows,START,HOUR,basis)
-    assert output['value']==1.52 and output['status']=='calculated'
-    assert '没有有效实测密度' not in output['reason']
-    assert coverage['storage_cadences_seconds']==[60]
-    # Five-second sampling keeps the legacy 30-second tail: a 45s-old basis still blocks.
-    stale=advice(fake_rows(),dict(value=1.5,status='good',observed_at=iso_time(HOUR-timedelta(seconds=45))))
-    assert stale[0]['value'] is None and '小时末 30 秒内' in stale[0]['reason']
+    assert (output['value'] is not None) == accepted
+    assert coverage['storage_cadences_seconds']==[cadence]
+    if not accepted:
+        assert '小时末 30 秒内' in output['reason']
 
 
 def legacy_hour(omit=71, other_reason=''):

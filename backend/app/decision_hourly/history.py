@@ -68,12 +68,14 @@ def historical_cells(db, start, end, rows, *, weights=None):
                 series[f'{key}:{label}'].extend(point_series(inputs.point(item,source)))
         elif point_key == 'a303_a304_density_average':
             parts = [point_series(inputs.point(item,source)) for _,item in DENSITY_AVERAGE_MEMBERS]
-            right = {(c['observed_at'],c['batch_id']):c for c in parts[1]}
-            for a in parts[0]:
-                b = right.get((a['observed_at'],a['batch_id']))
-                if b and a['batch_id']:
-                    series[key].append(dict(a,value=(a['value']+b['value'])/2 if valid(a,'density') and valid(b,'density') else None,
-                        point_key=point_key,item_id=point_key,_event='density-average:'+a['observed_at']))
+            left, right = [{(c['observed_at'],c['batch_id']):c for c in group} for group in parts]
+            for identity in left.keys() | right.keys():
+                a, b = left.get(identity), right.get(identity)
+                c = a or b
+                good = a and b and identity[1] and valid(a,'density') and valid(b,'density')
+                series[key].append(dict(c,value=(a['value']+b['value'])/2 if good else None,
+                    status='good' if good else 'missing', point_key=point_key,item_id=point_key,
+                    _event='density-average:'+c['observed_at']))
         else:
             p = next((p for group in inputs.points.values() for p in group if p.source_id==source and p.key==point_key),None)
             series[key].extend(point_series(p))
@@ -168,7 +170,7 @@ def historical_cells(db, start, end, rows, *, weights=None):
     if len(float_bases) > 1 and 'float_amount' in result:
         result['float_amount'].update(value=None, status='missing',
             reason='小时内浮精量口径变化（压滤机板数折算/沿用值），暂不混合均值')
-    densities = [c for c in series['density'] if valid(c,'density') and c.get('observed_at') and
+    densities = [c for c in series['density'] if c.get('observed_at') and
                  start <= business_time(c['observed_at']) < end]
     basis = max(densities,key=lambda c:c['observed_at'],default={})
     return result, sources, basis

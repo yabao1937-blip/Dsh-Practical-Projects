@@ -1,95 +1,63 @@
-// Dedicated density-trend page: full-page chart, dialog restored to chart-free.
+// Live read-only UI verification; synthetic checks are explicitly labeled.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+const fs = require('node:fs'), path = require('node:path');
 const {chromium} = require(process.env.DMCS_PLAYWRIGHT_MODULE || 'playwright');
-const root = path.resolve(__dirname,'../..');
-const output = path.join(root,'docs/verification/density-trend-20261026');
+const root = path.resolve(__dirname,'../..'), output = path.join(root,'docs/verification/density-trend-20261026');
 const url = process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000';
-
-(async () => {
-    const trend = await (await fetch(url+'/api/v1/decision/evidence/density-trend?limit=168')).json();
-    assert.equal(trend.policy,'density-trend-v1');
-    assert.equal(trend.items.length,168);
-    const withSetpoint = trend.items.filter(i => i.setpoint.value !== null).length;
-    assert.ok(withSetpoint > 0, 'expected setpoint hours from live data');
-
-    const browser = await chromium.launch({channel:'chrome',headless:true});
+(async()=>{
+    fs.mkdirSync(output,{recursive:true});
+    const started=Date.now(), response=await fetch(url+'/api/v1/decision/evidence/density-trend?limit=168');
+    assert.equal(response.status,200);const data=await response.json();
+    assert.equal(data.policy,'density-trend-v2');
+    assert.equal(Date.parse(data.period.end)-Date.parse(data.period.start),7*86400000);
+    const counts=Object.fromEntries(Object.entries(data.channels).map(([k,v])=>[k,v.length]));
+    assert.ok(Object.values(counts).some(n=>n>0));const apiMs=Date.now()-started;
+    const browser=await chromium.launch({channel:'chrome',headless:true});
     try {
-        fs.mkdirSync(output,{recursive:true});
-        const context = await browser.newContext({viewport:{width:1500,height:1000}});
-        await context.route('**/api/**',route => ['GET','HEAD','OPTIONS'].includes(route.request().method()) ? route.continue() : route.abort());
-        const page = await context.newPage(), errors = [];
-        page.on('pageerror',error => errors.push(error.message));
-        await page.goto(url+'/');
-        await page.waitForFunction(() => App.__ready);
-        // Navigate to the dedicated page via the main nav.
+        const context=await browser.newContext({viewport:{width:1500,height:1000}});let mutationAttempts=0;
+        await context.route('**/api/**',r=>{
+            if(!['GET','HEAD','OPTIONS'].includes(r.request().method())){mutationAttempts++;return r.abort();}return r.continue();
+        });
+        const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+        await page.goto(url);await page.waitForFunction(()=>App.__ready,{},{timeout:60000});
         await page.locator('.nav-item[data-page="page-density-trend"]').click();
-        await page.waitForSelector('#page-density-trend.active');
-        await page.waitForFunction(() => (document.getElementById('density-trend-canvas').width || 0) > 300
-            && !document.getElementById('density-trend-status').textContent);
-        const painted = await page.evaluate(() => {
-            const canvas = document.getElementById('density-trend-canvas');
-            const data = canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
-            let opaque = 0;
-            for (let i = 3; i < data.length; i += 40) if (data[i]) opaque++;
-            return {width:canvas.width,height:canvas.height,opaque};
-        });
-        assert.ok(painted.width > 800 && painted.height >= 400, JSON.stringify(painted));
-        assert.ok(painted.opaque > 400, 'full-page canvas looks blank: '+JSON.stringify(painted));
-        const caption = await page.locator('#density-trend-caption').innerText();
-        assert.ok(/近7天 · 168 小时/.test(caption), caption);
-        assert.ok(/人工设定 \d+ 小时/.test(caption) && /建议密度 \d+ 小时/.test(caption), caption);
-        const pageText = await page.locator('#page-density-trend').innerText();
-        assert.ok(pageText.includes('人工调密 与 建议密度 趋势'));
-        assert.ok(pageText.includes('缺数据小时留空不外推'));
-        const actionRows = await page.locator('#density-trend-actions tr').count();
-        assert.ok(actionRows >= 1, 'expected recent action rows');
-        // Hover a point: tooltip shows both series and the delta.
-        const hover = await page.evaluate(() => {
-            const canvas = document.getElementById('density-trend-canvas');
-            const hit = (canvas._hits || []).find(h => h.text.includes('人工设定 1.') || h.text.includes('人工设定 1.'));
-            if (!hit) return null;
-            canvas.dispatchEvent(new MouseEvent('mousemove',{clientX:canvas.getBoundingClientRect().left+hit.x,
-                clientY:canvas.getBoundingClientRect().top+hit.y,bubbles:true}));
-            const tip = canvas.parentElement.querySelector('.density-trend-tooltip');
-            return {hidden:tip.hidden,text:tip.textContent};
-        });
-        assert.ok(hover && !hover.hidden, 'tooltip did not open');
-        assert.ok(hover.text.includes('建议−设定'), hover.text);
-        // 30-day window switch refetches 720 hourly points.
+        await page.waitForFunction(()=>DensityTrendPage.meta?.policy==='density-trend-v2');
+        await page.waitForFunction(()=>document.getElementById('density-trend-canvas')._hits.length>0);
+        await page.locator('#density-trend-canvas').focus();await page.keyboard.press('End');
+        assert.equal(await page.evaluate(()=>{const c=document.getElementById('density-trend-canvas');return c._index===c._hits.length-1;}),true);
+        await page.keyboard.press('Home');assert.equal(await page.evaluate(()=>document.getElementById('density-trend-canvas')._index),0);
+        assert.equal(await page.locator('.density-trend-tooltip').isVisible(),true);await page.keyboard.press('Escape');
+        await page.locator('#density-trend-title').click(); // Remove the keyboard focus ring from the preview.
+        await page.waitForTimeout(250); // Let the existing CSS theme transition settle.
+        await page.screenshot({path:path.join(output,'live-7-days.png')});
         await page.locator('[data-t-range="720"]').click();
-        await page.waitForFunction(() => (document.getElementById('density-trend-canvas')._hits || []).length === 720);
-        assert.match(await page.locator('#density-trend-caption').innerText(), /近30天 · 720 小时/);
-        // Custom range: last 48 complete hours via the pickers.
-        await page.evaluate(() => {
-            const local = offset => new Date(Date.now() + offset + 8 * 3600000)
-                .toISOString().slice(0, 16);
-            document.getElementById('density-trend-start').value = local(-50 * 3600000);
-            document.getElementById('density-trend-end').value = local(-2 * 3600000);
-        });
+        await page.waitForFunction(()=>DensityTrendPage.meta && Date.parse(DensityTrendPage.meta.period.end)-Date.parse(DensityTrendPage.meta.period.start)===30*86400000);
+        const monthCount=await page.evaluate(()=>DensityTrendPage.meta.total_actions);
+        await page.locator('#density-trend-custom').click();
+        const local=offset=>new Date(Date.parse(data.period.end)+offset+8*3600000).toISOString().slice(0,16);
+        const start=local(-50*3600000),end=local(-2*3600000);
+        await page.locator('#density-trend-start').fill(start);await page.locator('#density-trend-end').fill(end);
         await page.locator('#density-trend-query').click();
-        await page.waitForFunction(() => (document.getElementById('density-trend-canvas')._hits || []).length === 48);
-        assert.match(await page.locator('#density-trend-caption').innerText(), /自定义 48 小时/);
-        // A preset click returns to rolling windows.
-        await page.locator('[data-t-range="168"]').click();
-        await page.waitForFunction(() => (document.getElementById('density-trend-canvas')._hits || []).length === 168);
-        await page.screenshot({path:path.join(output,'density-trend-page.png'),fullPage:false});
-        // The tracking dialog must be restored: no chart inside it.
-        await page.locator('.nav-item[data-page="page-decision"]').click();
-        await page.waitForSelector('#page-decision.active');
-        await page.locator('[data-evidence-open]').click();
-        await page.waitForSelector('#decision-evidence-dialog[open]');
-        await page.locator('[data-e-tab="actions"]').click();
-        await page.waitForTimeout(400);
-        assert.equal(await page.locator('#decision-evidence-dialog #evidence-density-trend').count(),0,
-            'the dialog must stay chart-free after the move');
-        assert.ok((await page.locator('#evidence-content').innerText()).includes('自动记录 A303/A304 设定值变化'));
-        assert.deepEqual(errors,[]);
-        const result = {passed:true,hours:168,setpointHours:withSetpoint,canvas:painted,
-            caption,actionRows,tooltipDelta:true,range720:true,dialogChartFree:true,
-            apiMutationsBlocked:true,pageErrors:errors};
-        fs.writeFileSync(path.join(output,'result-page.json'),JSON.stringify(result,null,2)+'\n');
-        console.log(JSON.stringify(result));
-    } finally { await browser.close(); }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+        await page.waitForFunction(s=>Date.parse(DensityTrendPage.meta.period.start)===Date.parse(s+':00+08:00'),start);
+        assert.ok((await page.locator('#density-trend-caption').innerText()).startsWith('自选时间'));
+        const edge=await page.evaluate(()=>{
+            const t=Date.now(),at=ms=>new Date(t+ms).toISOString();
+            const a={at:at(-7200000),value:1.48,key:'advice',t:t-7200000,apply_start:at(-7200000),basis:{channels:['A304']}};
+            return {gap:!DensityTrendPage.connected(a,{...a,at:at(0),t,apply_start:at(0)}),
+                route:!DensityTrendPage.connected(a,{...a,t:a.t+3600000,basis:{channels:['A303']}}),
+                missing:!DensityTrendPage.connected({...a,value:null},a)};
+        });assert.deepEqual(edge,{gap:true,route:true,missing:true});
+        assert.equal(await page.locator('[data-density-series="A303"]').count(),0);
+        await page.locator('[data-density-series="advice"]').click();
+        assert.equal(await page.locator('[data-density-series="advice"]').getAttribute('aria-pressed'),'false');
+        await page.setViewportSize({width:390,height:844});await page.screenshot({path:path.join(output,'live-mobile.png')});
+        const overflow=await page.locator('#page-density-trend').evaluate(el=>Math.max(el.scrollWidth-el.clientWidth,el.getBoundingClientRect().right-innerWidth));
+        assert.ok(overflow<=2,'horizontal overflow: '+overflow);
+        await page.setViewportSize({width:1500,height:1000});await page.locator('#density-trend-theme').click();
+        await page.screenshot({path:path.join(output,'live-dark.png')});
+        assert.deepEqual(errors,[]);assert.equal(mutationAttempts,0);
+        const report={passed:true,liveData:true,apiMs,counts,monthCount,archiveAvailable:data.archive_available,
+            trueAdviceCount:data.suggestions.length,exactRanges:true,keyboard:true,edgeCases:edge,mutationAttempts,pageErrors:errors};
+        fs.writeFileSync(path.join(output,'result-page.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
+    } finally {await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

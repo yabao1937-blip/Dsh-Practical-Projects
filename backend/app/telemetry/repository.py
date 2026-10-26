@@ -89,6 +89,7 @@ class TelemetryRepository:
             source.heartbeat_at = iso_time(now)
             source.lease_until = iso_time(now + timedelta(seconds=cfg.lease_seconds))
             self._persist_alignment_evidence(db, cfg, batch)
+            self._persist_hour_boundary_evidence(db, cfg, batch)
             for sample in batch["samples"]:
                 received = sample["received_at"]
                 point = db.get(TelemetryPoint, (cfg.source_id, sample["key"]))
@@ -174,6 +175,59 @@ class TelemetryRepository:
             if existing is None:
                 db.add(TelemetryReading(source_id=cfg.source_id, point_key=key,
                     batch_id=batch_id, received_at=sample['received_at'], sample=sample))
+        db.flush()
+
+    @staticmethod
+    def _persist_hour_boundary_evidence(db, cfg, batch):
+        from .realtime import BOUNDARY_ITEMS
+        entries = batch.get('hour_boundary_evidence', [])
+        if not isinstance(entries, list) or len(entries) > 4:
+            raise ValueError('invalid hour boundary evidence envelope')
+        if not entries:
+            return
+        if (batch.get('storage_policy') != 'periodic-v1' or batch.get('storage_kind') != 'periodic'
+                or batch.get('cadence_seconds') != 60):
+            raise ValueError('hour boundary evidence requires minute periodic batch')
+        captured = max(parse_time(s['received_at']) for s in batch['samples'])
+        boundary = captured.replace(minute=0, second=0, microsecond=0)
+        if (captured-boundary).total_seconds() >= 60:
+            raise ValueError('hour boundary evidence outside first minute')
+        seen, groups = set(), {}
+        for entry in entries:
+            sample = entry.get('sample') if isinstance(entry, dict) else None
+            key = entry.get('point_key') if isinstance(entry, dict) else None
+            parent = next((s for s in batch['samples'] if s.get('key') == key), None)
+            item = entry.get('item_id') if isinstance(entry, dict) else None
+            original = entry.get('point_config') if isinstance(entry, dict) else None
+            if (not isinstance(sample, dict) or not parent or item not in BOUNDARY_ITEMS or key in seen
+                    or db.get(TelemetryPoint, (cfg.source_id, key)) is None
+                    or entry.get('source_id') != cfg.source_id or entry.get('storage_kind') != 'hour-boundary-evidence'
+                    or sample.get('key') != key or sample.get('runtime_only')
+                    or not sample.get('definition_id') or sample['definition_id'] != parent.get('definition_id')
+                    or sample.get('node_id') != parent.get('node_id') or sample.get('unit') != parent.get('unit')
+                    or sample.get('storage_kind') != 'hour-boundary-evidence' or sample.get('cadence_seconds') != 5
+                    or not fullmatch(r'[a-f0-9]{32}', entry.get('batch_id') or '')):
+                raise ValueError('invalid hour boundary evidence identity')
+            # Match the original parent node, not the current definition: queued
+            # old configurations remain historical evidence on spool replay.
+            if (not isinstance(original, dict) or original.get('key') != key or original.get('item_id') != item
+                    or definition_id(original) != sample['definition_id']
+                    or original.get('node_id') != sample.get('node_id') or original.get('unit') != sample.get('unit')):
+                raise ValueError('invalid hour boundary point')
+            received = parse_time(sample['received_at'])
+            if (parse_time(entry['captured_at']) != captured or parse_time(entry['hour_end_at']) != boundary
+                    or not boundary-timedelta(seconds=30) <= received < boundary):
+                raise ValueError('invalid hour boundary evidence time')
+            seen.add(key)
+            groups.setdefault(item.rsplit('/', 1)[0], []).append((item.rsplit('/', 1)[1], entry['batch_id'], received))
+        for pair in groups.values():
+            if len(pair) != 2 or {p[0] for p in pair} != {'MD', 'MD_SET'} or len({p[1:] for p in pair}) != 1:
+                raise ValueError('hour boundary density pair must share batch and time')
+        for entry in entries:
+            if db.scalar(select(TelemetryReading.id).where(TelemetryReading.source_id == cfg.source_id,
+                    TelemetryReading.point_key == entry['point_key'], TelemetryReading.batch_id == entry['batch_id'])) is None:
+                db.add(TelemetryReading(source_id=cfg.source_id, point_key=entry['point_key'],
+                    batch_id=entry['batch_id'], received_at=entry['sample']['received_at'], sample=entry['sample']))
         db.flush()
 
     def prune(self, cfg):

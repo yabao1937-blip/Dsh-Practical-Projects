@@ -29,16 +29,8 @@ BASIS_WINDOW_SECONDS = 30  # Legacy hour-end tail for five-second observations.
 
 
 def hour_end_basis_window(cadences):
-    """The hour-end density basis window scales with the observation cadence.
-
-    The fixed 30-second tail predates 60-second decision sampling: one sample
-    per minute can never land inside it, so the hour-end basis -- and with it
-    every hourly advice value -- became structurally missing. Keep the legacy
-    30 seconds at the five-second cadence; otherwise widen to 1.5x the widest
-    stored cadence so the newest observation inside the hour always qualifies.
-    """
-    widest = max(cadences) if cadences else CADENCE
-    return max(BASIS_WINDOW_SECONDS, int(widest * 1.5))
+    """Freshness is a fixed rule, independent of ordinary history cadence."""
+    return BASIS_WINDOW_SECONDS
 
 
 def row_at(row):

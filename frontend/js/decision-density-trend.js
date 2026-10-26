@@ -1,173 +1,193 @@
-/* Dedicated page: operator setpoint vs suggested density, hourly point-line chart. */
+/* Real observations and actual archived hourly-card revisions, on a time axis. */
 const DensityTrendPage = {
-    hours: 168, range: null, inited: false, seq: 0, series: null, meta: null, actions: null,
-    seriesOf(items) {
-        // Pure shape for the point-line chart: null keeps the gap visible.
-        return (items || []).map((item, index) => ({index, label: item.label,
-            setpoint: Number.isFinite(item.setpoint?.value) ? item.setpoint.value : null,
-            setpointOrigin: item.setpoint?.origin || null,
-            suggested: Number.isFinite(item.suggested?.value) ? item.suggested.value : null,
-            suggestedReason: item.suggested?.reason || '', actions: item.actions || []}));
+    hours: 168, range: null, inited: false, seq: 0, meta: null, page: 0,
+    visible: {A304: true, advice: true},
+    num(v) { return Number.isFinite(v) ? v.toFixed(3) : '—'; },
+    esc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
+    time(v, short = false) {
+        if (!v) return '—';
+        return new Date(v).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai', hourCycle:'h23',
+            ...(short ? {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'} : {})});
     },
-    num(value, digits = 3) { return Number.isFinite(value) ? value.toFixed(digits) : '—'; },
-    time(value) {
-        return value ? new Date(value).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai', hour12: false}) : '—';
+    points(data) {
+        const shape = (points, key) => (points || []).map(p => ({...p, key, t: Date.parse(p.at),
+            value: Number.isFinite(p.value) ? p.value : null})).filter(p => Number.isFinite(p.t));
+        return {A304: shape(data.channels?.A304, 'A304'),
+            advice: shape(data.suggestions, 'advice')};
     },
-    esc(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
+    connected(a, b) {
+        if (!a || b.break_before || a.value === null || b.value === null) return false;
+        if (b.key === 'advice' && JSON.stringify(a.basis?.channels) !== JSON.stringify(b.basis?.channels)) return false;
+        const hour = p => Math.floor(Date.parse(p.apply_start || p.at) / 3600000);
+        return b.t >= a.t && b.t - a.t <= 75 * 60000 && hour(b) - hour(a) <= 1;
+    },
     init() {
         if (this.inited) return;
         this.inited = true;
-        document.querySelectorAll('#density-trend-ranges [data-t-range]').forEach(button =>
-            button.addEventListener('click', () => {
-                if (Number(button.dataset.tRange) === this.hours && !this.range) return;
-                this.hours = Number(button.dataset.tRange);
-                this.range = null;
-                this.refresh();
-            }));
-        document.getElementById('density-trend-query')?.addEventListener('click', () => {
-            const start = document.getElementById('density-trend-start').value;
-            const end = document.getElementById('density-trend-end').value;
-            if (!start || !end) { this.status('自定义范围请同时选择开始和结束时间。'); return; }
-            this.range = {start: start + ':00+08:00', end: end + ':00+08:00'};
-            this.refresh();
+        const byId = id => document.getElementById('density-trend-' + id);
+        document.getElementById('page-density-trend').classList.add('is-light');
+        byId('theme').onclick = () => {
+            const light = document.getElementById('page-density-trend').classList.toggle('is-light');
+            byId('theme').textContent = light ? '深色视图' : '浅色视图'; this.draw();
+        };
+        document.querySelectorAll('[data-t-range]').forEach(b => b.onclick = () => {
+            this.hours = Number(b.dataset.tRange); this.range = null; this.refresh();
         });
-        document.getElementById('density-trend-refresh')?.addEventListener('click', () => this.refresh());
-        this.resizeObserver = new ResizeObserver(() => { if (this.series) this.draw(); });
-        this.resizeObserver.observe(document.getElementById('density-trend-plot'));
+        byId('custom').onclick = () => {
+            const fields = byId('custom-fields'); fields.hidden = !fields.hidden;
+            byId('custom').setAttribute('aria-expanded', String(!fields.hidden));
+            if (!byId('end').value) {
+                const local = offset => new Date(Date.now() + offset + 8 * 3600000).toISOString().slice(0,16);
+                byId('start').value = local(-168 * 3600000); byId('end').value = local(0);
+            }
+        };
+        byId('query').onclick = () => {
+            const start = byId('start').value, end = byId('end').value;
+            if (!start || !end || end <= start) { this.status('请选择有效的起止时间，结束须晚于开始。'); return; }
+            this.range = {start: start + ':00+08:00', end: end + ':00+08:00'}; this.refresh();
+        };
+        byId('refresh').onclick = () => this.refresh();
+        document.querySelectorAll('[data-density-series]').forEach(b => b.onclick = () => {
+            const key = b.dataset.densitySeries; this.visible[key] = !this.visible[key];
+            b.setAttribute('aria-pressed', String(this.visible[key])); this.draw();
+        });
+        byId('prev').onclick = () => { this.page--; this.renderActions(); };
+        byId('next').onclick = () => { this.page++; this.renderActions(); };
+        this.observer = new ResizeObserver(() => this.draw()); this.observer.observe(byId('plot'));
+        this.themeObserver = new MutationObserver(() => this.draw());
+        this.themeObserver.observe(document.documentElement, {attributes:true, attributeFilter:['data-theme','class']});
+        this.themeObserver.observe(document.body, {attributes:true, attributeFilter:['data-theme','class']});
         document.addEventListener('visibilitychange', () => { if (!document.hidden && this.active()) this.refresh(); });
         this.refresh();
     },
     active() { return document.getElementById('page-density-trend')?.classList.contains('active'); },
-    status(message) { document.getElementById('density-trend-status').textContent = message || ''; },
+    status(message) { document.getElementById('density-trend-status').textContent = message; },
     async refresh() {
-        const seq = ++this.seq;
-        this.status('正在读取趋势数据…');
+        const seq = ++this.seq, range = this.range, hours = this.hours;
+        this.status('正在读取所选时段…');
+        document.getElementById('density-trend-plot').setAttribute('aria-busy', 'true');
         try {
-            const path = this.range
-                ? '/density-trend?start=' + encodeURIComponent(this.range.start) + '&end=' + encodeURIComponent(this.range.end)
-                : '/density-trend?limit=' + this.hours;
-            const [trend, actions] = await Promise.all([
-                Api.decisionEvidence(path),
-                Api.decisionEvidence('/actions?limit=50').catch(() => null),
-            ]);
+            const query = range ? 'start='+encodeURIComponent(range.start)+'&end='+encodeURIComponent(range.end) : 'limit='+hours;
+            const data = await Api.decisionEvidence('/density-trend?' + query);
             if (seq !== this.seq) return;
-            this.meta = trend;
-            this.series = this.seriesOf(trend.items);
-            this.actions = actions;
-            this.status('');
-            document.querySelectorAll('#density-trend-ranges [data-t-range]').forEach(button => {
-                const selected = !this.range && Number(button.dataset.tRange) === this.hours;
-                button.classList.toggle('btn-primary', selected);
-                button.setAttribute('aria-pressed', String(selected));
+            this.meta = data; this.series = this.points(data); this.page = 0;
+            document.querySelectorAll('[data-t-range]').forEach(b => {
+                const chosen = !range && Number(b.dataset.tRange) === hours;
+                b.classList.toggle('btn-primary', chosen); b.setAttribute('aria-pressed', String(chosen));
             });
-            const set = this.series.filter(s => s.setpoint !== null).length;
-            const advice = this.series.filter(s => s.suggested !== null).length;
-            const label = this.range
-                ? `自定义 ${this.series.length} 小时（${new Date(trend.period.start).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23', minute: '2-digit'})} 至 ${new Date(trend.period.end).toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23', minute: '2-digit'})}）`
-                : `${this.hours === 168 ? '近7天' : '近30天'} · ${this.series.length} 小时`;
+            document.getElementById('density-trend-custom').classList.toggle('btn-primary', !!range);
+            const count = data.suggestions.filter(p => Number.isFinite(p.value)).length;
             document.getElementById('density-trend-caption').textContent =
-                `${label} · 人工设定 ${set} 小时 · 建议密度 ${advice} 小时 · 调密 ${trend.total_actions} 次（${trend.channel === '全部通道' ? '全部通道' : 'MD_SET ' + trend.channel}）`;
-            this.renderActions();
-            this.draw();
+                `${range ? '自选时间' : hours === 168 ? '近7天' : '近30天'} · ${this.time(data.period.start, true)} — ${this.time(data.period.end, true)}`;
+            document.getElementById('density-trend-archive-note').textContent =
+                `${data.total_actions} 次设定变化 · ${count} 条真实小时建议。${data.archive_note}`;
+            this.status(''); this.renderActions(); this.draw();
         } catch (error) {
-            if (seq === this.seq) this.status(error.message || '趋势数据读取失败，请稍后刷新。');
+            if (seq !== this.seq) return;
+            this.meta = null; this.series = null; this.draw();
+            document.getElementById('density-trend-actions').innerHTML = '<tr><td colspan="4">该范围未能读取，请重试。</td></tr>';
+            document.getElementById('density-trend-caption').textContent = '所选时段读取失败';
+            document.getElementById('density-trend-archive-note').textContent = '';
+            this.status(error.message || '读取失败，请稍后刷新。');
+        } finally {
+            if (seq === this.seq) document.getElementById('density-trend-plot').setAttribute('aria-busy', 'false');
         }
     },
     renderActions() {
-        const body = document.getElementById('density-trend-actions');
-        if (!body) return;
-        body.innerHTML = this.actions?.items?.length ? this.actions.items.map(x =>
-            `<tr><td>${this.esc(this.time(x.detected_at))}</td><td>${this.esc(x.channel)}</td>` +
-            `<td>${this.num(x.before)} → ${this.num(x.after)}</td><td>${Number.isFinite(x.after) && Number.isFinite(x.before) ? this.num(x.after - x.before) : '—'}</td></tr>`).join('')
-            : '<tr><td colspan="4">尚未检测到设定值变化。功能启用后的变化会自动记录。</td></tr>';
+        const actions = [...(this.meta?.actions || [])].reverse(), pages = Math.max(1, Math.ceil(actions.length/20));
+        this.page = Math.max(0, Math.min(pages-1, this.page));
+        document.getElementById('density-trend-actions').innerHTML = actions.length ? actions.slice(this.page*20, this.page*20+20).map(a =>
+            `<tr><td>${this.esc(this.time(a.at))}${a.continuous ? '' : '<small>前后观测有间隔</small>'}</td><td>${this.esc(a.channel)}</td>`+
+            `<td>${this.num(a.before)} <span class="density-trend-arrow">→</span> ${this.num(a.after)}</td><td>${Number.isFinite(a.before) && Number.isFinite(a.after) ? (a.after >= a.before ? '+' : '') + this.num(a.after-a.before) : '—'}</td></tr>`).join('') :
+            '<tr><td colspan="4">所选时段没有已记录的设定变化。</td></tr>';
+        document.getElementById('density-trend-page-info').textContent = `共 ${actions.length} 条 · ${this.page+1} / ${pages}`;
+        document.getElementById('density-trend-prev').disabled = this.page === 0;
+        document.getElementById('density-trend-next').disabled = this.page === pages-1;
     },
     palette() {
-        const style = getComputedStyle(document.getElementById('page-density-trend'));
-        const get = (key, fallback) => style.getPropertyValue(key).trim() || fallback;
-        return {ink: get('--text-primary', '#22303f'), muted: get('--text-muted', '#7b8794'),
-            rule: get('--border-color', '#d6dde5'), blue: get('--accent-blue', '#2f6fed'),
-            orange: get('--accent-orange', '#f2994a'), red: get('--accent-red', '#d64545')};
+        const css = getComputedStyle(document.getElementById('page-density-trend'));
+        const get = (v, fallback) => css.getPropertyValue(v).trim() || fallback;
+        return {A304:get('--trend-a304','#25897c'),
+            advice:get('--trend-advice','#ce8428'), muted:get('--text-secondary','#68758a'), grid:get('--border-color','#dce1eb')};
+    },
+    detail(p) {
+        if (p.key !== 'advice') return `${p.key} 设定密度  ${this.num(p.value)} g/cm³\n${this.time(p.at)}\n` +
+            ({anchor:'本小时基准观测',before:'调密前观测',change:'检测到设定变化'}[p.origin] || '历史观测') +
+            (p.break_before ? ' · 前后观测有间隔' : '');
+        return `本小时建议  ${this.num(p.value)} g/cm³\n存档于 ${this.time(p.at)}\n适用小时 ${this.time(p.apply_start, true)}\n` +
+            `固定设定基准 ${this.num(p.basis?.value)} (${p.basis?.channels?.join(' / ') || '—'})\n`+
+            `小时灰分 ${Number.isFinite(p.ash?.value) ? p.ash.value.toFixed(2)+'%' : '—'}${p.ash?.provisional ? '（暂估）' : ''}`;
     },
     draw() {
-        const canvas = document.getElementById('density-trend-canvas');
-        const plot = document.getElementById('density-trend-plot');
-        const series = this.series || [];
-        const rect = plot.getBoundingClientRect();
-        const w = Math.max(320, rect.width), h = Math.max(300, Math.min(520, rect.height || 420));
-        const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
-        canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
-        ctx.font = '12px Microsoft YaHei, sans-serif';
-        const c = this.palette();
-        const values = series.flatMap(s => [s.setpoint, s.suggested]).filter(Number.isFinite);
-        if (!values.length) {
-            ctx.fillStyle = c.muted; ctx.textAlign = 'center';
-            ctx.fillText('暂无设定密度与建议密度数据', w / 2, h / 2);
-            canvas._hits = []; return;
+        const canvas = document.getElementById('density-trend-canvas'), plot = document.getElementById('density-trend-plot');
+        if (!canvas || !plot) return;
+        const w = plot.clientWidth, h = plot.clientHeight;
+        if (w < 100) return;
+        const ratio = Math.min(devicePixelRatio || 1, 2);
+        canvas.width = w*ratio; canvas.height = h*ratio;
+        const ctx = canvas.getContext('2d'); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h);
+        const tip = plot.querySelector('.density-trend-tooltip'); tip.hidden = true; canvas._hits = [];
+        const colors = this.palette();
+        const groups = Object.entries(this.series || {}).filter(([key]) => this.visible[key]);
+        const values = groups.flatMap(([, points]) => points.map(p => p.value)).filter(Number.isFinite);
+        ctx.font = '13px "Microsoft YaHei", sans-serif'; ctx.fillStyle = colors.muted;
+        if (!values.length || !this.meta) {
+            ctx.textAlign = 'center'; ctx.fillText(this.meta ? '所选曲线暂无有效历史记录' : '等待读取趋势数据', w/2, h/2); return;
         }
-        const left = 64, right = 24, top = 30, bottom = 52, xWidth = w - left - right, yHeight = h - top - bottom;
-        let min = Math.min(...values), max = Math.max(...values), span = max - min || 0.02;
-        min -= span * .15; max += span * .15;
-        const y = value => top + yHeight - (value - min) / (max - min) * yHeight;
-        ctx.lineWidth = 1; ctx.strokeStyle = c.rule; ctx.fillStyle = c.muted; ctx.textAlign = 'right';
-        for (let i = 0; i <= 6; i++) {
-            const value = min + (max - min) * i / 6, py = y(value);
-            ctx.beginPath(); ctx.moveTo(left, py); ctx.lineTo(w - right, py); ctx.stroke();
-            ctx.fillText(value.toFixed(3), left - 8, py + 4);
+        const left = 64, right = 24, top = 22, bottom = 52, width = w-left-right, height = h-top-bottom;
+        const lo = Math.min(...values), hi = Math.max(...values), pad = Math.max(.004,(hi-lo)*.18);
+        const min = lo-pad, max = hi+pad, start = Date.parse(this.meta.period.start), end = Date.parse(this.meta.period.end);
+        const x = t => left + (t-start)/(end-start)*width, y = v => top+(max-v)/(max-min)*height;
+        ctx.textAlign = 'right'; ctx.lineWidth = 1;
+        for (let i=0;i<=5;i++) {
+            const v=min+(max-min)*i/5, py=y(v); ctx.strokeStyle=colors.grid; ctx.setLineDash([3,5]);
+            ctx.beginPath();ctx.moveTo(left,py);ctx.lineTo(w-right,py);ctx.stroke();
+            ctx.fillStyle=colors.muted;ctx.fillText(v.toFixed(3),left-10,py+4);
         }
-        ctx.textAlign = 'left'; ctx.fillText('g/cm³', left, 16);
-        const n = series.length, x = index => left + (n === 1 ? .5 : index / (n - 1)) * xWidth;
-        const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(xWidth / 96))));
-        ctx.textAlign = 'center';
-        for (let i = 0; i < n; i += step) ctx.fillText(series[i].label, x(i), h - bottom + 22);
-        ctx.fillText('小时 · 每小时一点', left + xWidth / 2, h - 8);
-        const line = (field, color, dash) => {
-            ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = n > 240 ? 1.4 : 2; ctx.setLineDash(dash);
-            ctx.beginPath(); let started = false;
-            series.forEach((s, i) => { if (!Number.isFinite(s[field])) { started = false; return; }
-                started ? ctx.lineTo(x(i), y(s[field])) : ctx.moveTo(x(i), y(s[field])); started = true; });
-            ctx.stroke(); ctx.setLineDash([]);
-            const radius = n > 240 ? 1.7 : 2.7;
-            series.forEach((s, i) => { if (!Number.isFinite(s[field])) return;
-                ctx.beginPath(); ctx.arc(x(i), y(s[field]), radius, 0, Math.PI * 2); ctx.fill(); });
+        ctx.setLineDash([]);
+        const ticks = Math.max(2,Math.floor(width/155));
+        for (let i=0;i<=ticks;i++) {
+            const t=start+(end-start)*i/ticks;
+            ctx.textAlign=i===0?'left':i===ticks?'right':'center';
+            ctx.fillText(this.time(t,true),x(t),h-20);
+        }
+        for (const [key, points] of groups) {
+            ctx.strokeStyle=colors[key];ctx.fillStyle=colors[key];ctx.lineWidth=2;
+            ctx.setLineDash(key==='advice'?[6,4]:[]);ctx.beginPath();
+            let previous=null;
+            for (const p of points) {
+                if (p.value !== null) { this.connected(previous,p)?ctx.lineTo(x(p.t),y(p.value)):ctx.moveTo(x(p.t),y(p.value)); }
+                previous=p;
+            }
+            ctx.stroke();ctx.setLineDash([]);
+            for (const p of points) {
+                if (p.value===null) continue;
+                const px=x(p.t),py=y(p.value), radius=points.length>600?1.8:2.8;
+                ctx.beginPath();ctx.arc(px,py,radius,0,2*Math.PI);ctx.fill();
+                if (p.origin==='change') {ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(px,py,5,0,2*Math.PI);ctx.stroke();}
+                canvas._hits.push({...p,x:px,y:py,text:this.detail(p)});
+            }
+        }
+        canvas._hits.sort((a,b)=>a.t-b.t || a.key.localeCompare(b.key));
+        const show = hit => {
+            tip.textContent=hit.text;tip.hidden=false;
+            tip.style.left=Math.max(4,Math.min(hit.x+14,w-tip.offsetWidth-4))+'px';
+            tip.style.top=Math.max(4,Math.min(hit.y+12,h-tip.offsetHeight-4))+'px';
         };
-        line('suggested', c.orange, [5, 4]);
-        line('setpoint', c.blue, []);
-        series.forEach((s, i) => { if (!s.actions.length || !Number.isFinite(s.setpoint)) return;
-            ctx.strokeStyle = c.red; ctx.lineWidth = 1.5; ctx.beginPath();
-            ctx.arc(x(i), y(s.setpoint), n > 240 ? 4 : 5.5, 0, Math.PI * 2); ctx.stroke(); });
-        canvas._hits = series.map((s, i) => ({x: x(i),
-            y: y(Number.isFinite(s.setpoint) ? s.setpoint : (Number.isFinite(s.suggested) ? s.suggested : min)),
-            text: `${s.label}:00 小时\n人工设定 ${s.setpoint === null ? '—' : s.setpoint.toFixed(3)} g/cm³` +
-                `${s.actions.length ? `（该小时调密 ${s.actions.length} 次：${s.actions.map(a => `${this.num(a.before)}→${this.num(a.after)}`).join('，')}）` : s.setpointOrigin === 'anchor' ? '（本小时无调整）' : ''}\n` +
-                `建议密度 ${s.suggested === null ? '—' : s.suggested.toFixed(3)} g/cm³${s.suggested === null && s.suggestedReason ? `（${s.suggestedReason}）` : ''}\n` +
-                `建议−设定 ${Number.isFinite(s.suggested) && Number.isFinite(s.setpoint) ? (s.suggested - s.setpoint).toFixed(3) : '—'}`}));
-        const tooltip = plot.querySelector('.density-trend-tooltip');
-        const show = (hit, px, py) => { tooltip.textContent = hit.text; tooltip.hidden = false;
-            tooltip.style.left = Math.max(4, Math.min(px + 14, w - tooltip.offsetWidth - 4)) + 'px';
-            tooltip.style.top = Math.max(4, Math.min(py + 12, h - tooltip.offsetHeight - 4)) + 'px'; };
-        const nearest = px => { let best = null, distance = Infinity;
-            for (const hit of canvas._hits || []) { const d = Math.abs(hit.x - px); if (d < distance) { best = hit; distance = d; } }
-            return best && distance <= 28 ? best : null; };
-        canvas.onmousemove = event => { const r = canvas.getBoundingClientRect(); const hit = nearest(event.clientX - r.left);
-            hit ? show(hit, event.clientX - r.left, event.clientY - r.top) : tooltip.hidden = true; };
-        canvas.onmouseleave = () => { if (!canvas.matches(':focus-visible')) tooltip.hidden = true; };
-        canvas.onpointerdown = event => { canvas._tap = {x: event.clientX, y: event.clientY}; };
-        canvas.onpointerup = event => { const tap = canvas._tap; canvas._tap = null;
-            if (tap && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) < 10) {
-                const r = canvas.getBoundingClientRect(); const hit = nearest(event.clientX - r.left);
-                hit ? show(hit, event.clientX - r.left, event.clientY - r.top) : tooltip.hidden = true; } };
-        canvas.onkeydown = event => {
-            const hits = canvas._hits || []; if (!hits.length) return;
-            const keys = {ArrowLeft: -1, ArrowRight: 1, Home: 'first', End: 'last', Escape: 'close'};
-            if (!(event.key in keys)) return;
-            event.preventDefault();
-            if (event.key === 'Escape') { tooltip.hidden = true; return; }
-            canvas._index = Math.max(0, Math.min(hits.length - 1,
-                event.key === 'first' ? 0 : event.key === 'last' ? hits.length - 1 : (canvas._index ?? 0) + keys[event.key]));
-            const hit = hits[canvas._index]; show(hit, hit.x, hit.y); };
+        const point = event => {
+            const r=canvas.getBoundingClientRect(),px=event.clientX-r.left,py=event.clientY-r.top;
+            let best=null,distance=Infinity;
+            for(const hit of canvas._hits) {const d=Math.hypot(hit.x-px,hit.y-py);if(d<distance){best=hit;distance=d;}}
+            if(best&&distance<32)show(best);else tip.hidden=true;
+        };
+        canvas.onmousemove=point;canvas.onclick=point;canvas.onmouseleave=()=>{tip.hidden=true;};
+        canvas.onkeydown=event=>{
+            const hits=canvas._hits;
+            if(!['Home','End','ArrowLeft','ArrowRight','Escape'].includes(event.key)||!hits.length)return;
+            event.preventDefault();if(event.key==='Escape'){tip.hidden=true;return;}
+            canvas._index=event.key==='Home'?0:event.key==='End'?hits.length-1:
+                Math.max(0,Math.min(hits.length-1,(canvas._index??-1)+(event.key==='ArrowRight'?1:-1)));
+            show(hits[canvas._index]);
+        };
     },
 };
