@@ -81,6 +81,43 @@ def test_retention_cli_is_packaged_but_unknown_scripts_remain_forbidden(reposito
         assert 'payload/backend/scripts/untrusted_maintenance.py' not in archive.namelist()
 
 
+def test_schema_update_declares_compatible_rollback(repository):
+    root,output,_,git = repository
+    schema = root/'backend/app/schema_upgrade.py'
+    schema.parent.mkdir(parents=True)
+    schema.write_bytes((SCRIPTS.parent/'app/schema_upgrade.py').read_bytes())
+    output_schema = root/'backend/app/schemas.py'
+    output_schema.write_bytes((SCRIPTS.parent/'app/schemas.py').read_bytes())
+    git('add','backend/app/schema_upgrade.py','backend/app/schemas.py')
+    git('commit','-qm','compatible additive schema reader')
+    builder.build(output)
+    with zipfile.ZipFile(output/'extras/ProjectUpdate.zip') as archive:
+        manifest = json.loads(archive.read('update.json'))
+        assert manifest['rollback_compatibility'] == 'manual-float-ash-schema-v1'
+        assert archive.read('payload/backend/app/schema_upgrade.py') == schema.read_bytes()
+
+
+def test_recovery_output_hash_from_verified_old_package_is_accepted(repository):
+    root,output,_,git = repository
+    source = root/'backend/app/schemas.py'
+    source.parent.mkdir(parents=True)
+    source.write_bytes((SCRIPTS.parent/'app/schemas.py').read_bytes())
+    git('add','backend/app/schemas.py')
+    git('commit','-qm','current output schema')
+    old_source = b"from typing import Literal\nManualMetric = Literal['heavy_clean_coal_ash','raw_coal_slime_content','coarse_slime_amount','coarse_slime_ash']\n"
+    prior = output/'prior.zip'
+    with zipfile.ZipFile(prior,'w') as archive:
+        archive.writestr('update.json',json.dumps(dict(revision='known',files={'backend/app/schemas.py':dict(sha256=hashlib.sha256(old_source).hexdigest())})))
+        archive.writestr('payload/backend/app/schemas.py',old_source)
+    builder.build(output,accepted_baseline_packages=[prior])
+    from windows_offline.apply_update import manual_float_output_compatibility
+    with zipfile.ZipFile(output/'extras/ProjectUpdate.zip') as archive:
+        manifest = json.loads(archive.read('update.json'))
+        accepted = manifest['files']['backend/app/schemas.py']['accepted_previous_sha256']
+        assert hashlib.sha256(old_source).hexdigest() in accepted
+        assert hashlib.sha256(manual_float_output_compatibility(old_source)).hexdigest() in accepted
+
+
 def test_explicit_history_hashes_are_committed_bytes_and_repeatable(repository,capsys):
     root,output,revisions,_ = repository
     # An unpublished file at a historical path must never become a known baseline.

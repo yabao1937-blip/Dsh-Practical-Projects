@@ -14,6 +14,31 @@ spec = importlib.util.spec_from_file_location('project_update',BACKEND/'scripts/
 update = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(update)
 COLLECTOR_READY = update.collector_ready
+OLD_MANUAL_SCHEMAS = '''from typing import Literal
+from pydantic import BaseModel, ConfigDict
+ManualMetric = Literal['heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_amount', 'coarse_slime_ash']
+ManualEntryMetric = Literal['heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_ash']
+class OldBusinessRequest(BaseModel):
+    value: str
+class ManualMeasurementIn(BaseModel):
+    metric: ManualEntryMetric
+    value: float
+    observed_at: str | None = None
+    client_id: str | None = None
+class ManualMeasurementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    metric: ManualMetric
+    name: str
+    value: float
+    unit: str
+    observed_at: str
+    created_at: str
+    time_basis: str
+class ManualMeasurementList(BaseModel):
+    total: int
+    items: list[ManualMeasurementOut]
+'''
 
 
 @pytest.fixture
@@ -105,6 +130,135 @@ def test_failed_start_rolls_back_code_but_keeps_new_production_rows(prepared,mon
     assert target.read_text() == 'old code' and count == 2
     with sqlite3.connect(root/'backend/data/dense_medium.db') as db:
         assert db.execute('select * from evidence').fetchall() == [(1,),(2,)]
+
+
+@pytest.mark.parametrize('expanded',[False,True])
+def test_failed_update_retains_compatible_schema_reader_and_new_assays(prepared,monkeypatch,expanded):
+    from sqlalchemy import create_engine
+    package,root,source,target,manifest,calls = prepared
+    name = update.SCHEMA_UPGRADE_PATH
+    old = root/name
+    old.parent.mkdir(parents=True)
+    old.write_text('# old four-metric startup validator')
+    payload = package/'payload'/name
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes((BACKEND/'app/schema_upgrade.py').read_bytes())
+    manifest['files'][name] = dict(sha256=update.digest(payload),previous_sha256=update.digest(old))
+    output_name = update.MANUAL_OUTPUT_SCHEMA_PATH
+    old_output = root/output_name
+    old_output.write_text(OLD_MANUAL_SCHEMAS,encoding='utf-8')
+    output_payload = package/'payload'/output_name
+    output_payload.write_bytes((BACKEND/'app/schemas.py').read_bytes())
+    compatible_output = update.manual_float_output_compatibility(old_output.read_bytes())
+    import hashlib
+    manifest['files'][output_name] = dict(sha256=update.digest(output_payload),previous_sha256=update.digest(old_output),
+        accepted_previous_sha256=[hashlib.sha256(compatible_output).hexdigest()])
+    manifest['rollback_compatibility'] = update.MANUAL_FLOAT_ROLLBACK_COMPATIBILITY
+    (package/'StopOwnedCollector.ps1').write_text('# isolated stop fixture')
+    monkeypatch.setattr(update,'collector_configuration',lambda _:dict(enabled=False))
+    database = root/'backend/data/dense_medium.db'
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE manual_measurements (id INTEGER PRIMARY KEY, metric TEXT, value FLOAT, observed_at TEXT, CONSTRAINT ck_manual_measurement_metric CHECK (metric IN ('heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_amount', 'coarse_slime_ash')))")
+        db.execute("INSERT INTO manual_measurements VALUES(1,'heavy_clean_coal_ash',8.5,'2026-10-26T00:00:00Z')")
+        db.execute('CREATE TABLE coal_records (category TEXT, ts TEXT, system TEXT, belt TEXT)')
+        db.execute('CREATE TABLE heavy_samples (id INTEGER PRIMARY KEY)')
+    restarts = []
+    def fail_once(installation):
+        restarts.append(installation)
+        if len(restarts) == 1 and not expanded:
+            raise RuntimeError('failed before schema change')
+        # Exercise the real, dependency-free startup upgrade on both the first
+        # attempt and recovery, including a newly committed production assay.
+        if expanded:
+            namespace = {}
+            exec(old.read_text(encoding='utf-8'),namespace)
+            engine = create_engine('sqlite:///'+database.as_posix())
+            try:
+                namespace['upgrade_schema'](engine)
+                if len(restarts) == 1:
+                    with engine.begin() as connection:
+                        connection.exec_driver_sql("INSERT INTO manual_measurements(id,metric,value,observed_at) VALUES(2,'float_clean_coal_ash',9.1,'2026-10-26T01:00:00Z')")
+                    raise RuntimeError('failed after new assay')
+            finally:
+                engine.dispose()
+    monkeypatch.setattr(update,'restart',fail_once)
+    reports = []
+    with pytest.raises(RuntimeError,match='failed (after new assay|before schema change)'):
+        update.apply(package,root,manifest,lambda stage,message:reports.append(message))
+    assert len(restarts) == 2 and target.read_text() == 'old code'
+    assert old.read_bytes() == (payload.read_bytes() if expanded else b'# old four-metric startup validator')
+    with sqlite3.connect(database) as db:
+        assert db.execute('SELECT id,value FROM manual_measurements ORDER BY id').fetchall() == ([(1,8.5),(2,9.1)] if expanded else [(1,8.5)])
+    markers = list((root/'backups').glob('*/rollback-compatibility.json'))
+    assert len(markers) == int(expanded)
+    if expanded:
+        assert json.loads(markers[0].read_text()) == {name:manifest['files'][name]['sha256'],output_name:update.digest(old_output)}
+        assert old_output.read_bytes() == compatible_output
+        assert any('compatibility module was retained' in message for message in reports)
+        update.verify(package,root,manifest)  # Retry accepts the retained released bytes.
+    else:
+        assert old_output.read_text(encoding='utf-8') == OLD_MANUAL_SCHEMAS
+
+
+def test_old_manual_api_reads_new_assays_after_compatible_rollback(tmp_path):
+    from typing import get_args
+    from fastapi import FastAPI, Response
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.database import Base
+    from app.models import ManualMeasurement
+    from app.routers.manual_measurements import list_measurements,create_measurement
+    namespace = {}
+    exec(update.manual_float_output_compatibility(OLD_MANUAL_SCHEMAS.encode()),namespace)
+    assert 'OldBusinessRequest' in namespace
+    assert 'float_clean_coal_ash' not in get_args(namespace['ManualEntryMetric'])
+    engine = create_engine('sqlite:///'+(tmp_path/'api.db').as_posix(),connect_args={'check_same_thread':False})
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    with sessions() as db:
+        db.add(ManualMeasurement(metric='float_clean_coal_ash',name='浮精灰分',value=9.1,unit='%',
+            observed_at='2026-10-26T01:00:00Z',created_at='2026-10-26T01:00:00Z',time_basis='production-time-v1',request_hash='fixture'))
+        db.commit()
+    app = FastAPI()
+    @app.get('/manual',response_model=namespace['ManualMeasurementList'])
+    def read(metric: namespace['ManualMetric'] | None = None):
+        with sessions() as db:
+            return list_measurements(metric=metric,limit=20,offset=0,db=db)
+    @app.post('/manual',response_model=namespace['ManualMeasurementOut'],status_code=201)
+    def write(body: namespace['ManualMeasurementIn'],response: Response):
+        with sessions() as db:
+            return create_measurement(body,response,db)
+    try:
+        with TestClient(app) as client:
+            for path in ('/manual','/manual?metric=float_clean_coal_ash'):
+                response = client.get(path)
+                assert response.status_code == 200 and response.json()['items'][0]['value'] == 9.1
+            body = dict(metric='heavy_clean_coal_ash',value=8.5,client_id='rollback-test')
+            assert client.post('/manual',json=body).status_code == 201
+            assert client.post('/manual',json=body).status_code == 200
+            assert client.post('/manual',json=dict(body,value=8.6)).status_code == 409
+            assert client.post('/manual',json=dict(metric='float_clean_coal_ash',value=9.2)).status_code == 422
+    finally:
+        engine.dispose()
+
+
+def test_manual_response_compatibility_is_idempotent_and_preserves_trailing_comma():
+    source = OLD_MANUAL_SCHEMAS.replace("'coarse_slime_ash']\nManualEntryMetric", "'coarse_slime_ash',\n]\nManualEntryMetric").encode()
+    result = update.manual_float_output_compatibility(source)
+    compile(result,'compatibility','exec')
+    assert update.manual_float_output_compatibility(result) == result
+    with pytest.raises(ValueError,match='Unknown manual response'):
+        update.manual_float_output_compatibility(source.replace(b'coarse_slime_ash',b'unknown_ash'))
+
+
+def test_rollback_compatibility_cannot_accept_unknown_policy_or_missing_module(prepared):
+    package,root,_,_,manifest,calls = prepared
+    for policy in ('unreviewed-schema',update.MANUAL_FLOAT_ROLLBACK_COMPATIBILITY):
+        manifest['rollback_compatibility'] = policy
+        with pytest.raises(ValueError,match='rollback|Schema-compatible'):
+            update.apply(package,root,manifest)
+    assert not calls and not (root/'backups').exists()
 
 
 def test_live_wal_backup_is_consistent_and_releases_snapshot_before_check(prepared,tmp_path):

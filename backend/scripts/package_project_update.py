@@ -78,19 +78,34 @@ def build(output,accepted_baseline_revisions=(),accepted_baseline_packages=(),hi
     tracked = subprocess.check_output(['git','ls-files'],cwd=ROOT,text=True).splitlines()
     tracked += ['backend/client_mode.py','backend/app/gpt_density/hourly_anchor.py',
                 'backend/migrations/versions/c3a610160001_0014_production_assay_time.py']
-    from windows_offline.apply_update import allowed
+    from windows_offline.apply_update import allowed,manual_float_output_compatibility,MANUAL_OUTPUT_SCHEMA_PATH
     accepted,commits = {},[]
+    def accept_compatible_output(data):
+        digest = hashlib.sha256(manual_float_output_compatibility(data)).hexdigest()
+        accepted.setdefault(MANUAL_OUTPUT_SCHEMA_PATH,set()).add(digest)
+    original_schema = Path(latest['stage'])/'project'/MANUAL_OUTPUT_SCHEMA_PATH
+    original_digest = baseline['files'].get('project/'+MANUAL_OUTPUT_SCHEMA_PATH)
+    if original_digest and original_schema.is_file():
+        data = original_schema.read_bytes()
+        if hashlib.sha256(data).hexdigest() != original_digest:
+            raise ValueError('Original offline schema source does not match its manifest')
+        accept_compatible_output(data)
     for revision in accepted_baseline_revisions:
         commit,hashes = revision_hashes(revision,root=ROOT)
         if commit in commits: continue
         commits.append(commit)
         for name,digest in hashes.items(): accepted.setdefault(name,set()).add(digest)
+        if MANUAL_OUTPUT_SCHEMA_PATH in hashes:
+            accept_compatible_output(subprocess.check_output(['git','show',commit+':'+MANUAL_OUTPUT_SCHEMA_PATH],cwd=ROOT))
     packages = []
     for package in accepted_baseline_packages:
         evidence,hashes = package_hashes(Path(package))
         if any(item['sha256'] == evidence['sha256'] for item in packages): continue
         packages.append(evidence)
         for name,digest in hashes.items(): accepted.setdefault(name,set()).add(digest)
+        if MANUAL_OUTPUT_SCHEMA_PATH in hashes:
+            with zipfile.ZipFile(package) as archive:
+                accept_compatible_output(archive.read('payload/'+MANUAL_OUTPUT_SCHEMA_PATH))
     files,payload = {},{}
     for name in sorted(set(tracked)):
         if not allowed(name): continue
@@ -107,6 +122,8 @@ def build(output,accepted_baseline_revisions=(),accepted_baseline_packages=(),hi
     revision = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     manifest = dict(format=1,revision=revision,created_at=datetime.now().astimezone().isoformat(),
         report_url=f'http://{settings["bind"]}:{settings["port"]}/{settings["token"]}/status',files=files)
+    if {'backend/app/schema_upgrade.py',MANUAL_OUTPUT_SCHEMA_PATH}.issubset(files):
+        manifest['rollback_compatibility'] = 'manual-float-ash-schema-v1'
     if history_interval_seconds is not None:
         manifest['collector_history_interval_seconds'] = history_interval_seconds
     if defer_large_snapshot_check:

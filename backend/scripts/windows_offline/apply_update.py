@@ -22,6 +22,36 @@ PERIODIC_QUERY_PATH = 'backend/app/decision_hourly/service.py'
 PERIODIC_QUERY_BASELINE = 'cbef07c65508d228a1c82487ddb8cd347768ee8c08188d730caf31d746bb6edd'
 PERIODIC_QUERY_PROOF = 'baseline/decision-service.py'
 MAX_QUERY_SOURCE_BYTES = 1024 * 1024
+MANUAL_FLOAT_ROLLBACK_COMPATIBILITY = 'manual-float-ash-schema-v1'
+SCHEMA_UPGRADE_PATH = 'backend/app/schema_upgrade.py'
+MANUAL_OUTPUT_SCHEMA_PATH = 'backend/app/schemas.py'
+
+
+def manual_float_output_compatibility(data):
+    """Expand only the old response enum; preserve old request types and routers."""
+    prefix = b'\xef\xbb\xbf' if data.startswith(b'\xef\xbb\xbf') else b''
+    body = data[len(prefix):]
+    module = ast.parse(body.decode('utf-8'))
+    assignments = [node for node in module.body if isinstance(node,ast.Assign)
+                   and any(isinstance(target,ast.Name) and target.id == 'ManualMetric' for target in node.targets)]
+    if len(assignments) != 1:
+        raise ValueError('Unrecognized manual response metric definition')
+    value = assignments[0].value
+    if not isinstance(value,ast.Subscript) or not isinstance(value.value,ast.Name) or value.value.id != 'Literal':
+        raise ValueError('Unrecognized manual response metric type')
+    elements = value.slice.elts if isinstance(value.slice,ast.Tuple) else [value.slice]
+    if any(not isinstance(item,ast.Constant) or not isinstance(item.value,str) for item in elements):
+        raise ValueError('Unrecognized manual response metric values')
+    metrics = {item.value for item in elements}
+    base = {'heavy_clean_coal_ash','raw_coal_slime_content','coarse_slime_amount','coarse_slime_ash'}
+    if metrics not in (base,base|{'float_clean_coal_ash'}):
+        raise ValueError('Unknown manual response metrics')
+    if 'float_clean_coal_ash' in metrics:
+        return data
+    lines = body.splitlines(keepends=True)
+    last = elements[-1]
+    offset = sum(len(line) for line in lines[:last.end_lineno-1]) + last.end_col_offset
+    return prefix + body[:offset] + b", 'float_clean_coal_ash'" + body[offset:]
 
 
 def digest(path):
@@ -209,6 +239,11 @@ def verify(package,root,manifest):
     profile = manifest.get('profile')
     if profile not in (None,'query-only-hotfix'):
         raise ValueError('Unknown update profile')
+    compatibility = manifest.get('rollback_compatibility')
+    if compatibility not in (None, MANUAL_FLOAT_ROLLBACK_COMPATIBILITY):
+        raise ValueError('Unknown rollback compatibility policy')
+    if compatibility is not None and (profile is not None or not {SCHEMA_UPGRADE_PATH,MANUAL_OUTPUT_SCHEMA_PATH}.issubset(manifest['files'])):
+        raise ValueError('Schema-compatible rollback requires a full update with its schema upgrade module')
     snapshot_check_policy(manifest)
     history_configuration_patch(root,manifest)
     periodic_query_patch = verify_periodic_query_patch(package,root,manifest)
@@ -232,6 +267,8 @@ def verify(package,root,manifest):
                 raise ValueError('Installed source differs from update baseline: '+name+' (sha256='+actual+')')
         if not target.exists() and info.get('previous_sha256'):
             raise ValueError('Installed source is missing: '+name)
+        if compatibility is not None and name == MANUAL_OUTPUT_SCHEMA_PATH and target.is_file():
+            manual_float_output_compatibility(target.read_bytes())
     if collector_changed(manifest) and not (package/'StopOwnedCollector.ps1').is_file():
         raise ValueError('Collector update requires StopOwnedCollector.ps1; nothing was changed')
 
@@ -547,6 +584,21 @@ def register_retention_snapshot(root,backup,snapshot,deferred_check,created_at,r
         report('verifying','Snapshot retained; retention certification unavailable: '+type(exc).__name__)
 
 
+def rollback_schema_sources(root,manifest):
+    """Keep the reviewed additive schema reader when old code cannot read new assays.
+
+    Business code is rolled back, but committed production rows and the expanded
+    constraint must survive. The retained module is an ordinary verified payload,
+    so its exact bytes remain an accepted baseline for the next update.
+    """
+    if manifest.get('rollback_compatibility') != MANUAL_FLOAT_ROLLBACK_COMPATIBILITY:
+        return set()
+    path = root/'backend/data/dense_medium.db'
+    with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=5)) as database:
+        row = database.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='manual_measurements'").fetchone()
+    return {SCHEMA_UPGRADE_PATH,MANUAL_OUTPUT_SCHEMA_PATH} if row and 'float_clean_coal_ash' in row[0] else set()
+
+
 def apply(package,root,manifest,report=lambda stage,message:None):
     verify(package,root,manifest)
     snapshot_policy = snapshot_check_policy(manifest)
@@ -647,11 +699,24 @@ def apply(package,root,manifest,report=lambda stage,message:None):
                 recovery_error = exc
         if configuration_changed:
             replace_configuration(history_patch['path'],history_patch['original'])
+        compatible_sources = set()
+        try:
+            compatible_sources = rollback_schema_sources(root,manifest)
+        except Exception as exc:
+            recovery_error = exc
         for name,existed in original.items():
             target = safe_path(root,name)
-            if existed: shutil.copy2(backup/'source'/name,target)
+            if name == MANUAL_OUTPUT_SCHEMA_PATH and name in compatible_sources and existed:
+                target.write_bytes(manual_float_output_compatibility((backup/'source'/name).read_bytes()))
+            elif name in compatible_sources:
+                shutil.copy2(safe_path(package/'payload',name),target)
+            elif existed: shutil.copy2(backup/'source'/name,target)
             else: target.unlink(missing_ok=True)
             clear_bytecode(target)
+        if compatible_sources:
+            (backup/'rollback-compatibility.json').write_text(json.dumps({
+                name: digest(safe_path(root,name)) for name in compatible_sources},indent=2),encoding='utf-8')
+            report('copying','Previous business source restored; the verified schema compatibility module was retained and its response enum extended for existing float-ash records. Production data was not downgraded.')
         if cycle_collector and configuration['enabled'] and recovery_error is None:
             try: wait_collector_lease(root,configuration,report)
             except Exception as exc: recovery_error = exc
