@@ -35,8 +35,7 @@ const url = process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000';
             const canvas = document.getElementById('density-trend-canvas');
             const hits = canvas._hits.filter(p => p.key === 'advice');
             return {advice:hits.map(p => ({at:p.at, apply_start:p.apply_start, value:p.value})),
-                spanPixels:hits.at(-1).x-hits[0].x, label:canvas._adviceLabel.text,
-                note:document.getElementById('density-trend-archive-note').textContent};
+                spanPixels:hits.at(-1).x-hits[0].x, label:canvas._adviceLabel.text};
         });
         assert.ok(report.live.advice.length >= 2);
         assert.match(report.live.label, /1\.520/);

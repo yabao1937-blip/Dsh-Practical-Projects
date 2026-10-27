@@ -182,9 +182,6 @@ const DensityTrendPage = {
             const advice = this.series.advice.filter(p => Number.isFinite(p.value)), latest = advice.at(-1);
             document.getElementById('density-trend-caption').textContent =
                 `${range ? '自选时间' : hours === 168 ? '近7天' : '近30天'} · ${this.time(data.period.start, true)} — ${this.time(data.period.end, true)}`;
-            document.getElementById('density-trend-archive-note').textContent =
-                `${data.total_actions} 次设定变化 · ${advice.length} 条真实小时建议。` +
-                (latest ? `最近存档 ${this.time(latest.at, true)}：${this.num(latest.value)} g/cm³。` : '') + data.archive_note;
             document.getElementById('density-trend-focus-advice').disabled = !latest;
             this.status(''); this.renderActions(); this.draw();
         } catch (error) {
@@ -192,7 +189,6 @@ const DensityTrendPage = {
             this.meta = null; this.series = null; this.draw();
             document.getElementById('density-trend-actions').innerHTML = '<tr><td colspan="5">该范围未能读取，请重试。</td></tr>';
             document.getElementById('density-trend-caption').textContent = '所选时段读取失败';
-            document.getElementById('density-trend-archive-note').textContent = '';
             document.getElementById('density-trend-focus-advice').disabled = true;
             this.status(error.message || '读取失败，请稍后刷新。');
         } finally {

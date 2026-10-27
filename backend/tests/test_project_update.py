@@ -317,11 +317,16 @@ def test_query_hotfix_cannot_skip_snapshot_for_storage_changes(prepared):
     assert not (root/'backups').exists()
 
 
-def test_allowlisted_query_hotfix_preserves_database_without_full_scan(prepared,monkeypatch):
+@pytest.mark.parametrize('name',[
+    'frontend/js/api.js','backend/app/decision_hourly/density_trend.py',
+    'frontend/index.html','frontend/js/decision-density-trend.js',
+    'frontend/css/decision-density-trend.css',
+])
+def test_allowlisted_query_hotfix_preserves_database_without_full_scan(prepared,monkeypatch,name):
     package,root,source,target,manifest,calls = prepared
-    name = 'frontend/js/api.js'
-    source.rename(source.with_name('api.js'))
-    target.rename(target.with_name('api.js'))
+    for path in (package/'payload'/name,root/name): path.parent.mkdir(parents=True,exist_ok=True)
+    source.rename(package/'payload'/name)
+    target.rename(root/name)
     manifest['files'] = {name:next(iter(manifest['files'].values()))}
     manifest['profile'] = 'query-only-hotfix'
     monkeypatch.setattr(update,'backup_database',lambda *a,**kw:pytest.fail('Query hotfix must not scan live data'))

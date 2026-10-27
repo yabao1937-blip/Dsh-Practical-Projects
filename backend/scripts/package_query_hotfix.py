@@ -12,7 +12,9 @@ FILES = ('backend/app/decision_hourly/ash_history.py','backend/app/decision_hour
          'backend/app/decision_hourly/quality_advice.py','backend/app/routers/health.py',
          'backend/app/gpt_coarse/amount.py','backend/app/routers/decision.py',
          'frontend/js/decision-overview.js','frontend/js/decision-sources.js',
-         'frontend/js/api.js','frontend/js/operations.js')
+         'frontend/js/api.js','frontend/js/operations.js',
+         'backend/app/decision_hourly/density_trend.py','frontend/index.html',
+         'frontend/js/decision-density-trend.js','frontend/css/decision-density-trend.css')
 
 
 def git_bytes(ref,name):

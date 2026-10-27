@@ -53,7 +53,6 @@ const url=process.env.DMCS_VERIFY_URL || 'http://127.0.0.1:8000';
             set([[0,1.48],[30,1.49],[60,1.49],[90,1.51],[120,1.51],[150,1.5],[180,1.49],[210,1.49],[240,1.49]],
                 [[0,1.49],[60,1.52],[120,1.5],[180,1.48],[240,1.5]]);
             document.getElementById('density-trend-caption').textContent='合成验证示例 · 阶梯设定 / 独立建议 / 交叉差值（非生产数据）';
-            document.getElementById('density-trend-archive-note').textContent='此图仅验证有差值时的阴影效果，未写入数据库。';
             const canvas=document.getElementById('density-trend-canvas'),ctx=canvas.getContext('2d');
             const originalStroke=ctx.stroke, originalMove=ctx.moveTo, originalLine=ctx.lineTo, originalBegin=ctx.beginPath;
             let commands=[];const strokes=[];

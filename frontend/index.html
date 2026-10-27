@@ -473,7 +473,7 @@
 
         <section class="page" id="page-density-trend" aria-labelledby="density-trend-title">
             <div class="page-header">
-                <div><h2 id="density-trend-title">调密趋势对比</h2><p>人工设定与本小时建议，放在同一条时间轴上查看</p></div>
+                <div><h2 id="density-trend-title">调密趋势对比</h2></div>
                 <div class="page-header-actions"><div class="filter-group" id="density-trend-ranges">
                     <button type="button" class="btn" data-t-range="168" aria-pressed="true">近7天</button>
                     <button type="button" class="btn" data-t-range="720" aria-pressed="false">近30天</button>
@@ -495,14 +495,11 @@
                     <button type="button" data-density-series="advice" aria-pressed="true"><i></i>本小时建议</button>
                     <button type="button" id="density-trend-focus-advice" disabled>放大建议时段</button>
                     <span class="density-trend-difference"><i aria-hidden="true"></i>差值阴影</span>
-                    <span>点击图例显隐 · 悬停查看记录</span>
                 </div>
                 <div class="density-trend-plot" id="density-trend-plot">
                     <canvas id="density-trend-canvas" tabindex="0" role="img" aria-label="人工设定与真实小时建议趋势图，左右方向键查看记录，Home 和 End 跳至首尾"></canvas>
                     <div class="density-trend-tooltip" hidden></div>
                 </div>
-                <p id="density-trend-archive-note" class="density-trend-archive-note"></p>
-                <p class="density-trend-note">阴影表示小时建议与 A304 设定密度的差值；两线独立，相同值处重合、无阴影，缺数据处不填充。正常逐小时记录连续显示；A304 缺口不超过1小时沿用前值向后连接，超过1小时断开，不倒补、不写入历史。小点只标记变化，未存档建议保持留空。</p>
                 <p id="density-trend-status" role="status" aria-live="polite"></p>
             </div>
             <div class="card">
