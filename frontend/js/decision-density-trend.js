@@ -44,6 +44,50 @@ const DensityTrendPage = {
             previous = p;
         }
     },
+    segments(points, key) {
+        const observations = key==='A304' ? points.filter(p => p.value!==null) : points;
+        const result = [];
+        for (let i=1;i<observations.length;i++) {
+            const a=observations[i-1], b=observations[i];
+            if (b.t>a.t && this.connected(a,b)) result.push({start:a.t,end:b.t,
+                from:a.value,to:key==='A304'?a.value:b.value});
+        }
+        return result;
+    },
+    differenceAreas() {
+        if (!this.visible.A304 || !this.visible.advice || !this.series) return [];
+        const setpoints=this.segments(this.series.A304,'A304'), advice=this.segments(this.series.advice,'advice');
+        const areas=[];
+        let i=0,j=0;
+        while (i<setpoints.length && j<advice.length) {
+            const a=setpoints[i], b=advice[j], start=Math.max(a.start,b.start), end=Math.min(a.end,b.end);
+            if (end>start) {
+                const at=t=>b.from+(b.to-b.from)*(t-b.start)/(b.end-b.start);
+                const from=at(start), to=at(end), d0=from-a.from, d1=to-a.from;
+                // Ignore storage float noise; don't invent a visible gap for equal values.
+                if (Math.max(Math.abs(d0),Math.abs(d1))>1e-6) {
+                    if (d0*d1<0) {
+                        const crossing=start+(end-start)*d0/(d0-d1);
+                        areas.push({start,end:crossing,setpoint:a.from,from,to:a.from},
+                            {start:crossing,end,setpoint:a.from,from:a.from,to});
+                    } else areas.push({start,end,setpoint:a.from,from,to});
+                }
+            }
+            if (a.end<=b.end) i++;
+            if (b.end<=a.end) j++;
+        }
+        return areas;
+    },
+    shadeDifference(ctx, areas, x, y, color) {
+        if (!areas.length) return;
+        ctx.save();ctx.fillStyle=color;ctx.globalAlpha=.2;ctx.beginPath();
+        for (const a of areas) {
+            ctx.moveTo(x(a.start),y(a.setpoint));ctx.lineTo(x(a.end),y(a.setpoint));
+            ctx.lineTo(x(a.end),y(a.to));ctx.lineTo(x(a.start),y(a.from));ctx.closePath();
+        }
+        // Fill only: polygon boundaries must never become connecting strokes.
+        ctx.fill();ctx.restore();
+    },
     adviceRange() {
         const times = (this.series?.advice || []).filter(p => Number.isFinite(p.value)).map(p => p.t);
         if (!times.length || !this.meta) return null;
@@ -169,7 +213,7 @@ const DensityTrendPage = {
         const get = (v, fallback) => css.getPropertyValue(v).trim() || fallback;
         return {A304:get('--trend-a304','#25897c'),
             advice:get('--trend-advice','#ce8428'), muted:get('--text-secondary','#68758a'), grid:get('--border-color','#dce1eb'),
-            background:get('--bg-card','#fff')};
+            background:get('--bg-card','#fff'), difference:get('--trend-difference','#579ee8')};
     },
     detail(p) {
         if (p.key !== 'advice') return `${p.key} 设定密度  ${this.num(p.value)} g/cm³\n${this.time(p.at)}\n` +
@@ -212,6 +256,7 @@ const DensityTrendPage = {
             ctx.textAlign=i===0?'left':i===ticks?'right':'center';
             ctx.fillText(this.time(t,true),x(t),h-20);
         }
+        this.shadeDifference(ctx,this.differenceAreas(),x,y,colors.difference);
         for (const [key, observations] of groups) {
             // Missing A304 observations may be crossed only when the enclosing
             // real endpoints meet the 1 h rule. Advice gaps stay untouched.
@@ -242,7 +287,6 @@ const DensityTrendPage = {
             const lx=Math.max(left,Math.min(px-lw/2,w-right-lw));
             const ly=py-top>=44?py-44:py+16;
             ctx.strokeStyle=colors.advice;ctx.lineWidth=1;ctx.setLineDash([]);
-            ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(Math.max(lx+6,Math.min(px,lx+lw-6)),ly+(ly<py?lh:0));ctx.stroke();
             ctx.fillStyle=colors.background;ctx.fillRect(lx,ly,lw,lh);ctx.strokeRect(lx,ly,lw,lh);
             ctx.fillStyle=colors.advice;ctx.textAlign='left';ctx.fillText(label,lx+10,ly+19);
             canvas._adviceLabel={...latest,x:px,y:py,text:this.detail(latest),left:lx,top:ly,width:lw,height:lh};

@@ -1,4 +1,4 @@
-#page-density-trend { min-width: 0; --trend-a304: #25897c; --trend-advice: #ce8428; }
+#page-density-trend { min-width: 0; --trend-a304: #25897c; --trend-advice: #ce8428; --trend-difference: #579ee8; }
 body:has(#page-density-trend.active.is-light) { --bg-primary: #f3f5fa; --bg-secondary: #fff; --bg-card: #fff; --bg-input: #fff; --text-primary: #253154; --text-secondary: #63718a; --text-muted: #63718a; --border-color: #d8dfeb; color-scheme: light; }
 body:has(#page-density-trend.active.is-light) .top-bar { background: #fff; }
 #page-density-trend .card { background: var(--bg-card, var(--bg-secondary)); border: 1px solid var(--border-color); border-radius: 8px; }
@@ -24,6 +24,8 @@ body:has(#page-density-trend.active.is-light) .top-bar { background: #fff; }
 .density-trend-legend [data-density-series="A304"] i { border-color: var(--trend-a304); }
 .density-trend-legend [data-density-series="advice"] i { border-color: var(--trend-advice); border-top-style: dashed; }
 .density-trend-legend > span { margin-left: auto; color: var(--text-secondary); font-size: 12px; }
+.density-trend-legend .density-trend-difference { display: inline-flex; align-items: center; gap: 7px; margin-left: 0; }
+.density-trend-legend .density-trend-difference i { height: 12px; border: 1px solid var(--trend-difference); background: #579ee833; border-radius: 2px; }
 .density-trend-plot { position: relative; height: 430px; }
 .density-trend-plot canvas { width: 100%; height: 100%; display: block; touch-action: pan-y; }
 .density-trend-plot canvas:focus-visible { outline: 2px solid var(--trend-a304); outline-offset: 4px; }
