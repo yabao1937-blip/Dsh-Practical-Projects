@@ -3,6 +3,11 @@ const DensityTrendPage = {
     hours: 168, range: null, inited: false, seq: 0, meta: null, page: 0,
     visible: {A304: true, advice: true},
     num(v) { return Number.isFinite(v) ? v.toFixed(3) : '—'; },
+    signed(v) {
+        if (!Number.isFinite(v)) return '—';
+        const rounded=Number(v.toFixed(3));
+        return (rounded>0?'+':'') + rounded.toFixed(3);
+    },
     esc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
     time(v, short = false) {
         if (!v) return '—';
@@ -185,7 +190,7 @@ const DensityTrendPage = {
         } catch (error) {
             if (seq !== this.seq) return;
             this.meta = null; this.series = null; this.draw();
-            document.getElementById('density-trend-actions').innerHTML = '<tr><td colspan="4">该范围未能读取，请重试。</td></tr>';
+            document.getElementById('density-trend-actions').innerHTML = '<tr><td colspan="5">该范围未能读取，请重试。</td></tr>';
             document.getElementById('density-trend-caption').textContent = '所选时段读取失败';
             document.getElementById('density-trend-archive-note').textContent = '';
             document.getElementById('density-trend-focus-advice').disabled = true;
@@ -200,10 +205,14 @@ const DensityTrendPage = {
     renderActions() {
         const actions = [...(this.meta?.actions || [])].reverse(), pages = Math.max(1, Math.ceil(actions.length/20));
         this.page = Math.max(0, Math.min(pages-1, this.page));
-        document.getElementById('density-trend-actions').innerHTML = actions.length ? actions.slice(this.page*20, this.page*20+20).map(a =>
-            `<tr><td>${this.esc(this.time(a.at))}${a.continuous ? '' : '<small>前后观测有间隔</small>'}</td><td>${this.esc(a.channel)}</td>`+
-            `<td>${this.num(a.before)} <span class="density-trend-arrow">→</span> ${this.num(a.after)}</td><td>${Number.isFinite(a.before) && Number.isFinite(a.after) ? (a.after >= a.before ? '+' : '') + this.num(a.after-a.before) : '—'}</td></tr>`).join('') :
-            '<tr><td colspan="4">所选时段没有已记录的设定变化。</td></tr>';
+        document.getElementById('density-trend-actions').innerHTML = actions.length ? actions.slice(this.page*20, this.page*20+20).map(a => {
+            const advice=a.hourly_advice, value=advice?.value;
+            const tip=Number.isFinite(value) ? `调后观测 ${this.time(a.comparison_at)} · 建议存档于 ${this.time(advice.generated_at)} · 适用小时 ${this.time(advice.apply_start,true)}` :
+                '调后观测时刻没有对应小时的有效建议存档';
+            return `<tr><td>${this.esc(this.time(a.at))}${a.continuous ? '' : '<small>前后观测有间隔</small>'}</td><td>${this.esc(a.channel)}</td>`+
+                `<td>${this.num(a.before)} <span class="density-trend-arrow">→</span> <strong>${this.num(a.after)}</strong></td>`+
+                `<td title="${this.esc(tip)}">${this.num(value)}</td><td>${this.signed(a.difference)}</td></tr>`;
+        }).join('') : '<tr><td colspan="5">所选时段没有已记录的设定变化。</td></tr>';
         document.getElementById('density-trend-page-info').textContent = `共 ${actions.length} 条 · ${this.page+1} / ${pages}`;
         document.getElementById('density-trend-prev').disabled = this.page === 0;
         document.getElementById('density-trend-next').disabled = this.page === pages-1;

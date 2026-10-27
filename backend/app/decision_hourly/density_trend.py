@@ -1,5 +1,6 @@
 """Small indexed evidence queries; no minute-history scans or invented advice."""
 import json
+from bisect import bisect_right
 from datetime import timedelta
 
 from fastapi import HTTPException
@@ -32,6 +33,29 @@ def bounded(db, statement):
     if len(rows) > MAX_RECORDS:
         raise HTTPException(422, '此范围记录较多，请缩小时间范围后查看，避免遗漏调密点')
     return rows
+
+
+def compare_actions(actions, suggestions):
+    """Compare with advice that existed at the post-adjustment observation."""
+    by_hour = {}
+    for point in suggestions:
+        hour = iso_time(business_time(point['apply_start']))
+        times, points = by_hour.setdefault(hour, ([], []))
+        times.append(iso_time(business_time(point['at'])))
+        points.append(point)
+    for action in actions:
+        observed = business_time(action['after_at'] or action['at'])
+        action['comparison_at'] = iso_time(observed)
+        hour = iso_time(observed.replace(minute=0, second=0, microsecond=0))
+        times, points = by_hour.get(hour, ([], []))
+        index = bisect_right(times, iso_time(observed))-1
+        point = points[index] if index >= 0 else None
+        action['hourly_advice'] = None if point is None else dict(
+            value=point['value'] if numeric(point.get('value')) else None,
+            generated_at=point['at'], apply_start=point['apply_start'],
+            status=point.get('status'), reason=point.get('reason'))
+        action['difference'] = (round(action['after']-point['value'], 6)
+            if point and numeric(point.get('value')) and numeric(action['after']) else None)
 
 
 def read(db, now, hours=168, start=None, end=None):
@@ -81,14 +105,22 @@ def read(db, now, hours=168, start=None, end=None):
         channels[key] = list(unique.values())
     available = bool(db.execute(text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='gpt_hourly_density_advice'")).first())
     suggestions = []
+    comparison_advice = []
     if available:
+        # Minute-range table rows still need earlier advice from their own
+        # hour. Fetch a bounded indexed context without adding it to the plot.
+        context_start = business_time(min([start] + [business_time(a['after_at'] or a['at']) for a in actions]))
+        context_lower = iso_time(context_start.replace(minute=0, second=0, microsecond=0))
         for row in bounded(db, select(GptHourlyDensityAdvice.generated_at, GptHourlyDensityAdvice.apply_start,
-                GptHourlyDensityAdvice.snapshot).where(GptHourlyDensityAdvice.generated_at >= lower,
+                GptHourlyDensityAdvice.snapshot).where(GptHourlyDensityAdvice.generated_at >= context_lower,
                 GptHourlyDensityAdvice.generated_at <= upper).order_by(GptHourlyDensityAdvice.generated_at, GptHourlyDensityAdvice.id)):
             point = dict(at=row[0], apply_start=row[1], **row[2])
             if (point.get('basis') or {}).get('channels') != ['A304']:
                 point.update(value=None, status='different_basis', reason='该时段不是 A304 独立设定基准')
-            suggestions.append(point)
+            comparison_advice.append(point)
+            if iso_time(business_time(point['at'])) >= lower:
+                suggestions.append(point)
+    compare_actions(actions, comparison_advice)
     return dict(policy='density-trend-v2', generated_at=iso_time(now),
         period=dict(start=lower, end=upper), channels=channels, suggestions=suggestions,
         actions=actions, total_actions=len(actions), archive_available=available,

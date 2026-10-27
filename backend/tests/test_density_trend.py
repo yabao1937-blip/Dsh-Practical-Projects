@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import timedelta
+from datetime import timedelta, timezone
 import pytest
 from sqlalchemy import select, text, func
 
@@ -126,3 +126,107 @@ def test_other_route_advice_does_not_compare_with_a304(client,sessions,monkeypat
     r=client.get('/api/v1/decision/evidence/density-trend').json()
     assert set(r['channels'])=={'A304'}
     assert r['suggestions'][0]['value'] is None
+
+
+def test_action_comparison_uses_latest_existing_revision_without_future_or_prior_hour(client,sessions,monkeypatch):
+    monkeypatch.setattr('app.decision_hourly.router.utc_now',lambda:HOUR+timedelta(hours=1,minutes=10))
+    with sessions.begin() as db:
+        save_result(db,HOUR-timedelta(minutes=10),result(1.47))
+        save_result(db,HOUR+timedelta(minutes=2),result(1.49))
+        save_result(db,HOUR+timedelta(minutes=5),result(1.50))
+        save_result(db,HOUR+timedelta(minutes=7),result(None))
+        other=result(1.51)
+        other['advice_inputs']['density']['execution_basis']['components']={'A303':{}}
+        save_result(db,HOUR+timedelta(minutes=9),other)
+        save_result(db,HOUR+timedelta(minutes=11),result(1.48))
+        for identifier,minute,after in [('early',1,1.5),('exact',2,1.51),('up',3,1.50),
+                ('down',6,1.49),('blocked',8,1.5),('route',10,1.5),('same',12,1.47999998),
+                ('next-hour',61,1.51)]:
+            action(db,identifier,HOUR+timedelta(minutes=minute),after=after)
+        # A later revision cannot change comparisons for earlier actions.
+        save_result(db,HOUR+timedelta(minutes=15),result(1.55))
+    rows={a['id']:a for a in client.get('/api/v1/decision/evidence/density-trend').json()['actions']}
+    assert rows['early']['hourly_advice'] is None
+    assert rows['exact']['hourly_advice']['generated_at']==iso_time(HOUR+timedelta(minutes=2))
+    assert rows['exact']['difference']==.02
+    assert rows['up']['difference']==.01
+    assert rows['down']['difference']==-.01
+    assert rows['blocked']['hourly_advice']['value'] is None and rows['blocked']['difference'] is None
+    assert rows['route']['hourly_advice']['value'] is None and rows['route']['difference'] is None
+    assert rows['same']['difference']==0
+    assert rows['next-hour']['hourly_advice'] is None and rows['next-hour']['difference'] is None
+
+
+def test_action_comparison_loads_pre_range_advice_but_never_adds_it_to_plot(client,sessions,monkeypatch):
+    monkeypatch.setattr('app.decision_hourly.router.utc_now',lambda:HOUR)
+    with sessions.begin() as db:
+        save_result(db,START+timedelta(minutes=10),result(1.49))
+        save_result(db,START+timedelta(minutes=45),result(1.51))
+        action(db,'delayed-detection',START+timedelta(minutes=47),after=1.50)
+        db.flush()
+        row=db.get(DensityAction,'delayed-detection')
+        evidence=deepcopy(row.evidence)
+        evidence['after']['sampled_at']=iso_time(START+timedelta(minutes=40))
+        row.evidence=evidence
+    params={'start':iso_time(START+timedelta(minutes=31)),'end':iso_time(HOUR)}
+    data=client.get('/api/v1/decision/evidence/density-trend',params=params).json()
+    assert [p['value'] for p in data['suggestions']]==[1.51]
+    comparison=data['actions'][0]
+    assert comparison['hourly_advice']['value']==1.49
+    assert comparison['difference']==.01
+    assert comparison['hourly_advice']['generated_at']==iso_time(START+timedelta(minutes=10))
+    wide=client.get('/api/v1/decision/evidence/density-trend').json()['actions'][0]
+    assert wide['hourly_advice']==comparison['hourly_advice']
+    assert wide['difference']==comparison['difference']
+
+
+def test_action_observation_hour_can_precede_detection_hour(client,sessions,monkeypatch):
+    monkeypatch.setattr('app.decision_hourly.router.utc_now',lambda:HOUR+timedelta(minutes=5))
+    with sessions.begin() as db:
+        save_result(db,HOUR-timedelta(minutes=5),result(1.49))
+        save_result(db,HOUR+timedelta(minutes=1),result(1.55))
+        action(db,'cross-hour',HOUR+timedelta(minutes=2),after=1.51)
+        db.flush()
+        row=db.get(DensityAction,'cross-hour')
+        evidence=deepcopy(row.evidence)
+        evidence['after']['sampled_at']=iso_time(HOUR-timedelta(seconds=30))
+        row.evidence=evidence
+    data=client.get('/api/v1/decision/evidence/density-trend',params={
+        'start':iso_time(HOUR+timedelta(minutes=1)), 'end':iso_time(HOUR+timedelta(minutes=4))}).json()
+    assert [p['value'] for p in data['suggestions']]==[1.55]
+    assert data['actions'][0]['hourly_advice']['apply_start']==iso_time(START)
+    assert data['actions'][0]['difference']==.02
+    assert data['actions'][0]['comparison_at']==iso_time(HOUR-timedelta(seconds=30))
+
+
+def test_legacy_action_timestamp_fallback_and_missing_archive(client,sessions,monkeypatch):
+    monkeypatch.setattr('app.decision_hourly.router.utc_now',lambda:HOUR)
+    with sessions.begin() as db:
+        save_result(db,START+timedelta(minutes=1),result(1.49))
+        action(db,'legacy',START+timedelta(minutes=5),after=None)
+        db.flush()
+        row=db.get(DensityAction,'legacy')
+        evidence=deepcopy(row.evidence)
+        evidence['after'].pop('sampled_at')
+        row.evidence=evidence
+    data=client.get('/api/v1/decision/evidence/density-trend').json()
+    assert data['actions'][0]['hourly_advice']['value']==1.49
+    assert data['actions'][0]['difference'] is None
+    with sessions.begin() as db:
+        db.execute(text('DROP TABLE gpt_hourly_density_advice'))
+    data=client.get('/api/v1/decision/evidence/density-trend').json()
+    assert data['actions'][0]['hourly_advice'] is None and data['actions'][0]['difference'] is None
+
+
+def test_comparison_context_uses_business_hour_for_fractional_timezone(client,sessions,monkeypatch):
+    monkeypatch.setattr('app.decision_hourly.router.utc_now',lambda:HOUR+timedelta(hours=1))
+    with sessions.begin() as db:
+        save_result(db,HOUR+timedelta(minutes=5),result(1.49))
+        action(db,'within-hour',HOUR+timedelta(minutes=40),after=1.50)
+    offset=timezone(timedelta(hours=5,minutes=30))
+    data=client.get('/api/v1/decision/evidence/density-trend',params={
+        'start':(HOUR+timedelta(minutes=30)).astimezone(offset).isoformat(),
+        'end':(HOUR+timedelta(minutes=55)).astimezone(offset).isoformat()}).json()
+    assert data['suggestions']==[]
+    assert data['actions'][0]['hourly_advice']['value']==1.49
+    assert data['actions'][0]['difference']==.01
