@@ -493,6 +493,7 @@
                 <div class="density-trend-legend" aria-label="显示的曲线">
                     <button type="button" data-density-series="A304" aria-pressed="true"><i></i>A304 设定</button>
                     <button type="button" data-density-series="advice" aria-pressed="true"><i></i>本小时建议</button>
+                    <button type="button" id="density-trend-focus-advice" disabled>放大建议时段</button>
                     <span>点击图例显隐 · 悬停查看记录</span>
                 </div>
                 <div class="density-trend-plot" id="density-trend-plot">
@@ -500,7 +501,7 @@
                     <div class="density-trend-tooltip" hidden></div>
                 </div>
                 <p id="density-trend-archive-note" class="density-trend-archive-note"></p>
-                <p class="density-trend-note">相同密度连续显示为水平直线；设定曲线只在检测到调密处显示小点，建议曲线只在建议值变化处显示小点。悬停仍可查看原始观测，孤立观测用短横线表示。无记录时段保持断开；实际操作发生在前后两次观测之间。</p>
+                <p class="density-trend-note">正常逐小时记录连续显示；A304 观测缺口不超过1小时，沿用前值向后连接，超过1小时保持断开，不向前补值。补齐只用于显示，不写入历史数据。设定曲线只在调密处显示小点，建议曲线只在建议值变化处显示小点；悬停可查看原始观测，未存档建议保持留空。</p>
                 <p id="density-trend-status" role="status" aria-live="polite"></p>
             </div>
             <div class="card">

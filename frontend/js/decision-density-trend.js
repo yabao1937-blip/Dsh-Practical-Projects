@@ -16,10 +16,54 @@ const DensityTrendPage = {
             advice: shape(data.suggestions, 'advice')};
     },
     connected(a, b) {
-        if (!a || b.break_before || a.value === null || b.value === null) return false;
+        if (!a || !b || a.key !== b.key || !Number.isFinite(a.value) || !Number.isFinite(b.value)) return false;
+        // Adjacent hourly anchors already form a continuous hourly series;
+        // their few-second capture jitter is not a missing-data gap. Preserve
+        // that existing cadence rule, then fill real gaps up to 1 h only.
+        if (b.key === 'A304') {
+            const elapsed = b.t-a.t;
+            const nearHour = p => Math.abs(p.t-Date.parse(p.apply_start))<=30000;
+            const adjacentAnchors = !b.break_before && a.origin==='anchor' && b.origin==='anchor' &&
+                Date.parse(b.apply_start)-Date.parse(a.apply_start)===3600000 && nearHour(a) && nearHour(b);
+            return elapsed>=0 && (adjacentAnchors || elapsed<=3600000);
+        }
+        if (b.break_before) return false;
         if (b.key === 'advice' && JSON.stringify(a.basis?.channels) !== JSON.stringify(b.basis?.channels)) return false;
         const hour = p => Math.floor(Date.parse(p.apply_start || p.at) / 3600000);
         return b.t >= a.t && b.t - a.t <= 75 * 60000 && hour(b) - hour(a) <= 1;
+    },
+    trace(ctx, points, key, x, y) {
+        let previous = null;
+        for (const p of points) {
+            if (p.value !== null) {
+                if (this.connected(previous, p)) {
+                    if (key === 'A304') ctx.lineTo(x(p.t), y(previous.value));
+                    ctx.lineTo(x(p.t), y(p.value));
+                } else ctx.moveTo(x(p.t), y(p.value));
+            }
+            previous = p;
+        }
+    },
+    adviceRange() {
+        const times = (this.series?.advice || []).filter(p => Number.isFinite(p.value)).map(p => p.t);
+        if (!times.length || !this.meta) return null;
+        const start = Math.max(Math.floor(Date.parse(this.meta.period.start)/60000)*60000,
+            Math.floor((Math.min(...times)-30*60000)/60000)*60000);
+        const end = Math.min(Math.ceil(Date.parse(this.meta.period.end)/60000)*60000,
+            Math.ceil((Math.max(...times)+30*60000)/60000)*60000);
+        return {start: new Date(start).toISOString(), end: new Date(end).toISOString()};
+    },
+    focusAdvice() {
+        const range = this.adviceRange();
+        if (!range) return;
+        this.range = range;
+        for (const field of ['start', 'end']) document.getElementById('density-trend-'+field).value =
+            new Date(Date.parse(range[field])+8*3600000).toISOString().slice(0,16);
+        document.getElementById('density-trend-custom-fields').hidden = false;
+        document.getElementById('density-trend-custom').setAttribute('aria-expanded', 'true');
+        this.visible.advice = true;
+        document.querySelector('[data-density-series="advice"]').setAttribute('aria-pressed', 'true');
+        this.refresh();
     },
     showPoint(previous, point) {
         if (point.value === null) return false;
@@ -52,6 +96,7 @@ const DensityTrendPage = {
             this.range = {start: start + ':00+08:00', end: end + ':00+08:00'}; this.refresh();
         };
         byId('refresh').onclick = () => this.refresh();
+        byId('focus-advice').onclick = () => this.focusAdvice();
         document.querySelectorAll('[data-density-series]').forEach(b => b.onclick = () => {
             const key = b.dataset.densitySeries; this.visible[key] = !this.visible[key];
             b.setAttribute('aria-pressed', String(this.visible[key])); this.draw();
@@ -63,29 +108,35 @@ const DensityTrendPage = {
         this.themeObserver.observe(document.documentElement, {attributes:true, attributeFilter:['data-theme','class']});
         this.themeObserver.observe(document.body, {attributes:true, attributeFilter:['data-theme','class']});
         document.addEventListener('visibilitychange', () => { if (!document.hidden && this.active()) this.refresh(); });
+        this.timer = setInterval(() => {
+            if (!document.hidden && this.active() && !this.range && !this.loading) this.refresh({keepPage:true});
+        }, 60000);
         this.refresh();
     },
     active() { return document.getElementById('page-density-trend')?.classList.contains('active'); },
     status(message) { document.getElementById('density-trend-status').textContent = message; },
-    async refresh() {
+    async refresh({keepPage = false} = {}) {
         const seq = ++this.seq, range = this.range, hours = this.hours;
+        this.loading = true;
         this.status('正在读取所选时段…');
         document.getElementById('density-trend-plot').setAttribute('aria-busy', 'true');
         try {
             const query = range ? 'start='+encodeURIComponent(range.start)+'&end='+encodeURIComponent(range.end) : 'limit='+hours;
             const data = await Api.decisionEvidence('/density-trend?' + query);
             if (seq !== this.seq) return;
-            this.meta = data; this.series = this.points(data); this.page = 0;
+            this.meta = data; this.series = this.points(data); if (!keepPage) this.page = 0;
             document.querySelectorAll('[data-t-range]').forEach(b => {
                 const chosen = !range && Number(b.dataset.tRange) === hours;
                 b.classList.toggle('btn-primary', chosen); b.setAttribute('aria-pressed', String(chosen));
             });
             document.getElementById('density-trend-custom').classList.toggle('btn-primary', !!range);
-            const count = data.suggestions.filter(p => Number.isFinite(p.value)).length;
+            const advice = this.series.advice.filter(p => Number.isFinite(p.value)), latest = advice.at(-1);
             document.getElementById('density-trend-caption').textContent =
                 `${range ? '自选时间' : hours === 168 ? '近7天' : '近30天'} · ${this.time(data.period.start, true)} — ${this.time(data.period.end, true)}`;
             document.getElementById('density-trend-archive-note').textContent =
-                `${data.total_actions} 次设定变化 · ${count} 条真实小时建议。${data.archive_note}`;
+                `${data.total_actions} 次设定变化 · ${advice.length} 条真实小时建议。` +
+                (latest ? `最近存档 ${this.time(latest.at, true)}：${this.num(latest.value)} g/cm³。` : '') + data.archive_note;
+            document.getElementById('density-trend-focus-advice').disabled = !latest;
             this.status(''); this.renderActions(); this.draw();
         } catch (error) {
             if (seq !== this.seq) return;
@@ -93,9 +144,13 @@ const DensityTrendPage = {
             document.getElementById('density-trend-actions').innerHTML = '<tr><td colspan="4">该范围未能读取，请重试。</td></tr>';
             document.getElementById('density-trend-caption').textContent = '所选时段读取失败';
             document.getElementById('density-trend-archive-note').textContent = '';
+            document.getElementById('density-trend-focus-advice').disabled = true;
             this.status(error.message || '读取失败，请稍后刷新。');
         } finally {
-            if (seq === this.seq) document.getElementById('density-trend-plot').setAttribute('aria-busy', 'false');
+            if (seq === this.seq) {
+                this.loading = false;
+                document.getElementById('density-trend-plot').setAttribute('aria-busy', 'false');
+            }
         }
     },
     renderActions() {
@@ -113,7 +168,8 @@ const DensityTrendPage = {
         const css = getComputedStyle(document.getElementById('page-density-trend'));
         const get = (v, fallback) => css.getPropertyValue(v).trim() || fallback;
         return {A304:get('--trend-a304','#25897c'),
-            advice:get('--trend-advice','#ce8428'), muted:get('--text-secondary','#68758a'), grid:get('--border-color','#dce1eb')};
+            advice:get('--trend-advice','#ce8428'), muted:get('--text-secondary','#68758a'), grid:get('--border-color','#dce1eb'),
+            background:get('--bg-card','#fff')};
     },
     detail(p) {
         if (p.key !== 'advice') return `${p.key} 设定密度  ${this.num(p.value)} g/cm³\n${this.time(p.at)}\n` +
@@ -131,7 +187,7 @@ const DensityTrendPage = {
         const ratio = Math.min(devicePixelRatio || 1, 2);
         canvas.width = w*ratio; canvas.height = h*ratio;
         const ctx = canvas.getContext('2d'); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h);
-        const tip = plot.querySelector('.density-trend-tooltip'); tip.hidden = true; canvas._hits = [];
+        const tip = plot.querySelector('.density-trend-tooltip'); tip.hidden = true; canvas._hits = []; canvas._adviceLabel = null;
         const colors = this.palette();
         const groups = Object.entries(this.series || {}).filter(([key]) => this.visible[key]);
         const values = groups.flatMap(([, points]) => points.map(p => p.value)).filter(Number.isFinite);
@@ -156,16 +212,15 @@ const DensityTrendPage = {
             ctx.textAlign=i===0?'left':i===ticks?'right':'center';
             ctx.fillText(this.time(t,true),x(t),h-20);
         }
-        for (const [key, points] of groups) {
-            ctx.strokeStyle=colors[key];ctx.fillStyle=colors[key];ctx.lineWidth=2;
+        for (const [key, observations] of groups) {
+            // Missing A304 observations may be crossed only when the enclosing
+            // real endpoints meet the 1 h rule. Advice gaps stay untouched.
+            const points = key === 'A304' ? observations.filter(p => p.value !== null) : observations;
+            ctx.strokeStyle=colors[key];ctx.fillStyle=colors[key];ctx.lineWidth=key==='advice'?3:2;
             ctx.setLineDash(key==='advice'?[6,4]:[]);ctx.beginPath();
-            let previous=null;
-            for (const p of points) {
-                if (p.value !== null) { this.connected(previous,p)?ctx.lineTo(x(p.t),y(p.value)):ctx.moveTo(x(p.t),y(p.value)); }
-                previous=p;
-            }
+            this.trace(ctx, points, key, x, y);
             ctx.stroke();ctx.setLineDash([]);
-            previous=null;
+            let previous=null;
             for (const [index,p] of points.entries()) {
                 const marked=this.showPoint(previous,p);
                 const isolated=!this.connected(previous,p) && !(points[index+1] && this.connected(p,points[index+1]));
@@ -177,6 +232,21 @@ const DensityTrendPage = {
                 canvas._hits.push({...p,x:px,y:py,text:this.detail(p)});
             }
         }
+        // A newly started archive can span less than one pixel on a 7/30-day
+        // axis. Label its real endpoint, without moving or backdating records.
+        const latest = this.visible.advice && this.series.advice.filter(p => p.value !== null).at(-1);
+        if (latest) {
+            const px=x(latest.t), py=y(latest.value), label=`小时建议 ${this.num(latest.value)}`;
+            ctx.font='bold 13px "Microsoft YaHei", sans-serif';
+            const lw=ctx.measureText(label).width+20, lh=28;
+            const lx=Math.max(left,Math.min(px-lw/2,w-right-lw));
+            const ly=py-top>=44?py-44:py+16;
+            ctx.strokeStyle=colors.advice;ctx.lineWidth=1;ctx.setLineDash([]);
+            ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(Math.max(lx+6,Math.min(px,lx+lw-6)),ly+(ly<py?lh:0));ctx.stroke();
+            ctx.fillStyle=colors.background;ctx.fillRect(lx,ly,lw,lh);ctx.strokeRect(lx,ly,lw,lh);
+            ctx.fillStyle=colors.advice;ctx.textAlign='left';ctx.fillText(label,lx+10,ly+19);
+            canvas._adviceLabel={...latest,x:px,y:py,text:this.detail(latest),left:lx,top:ly,width:lw,height:lh};
+        }
         canvas._hits.sort((a,b)=>a.t-b.t || a.key.localeCompare(b.key));
         const show = hit => {
             tip.textContent=hit.text;tip.hidden=false;
@@ -185,6 +255,8 @@ const DensityTrendPage = {
         };
         const point = event => {
             const r=canvas.getBoundingClientRect(),px=event.clientX-r.left,py=event.clientY-r.top;
+            const label=canvas._adviceLabel;
+            if(label && px>=label.left && px<=label.left+label.width && py>=label.top && py<=label.top+label.height){show(label);return;}
             let best=null,distance=Infinity;
             for(const hit of canvas._hits) {const d=Math.hypot(hit.x-px,hit.y-py);if(d<distance){best=hit;distance=d;}}
             if(best&&distance<32)show(best);else tip.hidden=true;
