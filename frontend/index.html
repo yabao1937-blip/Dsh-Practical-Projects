@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="css/decision-overview.css?v=20">
     <link rel="stylesheet" href="css/decision-ash-history.css?v=3">
     <link rel="stylesheet" href="css/decision-evidence.css?v=1">
-    <link rel="stylesheet" href="css/decision-density-trend.css?v=3">
+    <link rel="stylesheet" href="css/decision-density-trend.css?v=4">
     <link rel="stylesheet" href="css/manual-measurements.css?v=4">
     <link rel="stylesheet" href="css/gpt-expert9.css?v=1">
     <link rel="stylesheet" href="css/core-workspace.css?v=1">
@@ -488,7 +488,7 @@
                 <button type="button" class="btn btn-primary" id="density-trend-query">查询</button><span>北京时间 · 最长90天</span>
             </div>
             <div class="card density-trend-card">
-                <div class="density-trend-chart-heading"><h3>设定密度 / 小时建议</h3><span>g/cm³ · 北京时间</span></div>
+                <div class="density-trend-chart-heading"><h3>总灰分 / 设定密度 / 小时建议</h3><span>总灰分 % · 密度 g/cm³ · 北京时间 · 同一时间轴上下对齐</span></div>
                 <p class="density-trend-caption" id="density-trend-caption">正在读取…</p>
                 <div class="density-trend-legend" aria-label="显示的曲线">
                     <button type="button" data-density-series="A304" aria-pressed="true"><i></i>A304 设定</button>
@@ -497,18 +497,17 @@
                     <span class="density-trend-difference"><i aria-hidden="true"></i>差值阴影</span>
                     <span class="density-trend-missing"><i aria-hidden="true"></i>无建议小时（红线＝当时设定密度）</span>
                 </div>
+                <p class="density-trend-ash-label">总灰分（% · 小时结算值 · 空心点＝暂估）</p>
+                <div class="density-trend-plot density-trend-ash-plot" id="density-trend-ash-plot">
+                    <canvas id="density-trend-ash-canvas" tabindex="0" role="img" aria-label="小时结算总灰分趋势图，左右方向键查看记录，Home 和 End 跳至首尾"></canvas>
+                    <div class="density-trend-tooltip" hidden></div>
+                </div>
+                <p class="density-trend-ash-label">设定密度 / 小时建议（g/cm³）</p>
                 <div class="density-trend-plot" id="density-trend-plot">
                     <canvas id="density-trend-canvas" tabindex="0" role="img" aria-label="人工设定与真实小时建议趋势图，左右方向键查看记录，Home 和 End 跳至首尾"></canvas>
                     <div class="density-trend-tooltip" hidden></div>
                 </div>
                 <p id="density-trend-status" role="status" aria-live="polite"></p>
-            </div>
-            <div class="card density-trend-card">
-                <div class="density-trend-chart-heading"><h3>总灰分</h3><span>% · 小时结算值 · 北京时间 · 空心点＝暂估</span></div>
-                <div class="density-trend-plot density-trend-ash-plot" id="density-trend-ash-plot">
-                    <canvas id="density-trend-ash-canvas" tabindex="0" role="img" aria-label="小时结算总灰分趋势图，左右方向键查看记录，Home 和 End 跳至首尾"></canvas>
-                    <div class="density-trend-tooltip" hidden></div>
-                </div>
             </div>
             <div class="card">
                 <h3 class="density-trend-table-title">所选时段的调密记录</h3>
@@ -555,7 +554,7 @@
     <script src="js/decision-realtime.js?v=5"></script>
     <script src="js/decision-hourly.js?v=11"></script>
     <script src="js/decision-evidence.js?v=1"></script>
-    <script src="js/decision-density-trend.js?v=3"></script>
+    <script src="js/decision-density-trend.js?v=4"></script>
     <script src="js/manual-measurements.js?v=5"></script>
     <script src="js/coarse.js?v=24"></script>
     <script src="js/float.js?v=15"></script>
