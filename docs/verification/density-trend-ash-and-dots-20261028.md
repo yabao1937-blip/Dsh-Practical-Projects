@@ -1,0 +1,44 @@
+# 密度趋势：红点仅标变化、标点缩小与总灰分对齐子图 · 2026-10-28
+
+## 需求（用户 2026-10-28，附截图反馈）
+
+1. 红色回落数据相同的小时画成**连续直线**，只在**数值改变**处标红点（此前每个回落小时都
+   画大圆点，串珠状盖住了直线）。
+2. 新增**对应时刻总灰分变化直线**，显示在趋势图/调密记录表上方区域（与密度图共用时间轴）。
+3. **标点缩小**：截图里圆点过大看不见连线。
+
+## 实现
+
+- 后端 `backend/app/decision_hourly/density_trend.py`：响应新增 `ash` 序列——按窗口从
+  `gpt_ash_settlements` 用 SQL JSON 投影只取 `item.value/item.provisional`（避免整行大
+  JSON 触发只读桥接结果上限），值为空的小时不返回；窗口口径与建议/锚点一致。
+- 前端 `frontend/js/decision-density-trend.js`：
+  - `showPoint` 去掉「回落小时必画点」捷径，回落点与真实建议同用「相邻且 |Δ|≥0.0005 才画
+    点」规则——同值回落小时成为无点的红色直线，数值变化处才有红点；
+  - 圆点半径 3.5→2.4，孤立短线 ±4→±3（A304 与建议曲线统一）；
+  - 新增 `drawAsh()` 总灰分子图：卡片置于密度图与调密记录表之间，同左右边距/时间轴对齐，
+    紫色实线（`--trend-ash`，深色 #8a7ae0 / 浅色 #6f5fd0），小实心点，暂估小时画空心点，
+    悬停/键盘提示含数值与「暂估」说明；随主题、窗口尺寸、刷新联动。
+- `frontend/index.html`：新增总灰分卡片（高 200px），趋势 css/js 版本 v=2→v=3；
+  `frontend/css/decision-density-trend.css`：新增 `--trend-ash` 与子图高度。
+
+## 验证
+
+`backend/scripts/verify_density_trend_solid_missing_browser.js`（Chrome headless + 只读桥接
+真实主机数据）全部通过：
+
+- **live**：近7天 106 真实建议小时 + 69 红线回落小时；总灰分序列 131 小时全部返回并在子图
+  渲染 131 个悬停点；零页面/控制台错误。
+- **合成**：同值回落相邻小时（1.48→1.48）标记序列 `[false,true,false,true,false]`——第二
+  个同值小时无红点、直线相连；全部圆点半径 2.4（≤2.5）；红线 3 段+橙 1 段颜色正确；总灰分
+  子图悬停文本含数值与暂估标注（暂估仅出现在暂估小时）；差值阴影与无锚点断线语义不变。
+- 后端 pytest：`test_density_trend.py` 18 项全过（新增结算灰分窗口用例：窗口内/值空小时/
+  自选范围）。调试过程一度出现 provisional 读值错乱，最终定位为测试种子键名笔误
+  （`provisionual`→`provisionual`），非产品代码问题。
+
+截图：`output/playwright/density-trend-solid-missing-20261028/live-7-days.png`（含总灰分子图）。
+
+## 未覆盖项
+
+- 主机生产页面：本批随后以查询热修包发布（density_trend.py + 趋势前端在热修白名单内，
+  不停采集、不整库备份）。

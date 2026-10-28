@@ -8,7 +8,8 @@ from sqlalchemy import select, text
 
 from ..hourly_brief.inputs import business_time, numeric
 from ..telemetry.domain import iso_time
-from .models import DensityAction, GptHourlyDensityAnchor, GptHourlyDensityAdvice
+from .models import (DecisionAshSettlement, DensityAction, GptHourlyDensityAnchor,
+                     GptHourlyDensityAdvice)
 
 MAX_RECORDS = 8000
 
@@ -121,8 +122,18 @@ def read(db, now, hours=168, start=None, end=None):
             if iso_time(business_time(point['at'])) >= lower:
                 suggestions.append(point)
     compare_actions(actions, comparison_advice)
+    # Settled hourly total ash for the aligned curve; project only the small
+    # fields instead of whole settlement snapshots (bridge result limits).
+    ash = []
+    for at, value, provisional in bounded(db, select(DecisionAshSettlement.start,
+            DecisionAshSettlement.snapshot['item']['value'].as_float(),
+            DecisionAshSettlement.snapshot['item']['provisional'].as_boolean()).where(
+            DecisionAshSettlement.start >= iso_time(start.replace(minute=0, second=0, microsecond=0)),
+            DecisionAshSettlement.start <= upper).order_by(DecisionAshSettlement.start)):
+        if lower <= at <= upper and value is not None:
+            ash.append(dict(at=at, value=value, provisional=bool(provisional)))
     return dict(policy='density-trend-v2', generated_at=iso_time(now),
-        period=dict(start=lower, end=upper), channels=channels, suggestions=suggestions,
+        period=dict(start=lower, end=upper), channels=channels, suggestions=suggestions, ash=ash,
         actions=actions, total_actions=len(actions), archive_available=available,
         archive_note='未存档的小时建议留空；不以旧统计值代替，也不按当前参数回算历史。' if available else
             '主机尚未启用真实小时建议存档，历史建议留空；测试端不会向主机补写数据。')

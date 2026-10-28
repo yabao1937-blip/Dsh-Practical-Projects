@@ -18,7 +18,8 @@ const DensityTrendPage = {
         const shape = (points, key) => (points || []).map(p => ({...p, key, t: Date.parse(p.at),
             value: Number.isFinite(p.value) ? p.value : null})).filter(p => Number.isFinite(p.t));
         return {A304: shape(data.channels?.A304, 'A304'),
-            advice: this.adviceWithFallback(shape(data.channels?.A304, 'A304'), shape(data.suggestions, 'advice'))};
+            advice: this.adviceWithFallback(shape(data.channels?.A304, 'A304'), shape(data.suggestions, 'advice')),
+            ash: shape(data.ash, 'ash')};
     },
     adviceWithFallback(A304, advice) {
         // An hour that ran on a known setpoint but produced no advice value
@@ -136,7 +137,8 @@ const DensityTrendPage = {
     showPoint(previous, point) {
         if (point.value === null) return false;
         if (point.key === 'A304') return point.origin === 'change';
-        if (point.missing) return true;  // every fallback hour stays visible in red
+        // Fallback hours follow the same change rule: equal values stay a plain
+        // red line, a dot appears only where the level actually changes.
         return this.connected(previous, point) && Math.abs(point.value - previous.value) >= .0005;
     },
     init() {
@@ -239,7 +241,7 @@ const DensityTrendPage = {
         return {A304:get('--trend-a304','#25897c'),
             advice:get('--trend-advice','#ce8428'), muted:get('--text-secondary','#68758a'), grid:get('--border-color','#dce1eb'),
             background:get('--bg-card','#fff'), difference:get('--trend-difference','#579ee8'),
-            missingAdvice:get('--trend-advice-missing','#d94f4f')};
+            missingAdvice:get('--trend-advice-missing','#d94f4f'), ash:get('--trend-ash','#8a7ae0')};
     },
     detail(p) {
         if (p.key !== 'advice') return `${p.key} 设定密度  ${this.num(p.value)} g/cm³\n${this.time(p.at)}\n` +
@@ -251,7 +253,85 @@ const DensityTrendPage = {
             `固定设定基准 ${this.num(p.basis?.value)} (${p.basis?.channels?.join(' / ') || '—'})\n`+
             `小时灰分 ${Number.isFinite(p.ash?.value) ? p.ash.value.toFixed(2)+'%' : '—'}${p.ash?.provisional ? '（暂估）' : ''}`;
     },
+    ashDetail(p) {
+        return `小时结算总灰分  ${Number.isFinite(p.value) ? p.value.toFixed(2) : '—'} %\n${this.time(p.at)}` +
+            (p.provisional ? '\n暂估：对应重介化验待补录' : '');
+    },
+    drawAsh() {
+        // Aligned companion chart: settled hourly total ash on the same time axis.
+        const canvas = document.getElementById('density-trend-ash-canvas'), plot = document.getElementById('density-trend-ash-plot');
+        if (!canvas || !plot) return;
+        const w = plot.clientWidth, h = plot.clientHeight;
+        const ratio = Math.min(devicePixelRatio || 1, 2);
+        canvas.width = Math.max(1, w*ratio); canvas.height = Math.max(1, h*ratio);
+        const ctx = canvas.getContext('2d'); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h);
+        const tip = plot.querySelector('.density-trend-tooltip'); tip.hidden = true; canvas._hits = []; canvas._index = 0;
+        const colors = this.palette(), points = (this.series?.ash || []).filter(p => p.value !== null);
+        ctx.font = '13px "Microsoft YaHei", sans-serif';
+        if (w < 100) return;
+        if (!points.length || !this.meta) {
+            ctx.fillStyle = colors.muted; ctx.textAlign = 'center';
+            ctx.fillText(points.length ? '等待读取趋势数据' : '该时段暂无结算总灰分', w/2, h/2);
+            return;
+        }
+        const left = 64, right = 24, top = 12, bottom = 26, width = w-left-right, height = h-top-bottom;
+        const lo = Math.min(...points.map(p => p.value)), hi = Math.max(...points.map(p => p.value));
+        const pad = Math.max(.05, (hi-lo)*.15), min = lo-pad, max = hi+pad;
+        const start = Date.parse(this.meta.period.start), end = Date.parse(this.meta.period.end);
+        const x = t => left + (t-start)/(end-start)*width, y = v => top+(max-v)/(max-min)*height;
+        ctx.textAlign = 'right'; ctx.lineWidth = 1;
+        for (let i=0;i<=4;i++) {
+            const v=min+(max-min)*i/4, py=y(v);
+            ctx.strokeStyle=colors.grid; ctx.setLineDash([3,5]);
+            ctx.beginPath();ctx.moveTo(left,py);ctx.lineTo(w-right,py);ctx.stroke();
+            ctx.fillStyle=colors.muted;ctx.fillText(v.toFixed(2),left-10,py+4);
+        }
+        ctx.setLineDash([]);
+        const ticks = Math.max(2, Math.floor(width/155));
+        for (let i=0;i<=ticks;i++) {
+            const t=start+(end-start)*i/ticks;
+            ctx.textAlign=i===0?'left':i===ticks?'right':'center';
+            ctx.fillStyle=colors.muted; ctx.fillText(this.time(t,true),x(t),h-8);
+        }
+        ctx.strokeStyle=colors.ash; ctx.fillStyle=colors.ash; ctx.lineWidth=2;
+        let link=null;
+        for (const p of points) {
+            if (link && p.t-link.t <= 75*60000) {
+                ctx.beginPath();ctx.moveTo(x(link.t),y(link.value));ctx.lineTo(x(p.t),y(p.value));ctx.stroke();
+            }
+            link=p;
+        }
+        for (const p of points) {
+            const px=x(p.t),py=y(p.value);
+            ctx.beginPath();ctx.arc(px,py,2.2,0,2*Math.PI);
+            if (p.provisional) ctx.stroke();  // provisional hours stay hollow
+            else ctx.fill();
+            canvas._hits.push({...p,x:px,y:py,text:this.ashDetail(p)});
+        }
+        canvas._hits.sort((a,b)=>a.t-b.t);
+        const show = hit => {
+            tip.textContent=hit.text;tip.hidden=false;
+            tip.style.left=Math.max(4,Math.min(hit.x+14,w-tip.offsetWidth-4))+'px';
+            tip.style.top=Math.max(4,Math.min(hit.y+12,h-tip.offsetHeight-4))+'px';
+        };
+        const point = event => {
+            const r=canvas.getBoundingClientRect(),px=event.clientX-r.left,py=event.clientY-r.top;
+            let best=null,distance=Infinity;
+            for(const hit of canvas._hits) {const d=Math.hypot(hit.x-px,hit.y-py);if(d<distance){best=hit;distance=d;}}
+            if(best&&distance<32)show(best);else tip.hidden=true;
+        };
+        canvas.onmousemove=point;canvas.onclick=point;canvas.onmouseleave=()=>{tip.hidden=true;};
+        canvas.onkeydown=event=>{
+            const hits=canvas._hits;
+            if(!['Home','End','ArrowLeft','ArrowRight','Escape'].includes(event.key)||!hits.length)return;
+            event.preventDefault();if(event.key==='Escape'){tip.hidden=true;return;}
+            canvas._index=event.key==='Home'?0:event.key==='End'?hits.length-1:
+                Math.max(0,Math.min(hits.length-1,(canvas._index??-1)+(event.key==='ArrowRight'?1:-1)));
+            show(hits[canvas._index]);
+        };
+    },
     draw() {
+        this.drawAsh();
         const canvas = document.getElementById('density-trend-canvas'), plot = document.getElementById('density-trend-plot');
         if (!canvas || !plot) return;
         const w = plot.clientWidth, h = plot.clientHeight;
@@ -317,8 +397,8 @@ const DensityTrendPage = {
                 previous=p;
                 if (p.value===null) continue;
                 const px=x(p.t),py=y(p.value);
-                if (marked) {ctx.fillStyle=p.missing?colors.missingAdvice:colors[key];ctx.beginPath();ctx.arc(px,py,3.5,0,2*Math.PI);ctx.fill();}
-                else if (isolated) {ctx.strokeStyle=p.missing?colors.missingAdvice:colors[key];ctx.beginPath();ctx.moveTo(px-4,py);ctx.lineTo(px+4,py);ctx.stroke();}
+                if (marked) {ctx.fillStyle=p.missing?colors.missingAdvice:colors[key];ctx.beginPath();ctx.arc(px,py,2.4,0,2*Math.PI);ctx.fill();}
+                else if (isolated) {ctx.strokeStyle=p.missing?colors.missingAdvice:colors[key];ctx.beginPath();ctx.moveTo(px-3,py);ctx.lineTo(px+3,py);ctx.stroke();}
                 canvas._hits.push({...p,x:px,y:py,text:this.detail(p)});
             }
         }

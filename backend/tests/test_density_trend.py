@@ -4,7 +4,8 @@ import pytest
 from sqlalchemy import select, text, func
 
 from test_decision_evidence import client, sessions, HOUR, START, seed_anchor
-from app.decision_hourly.models import DecisionCycleHour, DensityAction, GptHourlyDensityAdvice
+from app.decision_hourly.models import (DecisionAshSettlement, DecisionCycleHour, DensityAction,
+                                        GptHourlyDensityAdvice)
 from app.decision_hourly.advice_archive import save_result
 from app.telemetry.domain import iso_time
 
@@ -82,6 +83,26 @@ def test_old_host_missing_table_is_explicit_not_fake(client,sessions):
         db.execute(text('DROP TABLE gpt_hourly_density_advice'))
     r=client.get('/api/v1/decision/evidence/density-trend').json()
     assert not r['archive_available'] and r['suggestions']==[]
+
+
+def test_settled_ash_curve_covers_only_windowed_hours(client,sessions,monkeypatch):
+    monkeypatch.setattr('app.decision_hourly.router.utc_now',lambda:HOUR+timedelta(hours=2))
+    def settled(start,item):
+        return DecisionAshSettlement(start=iso_time(start),end=iso_time(start+timedelta(hours=1)),
+            deadline=iso_time(start+timedelta(hours=2)),generated_at=iso_time(start+timedelta(hours=2)),
+            snapshot=dict(item=dict(**item)))
+    with sessions.begin() as db:
+        db.add(settled(HOUR-timedelta(hours=2),dict(value=8.1,provisional=False)))   # before the window
+        db.add(settled(HOUR-timedelta(hours=1),dict(value=8.4,provisional=True)))
+        db.add(settled(HOUR,dict(value=None,provisional=True)))                       # unsettled hour stays out
+        db.add(settled(HOUR+timedelta(hours=1),dict(value=9.2,provisional=False)))
+    data=client.get('/api/v1/decision/evidence/density-trend').json()
+    assert [(p['at'],p['value'],p['provisional']) for p in data['ash']] == [
+        (iso_time(HOUR-timedelta(hours=2)),8.1,False),(iso_time(HOUR-timedelta(hours=1)),8.4,True),
+        (iso_time(HOUR+timedelta(hours=1)),9.2,False)]  # the null-value hour stays out
+    narrow=client.get('/api/v1/decision/evidence/density-trend',params={
+        'start':iso_time(HOUR),'end':iso_time(HOUR+timedelta(hours=2))}).json()
+    assert [(p['value'],p['provisional']) for p in narrow['ash']] == [(9.2,False)]
 
 
 def test_archive_deduplicates_but_preserves_return_to_previous_value_and_null(sessions):

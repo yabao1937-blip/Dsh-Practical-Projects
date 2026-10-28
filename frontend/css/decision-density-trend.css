@@ -1,11 +1,11 @@
-#page-density-trend { min-width: 0; --trend-a304: #25897c; --trend-advice: #ce8428; --trend-difference: #579ee8; --trend-advice-missing: #e05252; }
+#page-density-trend { min-width: 0; --trend-a304: #25897c; --trend-advice: #ce8428; --trend-difference: #579ee8; --trend-advice-missing: #e05252; --trend-ash: #8a7ae0; }
 body:has(#page-density-trend.active.is-light) { --bg-primary: #f3f5fa; --bg-secondary: #fff; --bg-card: #fff; --bg-input: #fff; --text-primary: #253154; --text-secondary: #63718a; --text-muted: #63718a; --border-color: #d8dfeb; color-scheme: light; }
 body:has(#page-density-trend.active.is-light) .top-bar { background: #fff; }
 #page-density-trend .card { background: var(--bg-card, var(--bg-secondary)); border: 1px solid var(--border-color); border-radius: 8px; }
 #page-density-trend > .card + .card { margin-top: 20px; padding: 20px; }
 #page-density-trend.is-light .data-table thead th { background: #f3f5fa; }
 #page-density-trend.is-light .btn:not(.btn-primary) { background: #fff; color: #4a5b78; }
-#page-density-trend.is-light { --trend-a304: #1b8173; --trend-advice: #b36d19; --trend-advice-missing: #c23434; }
+#page-density-trend.is-light { --trend-a304: #1b8173; --trend-advice: #b36d19; --trend-advice-missing: #c23434; --trend-ash: #6f5fd0; }
 #page-density-trend .page-header { align-items: center; gap: 20px; flex-wrap: wrap; }
 #density-trend-ranges { display: flex; gap: 8px; flex-wrap: wrap; }
 #density-trend-custom-fields:not([hidden]) { display: flex; gap: 14px; align-items: end; flex-wrap: wrap; margin: 0 0 20px; color: var(--text-secondary); }
@@ -30,6 +30,7 @@ body:has(#page-density-trend.active.is-light) .top-bar { background: #fff; }
 .density-trend-plot { position: relative; height: 430px; }
 .density-trend-plot canvas { width: 100%; height: 100%; display: block; touch-action: pan-y; }
 .density-trend-plot canvas:focus-visible { outline: 2px solid var(--trend-a304); outline-offset: 4px; }
+.density-trend-ash-plot { height: 200px; }
 .density-trend-tooltip { position: absolute; z-index: 6; max-width: min(340px,90%); padding: 12px 14px; border-radius: 6px; background: #19243d; color: #f6f8ff; font-size: 13px; line-height: 1.7; white-space: pre-line; pointer-events: none; box-shadow: 0 4px 20px #0003; }
 .density-trend-note { color: var(--text-secondary); font-size: 12px; line-height: 1.8; margin: 0; }
 #density-trend-status:empty { display: none; }
