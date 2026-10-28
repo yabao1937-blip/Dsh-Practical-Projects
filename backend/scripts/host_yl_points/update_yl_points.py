@@ -134,7 +134,14 @@ def main():
         return 0
     if root is None:
         raise SystemExit('重启采集器需要 --install-dir')
-    powershell(root / 'StopOwnedCollector.ps1', '-InstallDir', str(root), cwd=root)
+    if not (root / 'offline-install.json').is_file():
+        raise SystemExit('未识别的安装目录：' + str(root))
+    # StopOwnedCollector.ps1 ships beside this script (same layout as update
+    # packages); installations do not keep a copy at their root.
+    stop_script = Path(__file__).resolve().parent / 'StopOwnedCollector.ps1'
+    if not stop_script.is_file():
+        raise SystemExit('工具包缺少 StopOwnedCollector.ps1，请重新下载完整 ZIP。')
+    powershell(stop_script, '-InstallDir', str(root), cwd=root)
     powershell(root / 'Start.ps1', '-NoBrowser', cwd=root)
     wait_collector(root / 'backend/data/dense_medium.db', data['source_id'])
     time.sleep(15)  # two poll cycles at the 5-second cadence
