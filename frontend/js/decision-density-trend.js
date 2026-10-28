@@ -18,7 +18,26 @@ const DensityTrendPage = {
         const shape = (points, key) => (points || []).map(p => ({...p, key, t: Date.parse(p.at),
             value: Number.isFinite(p.value) ? p.value : null})).filter(p => Number.isFinite(p.t));
         return {A304: shape(data.channels?.A304, 'A304'),
-            advice: shape(data.suggestions, 'advice')};
+            advice: this.adviceWithFallback(shape(data.channels?.A304, 'A304'), shape(data.suggestions, 'advice'))};
+    },
+    adviceWithFallback(A304, advice) {
+        // An hour that ran on a known setpoint but produced no advice value
+        // falls back to that hour's setpoint and renders red, instead of a blank.
+        const anchors = new Map(A304.filter(p => p.origin === 'anchor' && Number.isFinite(p.value)
+            && p.apply_start).map(p => [p.apply_start, p]));
+        if (!anchors.size) return advice;
+        const seen = new Set(advice.map(p => p.apply_start));
+        const result = advice.map(p => {
+            const anchor = p.apply_start ? anchors.get(p.apply_start) : null;
+            if (p.value !== null || !anchor) return p;
+            return {...p, value: anchor.value, missing: true,
+                basis: {...(p.basis || {}), channels: ['A304'], value: anchor.value}};
+        });
+        for (const [start, anchor] of anchors)
+            if (!seen.has(start)) result.push({at: anchor.at, t: anchor.t, value: anchor.value, key: 'advice',
+                apply_start: start, origin: 'fallback', missing: true,
+                basis: {channels: ['A304'], value: anchor.value}});
+        return result.sort((a, b) => a.t-b.t || String(a.apply_start).localeCompare(String(b.apply_start)));
     },
     connected(a, b) {
         if (!a || !b || a.key !== b.key || !Number.isFinite(a.value) || !Number.isFinite(b.value)) return false;
@@ -94,7 +113,7 @@ const DensityTrendPage = {
         ctx.fill();ctx.restore();
     },
     adviceRange() {
-        const times = (this.series?.advice || []).filter(p => Number.isFinite(p.value)).map(p => p.t);
+        const times = (this.series?.advice || []).filter(p => Number.isFinite(p.value) && !p.missing).map(p => p.t);
         if (!times.length || !this.meta) return null;
         const start = Math.max(Math.floor(Date.parse(this.meta.period.start)/60000)*60000,
             Math.floor((Math.min(...times)-30*60000)/60000)*60000);
@@ -117,6 +136,7 @@ const DensityTrendPage = {
     showPoint(previous, point) {
         if (point.value === null) return false;
         if (point.key === 'A304') return point.origin === 'change';
+        if (point.missing) return true;  // every fallback hour stays visible in red
         return this.connected(previous, point) && Math.abs(point.value - previous.value) >= .0005;
     },
     init() {
@@ -179,7 +199,7 @@ const DensityTrendPage = {
                 b.classList.toggle('btn-primary', chosen); b.setAttribute('aria-pressed', String(chosen));
             });
             document.getElementById('density-trend-custom').classList.toggle('btn-primary', !!range);
-            const advice = this.series.advice.filter(p => Number.isFinite(p.value)), latest = advice.at(-1);
+            const advice = this.series.advice.filter(p => Number.isFinite(p.value) && !p.missing), latest = advice.at(-1);
             document.getElementById('density-trend-caption').textContent =
                 `${range ? '自选时间' : hours === 168 ? '近7天' : '近30天'} · ${this.time(data.period.start, true)} — ${this.time(data.period.end, true)}`;
             document.getElementById('density-trend-focus-advice').disabled = !latest;
@@ -218,12 +238,15 @@ const DensityTrendPage = {
         const get = (v, fallback) => css.getPropertyValue(v).trim() || fallback;
         return {A304:get('--trend-a304','#25897c'),
             advice:get('--trend-advice','#ce8428'), muted:get('--text-secondary','#68758a'), grid:get('--border-color','#dce1eb'),
-            background:get('--bg-card','#fff'), difference:get('--trend-difference','#579ee8')};
+            background:get('--bg-card','#fff'), difference:get('--trend-difference','#579ee8'),
+            missingAdvice:get('--trend-advice-missing','#d94f4f')};
     },
     detail(p) {
         if (p.key !== 'advice') return `${p.key} 设定密度  ${this.num(p.value)} g/cm³\n${this.time(p.at)}\n` +
             ({anchor:'本小时基准观测',before:'调密前观测',change:'检测到设定变化'}[p.origin] || '历史观测') +
             (p.break_before ? ' · 前后观测有间隔' : '');
+        if (p.missing) return `本小时建议无法给出（缺失必要计算数据）\n红线回落为当时设定密度 ${this.num(p.value)} g/cm³\n` +
+            `适用小时 ${this.time(p.apply_start, true)}\n` + (p.reason ? `原因：${p.reason}` : '');
         return `本小时建议  ${this.num(p.value)} g/cm³\n存档于 ${this.time(p.at)}\n适用小时 ${this.time(p.apply_start, true)}\n` +
             `固定设定基准 ${this.num(p.basis?.value)} (${p.basis?.channels?.join(' / ') || '—'})\n`+
             `小时灰分 ${Number.isFinite(p.ash?.value) ? p.ash.value.toFixed(2)+'%' : '—'}${p.ash?.provisional ? '（暂估）' : ''}`;
@@ -266,10 +289,27 @@ const DensityTrendPage = {
             // Missing A304 observations may be crossed only when the enclosing
             // real endpoints meet the 1 h rule. Advice gaps stay untouched.
             const points = key === 'A304' ? observations.filter(p => p.value !== null) : observations;
-            ctx.strokeStyle=colors[key];ctx.fillStyle=colors[key];ctx.lineWidth=key==='advice'?3:2;
-            ctx.setLineDash(key==='advice'?[6,4]:[]);ctx.beginPath();
-            this.trace(ctx, points, key, x, y);
-            ctx.stroke();ctx.setLineDash([]);
+            ctx.lineWidth = key==='advice'?3:2;
+            ctx.setLineDash([]);  // both curves are solid; advice dropped its dash on 2026-10-28
+            if (key === 'A304') {
+                ctx.strokeStyle=colors[key];ctx.fillStyle=colors[key];
+                ctx.beginPath();
+                this.trace(ctx, points, key, x, y);
+                ctx.stroke();
+            } else {
+                // A segment entering or leaving a no-advice hour is the red
+                // fallback at that hour's setpoint; valid advice stays orange.
+                // Null rows without a setpoint keep their line-breaking role.
+                let link=null;
+                for (const p of points) {
+                    if (p.value!==null && link && this.connected(link,p)) {
+                        ctx.strokeStyle=(link.missing||p.missing)?colors.missingAdvice:colors.advice;
+                        ctx.beginPath();ctx.moveTo(x(link.t),y(link.value));ctx.lineTo(x(p.t),y(p.value));ctx.stroke();
+                    }
+                    link=p;
+                }
+            }
+            ctx.strokeStyle=colors[key];ctx.fillStyle=colors[key];
             let previous=null;
             for (const [index,p] of points.entries()) {
                 const marked=this.showPoint(previous,p);
@@ -277,14 +317,14 @@ const DensityTrendPage = {
                 previous=p;
                 if (p.value===null) continue;
                 const px=x(p.t),py=y(p.value);
-                if (marked) {ctx.beginPath();ctx.arc(px,py,3.5,0,2*Math.PI);ctx.fill();}
-                else if (isolated) {ctx.beginPath();ctx.moveTo(px-4,py);ctx.lineTo(px+4,py);ctx.stroke();}
+                if (marked) {ctx.fillStyle=p.missing?colors.missingAdvice:colors[key];ctx.beginPath();ctx.arc(px,py,3.5,0,2*Math.PI);ctx.fill();}
+                else if (isolated) {ctx.strokeStyle=p.missing?colors.missingAdvice:colors[key];ctx.beginPath();ctx.moveTo(px-4,py);ctx.lineTo(px+4,py);ctx.stroke();}
                 canvas._hits.push({...p,x:px,y:py,text:this.detail(p)});
             }
         }
         // A newly started archive can span less than one pixel on a 7/30-day
         // axis. Label its real endpoint, without moving or backdating records.
-        const latest = this.visible.advice && this.series.advice.filter(p => p.value !== null).at(-1);
+        const latest = this.visible.advice && this.series.advice.filter(p => p.value !== null && !p.missing).at(-1);
         if (latest) {
             const px=x(latest.t), py=y(latest.value), label=`小时建议 ${this.num(latest.value)}`;
             ctx.font='bold 13px "Microsoft YaHei", sans-serif';

@@ -1,11 +1,11 @@
-#page-density-trend { min-width: 0; --trend-a304: #25897c; --trend-advice: #ce8428; --trend-difference: #579ee8; }
+#page-density-trend { min-width: 0; --trend-a304: #25897c; --trend-advice: #ce8428; --trend-difference: #579ee8; --trend-advice-missing: #e05252; }
 body:has(#page-density-trend.active.is-light) { --bg-primary: #f3f5fa; --bg-secondary: #fff; --bg-card: #fff; --bg-input: #fff; --text-primary: #253154; --text-secondary: #63718a; --text-muted: #63718a; --border-color: #d8dfeb; color-scheme: light; }
 body:has(#page-density-trend.active.is-light) .top-bar { background: #fff; }
 #page-density-trend .card { background: var(--bg-card, var(--bg-secondary)); border: 1px solid var(--border-color); border-radius: 8px; }
 #page-density-trend > .card + .card { margin-top: 20px; padding: 20px; }
 #page-density-trend.is-light .data-table thead th { background: #f3f5fa; }
 #page-density-trend.is-light .btn:not(.btn-primary) { background: #fff; color: #4a5b78; }
-#page-density-trend.is-light { --trend-a304: #1b8173; --trend-advice: #b36d19; }
+#page-density-trend.is-light { --trend-a304: #1b8173; --trend-advice: #b36d19; --trend-advice-missing: #c23434; }
 #page-density-trend .page-header { align-items: center; gap: 20px; flex-wrap: wrap; }
 #density-trend-ranges { display: flex; gap: 8px; flex-wrap: wrap; }
 #density-trend-custom-fields:not([hidden]) { display: flex; gap: 14px; align-items: end; flex-wrap: wrap; margin: 0 0 20px; color: var(--text-secondary); }
@@ -22,10 +22,11 @@ body:has(#page-density-trend.active.is-light) .top-bar { background: #fff; }
 .density-trend-legend button[aria-pressed="false"] { opacity: .45; text-decoration: line-through; }
 .density-trend-legend i { width: 18px; border-top: 3px solid var(--trend-a304); }
 .density-trend-legend [data-density-series="A304"] i { border-color: var(--trend-a304); }
-.density-trend-legend [data-density-series="advice"] i { border-color: var(--trend-advice); border-top-style: dashed; }
+.density-trend-legend [data-density-series="advice"] i { border-color: var(--trend-advice); }
 .density-trend-legend > span { margin-left: auto; color: var(--text-secondary); font-size: 12px; }
 .density-trend-legend .density-trend-difference { display: inline-flex; align-items: center; gap: 7px; margin-left: 0; }
 .density-trend-legend .density-trend-difference i { height: 12px; border: 1px solid var(--trend-difference); background: #579ee833; border-radius: 2px; }
+.density-trend-legend .density-trend-missing i { border-color: var(--trend-advice-missing); }
 .density-trend-plot { position: relative; height: 430px; }
 .density-trend-plot canvas { width: 100%; height: 100%; display: block; touch-action: pan-y; }
 .density-trend-plot canvas:focus-visible { outline: 2px solid var(--trend-a304); outline-offset: 4px; }
