@@ -33,10 +33,13 @@ def serve(output):
     readonly_bridge = (output/'extras'/'ReadOnlyBridge.zip').resolve()
     storage_move = (output/'extras'/'MoveStorageToD.zip').resolve()
     advice_backfill = (output/'extras'/'BackfillHourlyAdvice.zip').resolve()
+    yl_points = (output/'extras'/'UpdateYlPoints.zip').resolve()
     if not storage_move.is_relative_to(output.resolve()):
         raise ValueError('Storage migration must stay inside the configured output directory')
     if not advice_backfill.is_relative_to(output.resolve()):
         raise ValueError('Advice backfill must stay inside the configured output directory')
+    if not yl_points.is_relative_to(output.resolve()):
+        raise ValueError('Press-state point update must stay inside the configured output directory')
     prefix = '/'+settings['token']
     allowed = {settings['client'], settings['bind'], '127.0.0.1'}
 
@@ -73,6 +76,13 @@ def serve(output):
                     f'不停服务、不改代码，只向 gpt_hourly_density_advice 增加带 origin 标记的行，'
                     f'已有归档不改动。完成后在密度趋势对比页按 Ctrl＋F5。</p><hr>'
                     if advice_backfill.is_file() else '')
+                points = (f'<h2>采集点位 · 压滤机 A416/A417 运行状态新地址</h2>'
+                    f'<p><a href="{prefix}/yl-points.zip">下载点位地址更新工具</a></p>'
+                    f'<p>在主机全部解压到新文件夹，双击 <b>UpdateYlPoints.cmd</b>。'
+                    f'把 A416/A417 压滤机运行状态两点改到新 OPC 地址（XMZX-YM.YM4_2），'
+                    f'自动备份配置、只重启本机采集器并验证新点位采样正常；'
+                    f'可先加 --dry-run 预览。建议在项目更新包安装完成后再运行。</p><hr>'
+                    if yl_points.is_file() else '')
                 project = (f'<h2>已有主机：本次项目更新</h2>'
                     f'<p><a href="{prefix}/project-update.zip">下载本次项目更新包（保留主机数据库）</a></p>'
                     f'<p>右键 ZIP → 全部解压，进入文件夹，双击 <b>UpdateProject.cmd</b>。成功后按 Ctrl＋F5。</p>'
@@ -89,7 +99,7 @@ def serve(output):
                     if chrome.is_file() else '')
                 content = (f'<!doctype html><meta charset="utf-8"><title>离线安装</title>'
                     f'<body style="font:22px sans-serif;padding:32px;line-height:1.7">'
-                    f'{storage}{project}{readonly}{backfill}'+(f'<h2>主机故障诊断</h2><p><a href="{prefix}/diagnostics.zip">下载一键诊断包</a>：全部解压后运行 DiagnoseProject.cmd，不停止服务、不修改数据库。</p><hr>' if diagnostics.is_file() else '')+
+                    f'{storage}{project}{readonly}{backfill}{points}'+(f'<h2>主机故障诊断</h2><p><a href="{prefix}/diagnostics.zip">下载一键诊断包</a>：全部解压后运行 DiagnoseProject.cmd，不停止服务、不修改数据库。</p><hr>' if diagnostics.is_file() else '')+
                     f'<h2>首次安装 · Windows 10 64位 · 重介密控系统</h2>'
                     f'<p><a href="{prefix}/download.zip">下载离线安装包（{bundle.stat().st_size/1048576:.0f} MB）</a></p>'
                     f'<ol><li>下载完成后，右键 ZIP → 全部解压。</li>'
@@ -117,6 +127,8 @@ def serve(output):
                 self.download(readonly_bridge, 'application/zip')
             elif path == prefix+'/advice-backfill.zip' and advice_backfill.is_file():
                 self.download(advice_backfill, 'application/zip')
+            elif path == prefix+'/yl-points.zip' and yl_points.is_file():
+                self.download(yl_points, 'application/zip')
             elif path == prefix+'/storage-move.zip' and storage_move.is_file():
                 self.download(storage_move, 'application/zip')
             else:
