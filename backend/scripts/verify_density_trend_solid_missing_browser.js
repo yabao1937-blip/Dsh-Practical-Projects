@@ -113,7 +113,7 @@ const output = path.resolve(__dirname, '../../output/playwright/density-trend-so
         assert.ok(s.dotRadii.length > 0 && s.dotRadii.every(r => r <= 2.5), 'dots must stay small');
         assert.ok(s.hits.some(p => p.missing && p.h === 1 && /缺失必要计算数据/.test(p.text) && /覆盖不足/.test(p.text)));
         assert.ok(s.hits.some(p => p.missing && p.h === 2 && /缺失必要计算数据/.test(p.text)));
-        assert.match(s.label, /1\.530/);  // the label follows the latest real advice, never a fallback
+        assert.equal(s.label, null);  // the always-on advice label is retired; hover shows values
         // The aligned ash chart renders its own hover points, provisional marked as estimates.
         assert.deepEqual(s.ashHits.map(h => h.h), [0, 1, 3]);
         assert.match(s.ashHits[0].text, /小时结算总灰分\s+8\.40\s*%/);
@@ -121,7 +121,7 @@ const output = path.resolve(__dirname, '../../output/playwright/density-trend-so
         assert.ok(!/暂估/.test(s.ashHits[1].text));
         assert.ok(s.hits.some(p => p.missing && p.h === 1 && /缺失必要计算数据/.test(p.text) && /覆盖不足/.test(p.text)));
         assert.ok(s.hits.some(p => p.missing && p.h === 2 && /缺失必要计算数据/.test(p.text)));
-        assert.match(s.label, /1\.530/);  // the label follows the latest real advice, never a fallback
+        assert.equal(s.label, null);  // the always-on advice label is retired; hover shows values
         // Fallback hours equal the setpoint: no difference shadow appears there.
         assert.equal(s.shadowAreas, 0);
         // A null advice row in an hour without any setpoint anchor stays an honest break.

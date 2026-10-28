@@ -1,513 +1,502 @@
-/* Real observations and actual archived hourly-card revisions, on a time axis. */
-const DensityTrendPage = {
-    hours: 168, range: null, inited: false, seq: 0, meta: null, page: 0,
-    visible: {A304: true, advice: true},
-    num(v) { return Number.isFinite(v) ? v.toFixed(3) : '—'; },
-    signed(v) {
-        if (!Number.isFinite(v)) return '—';
-        const rounded=Number(v.toFixed(3));
-        return (rounded>0?'+':'') + rounded.toFixed(3);
-    },
-    esc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
-    time(v, short = false) {
-        if (!v) return '—';
-        return new Date(v).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai', hourCycle:'h23',
-            ...(short ? {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'} : {})});
-    },
-    points(data) {
-        const shape = (points, key) => (points || []).map(p => ({...p, key, t: Date.parse(p.at),
-            value: Number.isFinite(p.value) ? p.value : null})).filter(p => Number.isFinite(p.t));
-        return {A304: shape(data.channels?.A304, 'A304'),
-            advice: this.adviceWithFallback(shape(data.channels?.A304, 'A304'), shape(data.suggestions, 'advice')),
-            ash: shape(data.ash, 'ash')};
-    },
-    adviceWithFallback(A304, advice) {
-        // An hour that ran on a known setpoint but produced no advice value
-        // falls back to that hour's setpoint and renders red, instead of a blank.
-        const anchors = new Map(A304.filter(p => p.origin === 'anchor' && Number.isFinite(p.value)
-            && p.apply_start).map(p => [p.apply_start, p]));
-        if (!anchors.size) return advice;
-        const seen = new Set(advice.map(p => p.apply_start));
-        const result = advice.map(p => {
-            const anchor = p.apply_start ? anchors.get(p.apply_start) : null;
-            if (p.value !== null || !anchor) return p;
-            return {...p, value: anchor.value, missing: true,
-                basis: {...(p.basis || {}), channels: ['A304'], value: anchor.value}};
-        });
-        for (const [start, anchor] of anchors)
-            if (!seen.has(start)) result.push({at: anchor.at, t: anchor.t, value: anchor.value, key: 'advice',
-                apply_start: start, origin: 'fallback', missing: true,
-                basis: {channels: ['A304'], value: anchor.value}});
-        return result.sort((a, b) => a.t-b.t || String(a.apply_start).localeCompare(String(b.apply_start)));
-    },
-    connected(a, b) {
-        if (!a || !b || a.key !== b.key || !Number.isFinite(a.value) || !Number.isFinite(b.value)) return false;
-        // Adjacent hourly anchors already form a continuous hourly series;
-        // their few-second capture jitter is not a missing-data gap. Preserve
-        // that existing cadence rule, then fill real gaps up to 1 h only.
-        if (b.key === 'A304') {
-            const elapsed = b.t-a.t;
-            const nearHour = p => Math.abs(p.t-Date.parse(p.apply_start))<=30000;
-            const adjacentAnchors = !b.break_before && a.origin==='anchor' && b.origin==='anchor' &&
-                Date.parse(b.apply_start)-Date.parse(a.apply_start)===3600000 && nearHour(a) && nearHour(b);
-            return elapsed>=0 && (adjacentAnchors || elapsed<=3600000);
-        }
-        if (b.break_before) return false;
-        if (b.key === 'advice' && JSON.stringify(a.basis?.channels) !== JSON.stringify(b.basis?.channels)) return false;
-        const hour = p => Math.floor(Date.parse(p.apply_start || p.at) / 3600000);
-        return b.t >= a.t && b.t - a.t <= 75 * 60000 && hour(b) - hour(a) <= 1;
-    },
-    trace(ctx, points, key, x, y) {
-        let previous = null;
-        for (const p of points) {
-            if (p.value !== null) {
-                if (this.connected(previous, p)) {
-                    if (key === 'A304') ctx.lineTo(x(p.t), y(previous.value));
-                    ctx.lineTo(x(p.t), y(p.value));
-                } else ctx.moveTo(x(p.t), y(p.value));
-            }
-            previous = p;
-        }
-    },
-    segments(points, key) {
-        const observations = key==='A304' ? points.filter(p => p.value!==null) : points;
-        const result = [];
-        for (let i=1;i<observations.length;i++) {
-            const a=observations[i-1], b=observations[i];
-            if (b.t>a.t && this.connected(a,b)) result.push({start:a.t,end:b.t,
-                from:a.value,to:key==='A304'?a.value:b.value});
-        }
-        return result;
-    },
-    differenceAreas() {
-        if (!this.visible.A304 || !this.visible.advice || !this.series) return [];
-        const setpoints=this.segments(this.series.A304,'A304'), advice=this.segments(this.series.advice,'advice');
-        const areas=[];
-        let i=0,j=0;
-        while (i<setpoints.length && j<advice.length) {
-            const a=setpoints[i], b=advice[j], start=Math.max(a.start,b.start), end=Math.min(a.end,b.end);
-            if (end>start) {
-                const at=t=>b.from+(b.to-b.from)*(t-b.start)/(b.end-b.start);
-                const from=at(start), to=at(end), d0=from-a.from, d1=to-a.from;
-                // Ignore storage float noise; don't invent a visible gap for equal values.
-                if (Math.max(Math.abs(d0),Math.abs(d1))>1e-6) {
-                    if (d0*d1<0) {
-                        const crossing=start+(end-start)*d0/(d0-d1);
-                        areas.push({start,end:crossing,setpoint:a.from,from,to:a.from},
-                            {start:crossing,end,setpoint:a.from,from:a.from,to});
-                    } else areas.push({start,end,setpoint:a.from,from,to});
-                }
-            }
-            if (a.end<=b.end) i++;
-            if (b.end<=a.end) j++;
-        }
-        return areas;
-    },
-    shadeDifference(ctx, areas, x, y, color) {
-        if (!areas.length) return;
-        ctx.save();ctx.fillStyle=color;ctx.globalAlpha=.2;ctx.beginPath();
-        for (const a of areas) {
-            ctx.moveTo(x(a.start),y(a.setpoint));ctx.lineTo(x(a.end),y(a.setpoint));
-            ctx.lineTo(x(a.end),y(a.to));ctx.lineTo(x(a.start),y(a.from));ctx.closePath();
-        }
-        // Fill only: polygon boundaries must never become connecting strokes.
-        ctx.fill();ctx.restore();
-    },
-    adviceRange() {
-        const times = (this.series?.advice || []).filter(p => Number.isFinite(p.value) && !p.missing).map(p => p.t);
-        if (!times.length || !this.meta) return null;
-        const start = Math.max(Math.floor(Date.parse(this.meta.period.start)/60000)*60000,
-            Math.floor((Math.min(...times)-30*60000)/60000)*60000);
-        const end = Math.min(Math.ceil(Date.parse(this.meta.period.end)/60000)*60000,
-            Math.ceil((Math.max(...times)+30*60000)/60000)*60000);
-        return {start: new Date(start).toISOString(), end: new Date(end).toISOString()};
-    },
-    focusAdvice() {
-        const range = this.adviceRange();
-        if (!range) return;
-        this.range = range;
-        for (const field of ['start', 'end']) document.getElementById('density-trend-'+field).value =
-            new Date(Date.parse(range[field])+8*3600000).toISOString().slice(0,16);
-        document.getElementById('density-trend-custom-fields').hidden = false;
-        document.getElementById('density-trend-custom').setAttribute('aria-expanded', 'true');
-        this.visible.advice = true;
-        document.querySelector('[data-density-series="advice"]').setAttribute('aria-pressed', 'true');
-        this.refresh();
-    },
-    showPoint(previous, point) {
-        if (point.value === null) return false;
-        if (point.key === 'A304') return point.origin === 'change';
-        // Fallback hours follow the same change rule: equal values stay a plain
-        // red line, a dot appears only where the level actually changes.
-        return this.connected(previous, point) && Math.abs(point.value - previous.value) >= .0005;
-    },
-    init() {
-        if (this.inited) return;
-        this.inited = true;
-        const byId = id => document.getElementById('density-trend-' + id);
-        document.getElementById('page-density-trend').classList.add('is-light');
-        byId('theme').onclick = () => {
-            const light = document.getElementById('page-density-trend').classList.toggle('is-light');
-            byId('theme').textContent = light ? '深色视图' : '浅色视图'; this.draw();
-        };
-        document.querySelectorAll('[data-t-range]').forEach(b => b.onclick = () => {
-            this.hours = Number(b.dataset.tRange); this.range = null; this.refresh();
-        });
-        byId('custom').onclick = () => {
-            const fields = byId('custom-fields'); fields.hidden = !fields.hidden;
-            byId('custom').setAttribute('aria-expanded', String(!fields.hidden));
-            if (!byId('end').value) {
-                const local = offset => new Date(Date.now() + offset + 8 * 3600000).toISOString().slice(0,16);
-                byId('start').value = local(-168 * 3600000); byId('end').value = local(0);
-            }
-        };
-        byId('query').onclick = () => {
-            const start = byId('start').value, end = byId('end').value;
-            if (!start || !end || end <= start) { this.status('请选择有效的起止时间，结束须晚于开始。'); return; }
-            this.range = {start: start + ':00+08:00', end: end + ':00+08:00'}; this.refresh();
-        };
-        byId('refresh').onclick = () => this.refresh();
-        byId('focus-advice').onclick = () => this.focusAdvice();
-        document.querySelectorAll('[data-density-series]').forEach(b => b.onclick = () => {
-            const key = b.dataset.densitySeries; this.visible[key] = !this.visible[key];
-            b.setAttribute('aria-pressed', String(this.visible[key])); this.draw();
-        });
-        byId('prev').onclick = () => { this.page--; this.renderActions(); };
-        byId('next').onclick = () => { this.page++; this.renderActions(); };
-        this.observer = new ResizeObserver(() => this.draw()); this.observer.observe(byId('plot'));
-        this.themeObserver = new MutationObserver(() => this.draw());
-        this.themeObserver.observe(document.documentElement, {attributes:true, attributeFilter:['data-theme','class']});
-        this.themeObserver.observe(document.body, {attributes:true, attributeFilter:['data-theme','class']});
-        document.addEventListener('visibilitychange', () => { if (!document.hidden && this.active()) this.refresh(); });
-        this.timer = setInterval(() => {
-            if (!document.hidden && this.active() && !this.range && !this.loading) this.refresh({keepPage:true});
-        }, 60000);
-        this.refresh();
-    },
-    active() { return document.getElementById('page-density-trend')?.classList.contains('active'); },
-    status(message) { document.getElementById('density-trend-status').textContent = message; },
-    async refresh({keepPage = false} = {}) {
-        const seq = ++this.seq, range = this.range, hours = this.hours;
-        this.loading = true;
-        this.status('正在读取所选时段…');
-        document.getElementById('density-trend-plot').setAttribute('aria-busy', 'true');
-        try {
-            const query = range ? 'start='+encodeURIComponent(range.start)+'&end='+encodeURIComponent(range.end) : 'limit='+hours;
-            const data = await Api.decisionEvidence('/density-trend?' + query);
-            if (seq !== this.seq) return;
-            this.meta = data; this.series = this.points(data); if (!keepPage) this.page = 0;
-            document.querySelectorAll('[data-t-range]').forEach(b => {
-                const chosen = !range && Number(b.dataset.tRange) === hours;
-                b.classList.toggle('btn-primary', chosen); b.setAttribute('aria-pressed', String(chosen));
-            });
-            document.getElementById('density-trend-custom').classList.toggle('btn-primary', !!range);
-            const advice = this.series.advice.filter(p => Number.isFinite(p.value) && !p.missing), latest = advice.at(-1);
-            document.getElementById('density-trend-caption').textContent =
-                `${range ? '自选时间' : hours === 168 ? '近7天' : '近30天'} · ${this.time(data.period.start, true)} — ${this.time(data.period.end, true)}`;
-            document.getElementById('density-trend-focus-advice').disabled = !latest;
-            this.status(''); this.renderActions(); this.draw();
-        } catch (error) {
-            if (seq !== this.seq) return;
-            this.meta = null; this.series = null; this.draw();
-            document.getElementById('density-trend-actions').innerHTML = '<tr><td colspan="5">该范围未能读取，请重试。</td></tr>';
-            document.getElementById('density-trend-caption').textContent = '所选时段读取失败';
-            document.getElementById('density-trend-focus-advice').disabled = true;
-            this.status(error.message || '读取失败，请稍后刷新。');
-        } finally {
-            if (seq === this.seq) {
-                this.loading = false;
-                document.getElementById('density-trend-plot').setAttribute('aria-busy', 'false');
-            }
-        }
-    },
-    renderActions() {
-        const actions = [...(this.meta?.actions || [])].reverse(), pages = Math.max(1, Math.ceil(actions.length/20));
-        this.page = Math.max(0, Math.min(pages-1, this.page));
-        document.getElementById('density-trend-actions').innerHTML = actions.length ? actions.slice(this.page*20, this.page*20+20).map(a => {
-            const advice=a.hourly_advice, value=advice?.value;
-            const tip=Number.isFinite(value) ? `调后观测 ${this.time(a.comparison_at)} · 建议存档于 ${this.time(advice.generated_at)} · 适用小时 ${this.time(advice.apply_start,true)}` :
-                '调后观测时刻没有对应小时的有效建议存档';
-            return `<tr><td>${this.esc(this.time(a.at))}${a.continuous ? '' : '<small>前后观测有间隔</small>'}</td><td>${this.esc(a.channel)}</td>`+
-                `<td>${this.num(a.before)} <span class="density-trend-arrow">→</span> <strong>${this.num(a.after)}</strong></td>`+
-                `<td title="${this.esc(tip)}">${this.num(value)}</td><td>${this.signed(a.difference)}</td></tr>`;
-        }).join('') : '<tr><td colspan="5">所选时段没有已记录的设定变化。</td></tr>';
-        document.getElementById('density-trend-page-info').textContent = `共 ${actions.length} 条 · ${this.page+1} / ${pages}`;
-        document.getElementById('density-trend-prev').disabled = this.page === 0;
-        document.getElementById('density-trend-next').disabled = this.page === pages-1;
-    },
-    palette() {
-        const css = getComputedStyle(document.getElementById('page-density-trend'));
-        const get = (v, fallback) => css.getPropertyValue(v).trim() || fallback;
-        return {A304:get('--trend-a304','#25897c'),
-            advice:get('--trend-advice','#ce8428'), muted:get('--text-secondary','#68758a'), grid:get('--border-color','#dce1eb'),
-            background:get('--bg-card','#fff'), difference:get('--trend-difference','#579ee8'),
-            missingAdvice:get('--trend-advice-missing','#d94f4f'), ash:get('--trend-ash','#8a7ae0')};
-    },
-    detail(p) {
-        if (p.key !== 'advice') return `${p.key} 设定密度  ${this.num(p.value)} g/cm³\n${this.time(p.at)}\n` +
-            ({anchor:'本小时基准观测',before:'调密前观测',change:'检测到设定变化'}[p.origin] || '历史观测') +
-            (p.break_before ? ' · 前后观测有间隔' : '');
-        if (p.missing) return `本小时建议无法给出（缺失必要计算数据）\n红线回落为当时设定密度 ${this.num(p.value)} g/cm³\n` +
-            `适用小时 ${this.time(p.apply_start, true)}\n` + (p.reason ? `原因：${p.reason}` : '');
-        return `本小时建议  ${this.num(p.value)} g/cm³\n存档于 ${this.time(p.at)}\n适用小时 ${this.time(p.apply_start, true)}\n` +
-            `固定设定基准 ${this.num(p.basis?.value)} (${p.basis?.channels?.join(' / ') || '—'})\n`+
-            `小时灰分 ${Number.isFinite(p.ash?.value) ? p.ash.value.toFixed(2)+'%' : '—'}${p.ash?.provisional ? '（暂估）' : ''}`;
-    },
-    ashDetail(p) {
-        return `小时结算总灰分  ${Number.isFinite(p.value) ? p.value.toFixed(2) : '—'} %\n${this.time(p.at)}` +
-            (p.provisional ? '\n暂估：对应重介化验待补录' : '');
-    },
-    crosshair: null,
-    crosshairAt(hit) {
-        this.crosshair = hit ? {t: hit.t, x: hit.x} : null;
-        this.drawCrosshair();
-    },
-    hideCrosshair() { this.crosshair = null; this.drawCrosshair(); },
-    stepValueAt(points, t, hold) {
-        // Latest observation at/before t (anchors carry a few seconds of jitter),
-        // valid while inside the bounded hold window.
-        let current = null;
-        for (const p of points) {
-            if (p.value === null) continue;
-            if (p.t <= t + 45000) current = p; else break;
-        }
-        return current && t - current.t <= hold ? current : null;
-    },
-    nearestValueAt(points, t, window) {
-        let best = null;
-        for (const p of points) {
-            if (p.value === null) continue;
-            const d = Math.abs(p.t - t);
-            if (d <= window && (!best || d < Math.abs(best.t - t))) best = p;
-        }
-        return best;
-    },
-    chip(ctx, x, y, lines, colors, w, h) {
-        ctx.font = 'bold 12px "Microsoft YaHei", sans-serif';
-        const text = lines.map((l, i) => ({l, c: colors[i]}));
-        const width = Math.max(...text.map(t => ctx.measureText(t.l).width)) + 16;
-        const height = lines.length * 17 + 8;
-        const left = x + width > w - 30 ? x - width - 10 : x + 10;
-        const top = Math.max(4, Math.min(y, h - height - 4));
-        ctx.fillStyle = this.palette().background;
-        ctx.strokeStyle = this.palette().muted; ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.roundRect ? ctx.roundRect(left, top, width, height, 3) : ctx.rect(left, top, width, height);
-        ctx.fill(); ctx.stroke();
-        ctx.textAlign = 'left';
-        text.forEach((t, i) => { ctx.fillStyle = t.c; ctx.fillText(t.l, left + 8, top + 17 + i * 17); });
-    },
-    drawCrosshair() {
-        const stack = document.querySelector('.density-trend-stack'), overlay = document.getElementById('density-trend-crosshair');
-        if (!stack || !overlay) return;
-        const w = stack.clientWidth, h = stack.clientHeight;
-        const ratio = Math.min(devicePixelRatio || 1, 2);
-        overlay.width = Math.max(1, w*ratio); overlay.height = Math.max(1, h*ratio);
-        const ctx = overlay.getContext('2d');
-        ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, w, h);
-        const state = this.crosshair;
-        if (!state || !this.series || !this.meta) return;
-        const colors = this.palette();
-        const ashH = document.getElementById('density-trend-ash-plot').clientHeight;
-        // One dashed vertical guide through both panes at the snapped instant.
-        ctx.strokeStyle = colors.muted; ctx.setLineDash([5, 4]); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(state.x, 2); ctx.lineTo(state.x, h - 30); ctx.stroke();
-        ctx.setLineDash([]);
-        // Values at that instant: settled ash above, setpoint and advice below.
-        const ash = this.nearestValueAt(this.series.ash || [], state.t, 45*60000);
-        const setpoint = this.stepValueAt(this.series.A304 || [], state.t, 75*60000);
-        const advice = this.nearestValueAt(this.series.advice || [], state.t, 75*60000);
-        this.chip(ctx, state.x, 8, [ash ? `总灰分 ${ash.value.toFixed(2)}%${ash.provisional ? '（暂估）' : ''}` : '总灰分 —'],
-            [colors.ash], w, ashH);
-        const adviceText = !advice ? '小时建议 —' : advice.missing
-            ? `小时建议 无（回落 ${this.num(advice.value)}）` : `小时建议 ${this.num(advice.value)}`;
-        const adviceColor = !advice ? colors.muted : advice.missing ? colors.missingAdvice : colors.advice;
-        this.chip(ctx, state.x, ashH + 8,
-            [setpoint ? `设定密度 ${this.num(setpoint.value)}` : '设定密度 —', adviceText],
-            [setpoint ? colors.A304 : colors.muted, adviceColor], w, h - ashH);
-        this.chip(ctx, state.x, h - 56, [this.time(state.t, true)], [colors.muted], w, h);
-    },
-    drawAsh() {
-        // Aligned companion chart: settled hourly total ash on the same time axis.
-        const canvas = document.getElementById('density-trend-ash-canvas'), plot = document.getElementById('density-trend-ash-plot');
-        if (!canvas || !plot) return;
-        const w = plot.clientWidth, h = plot.clientHeight;
-        const ratio = Math.min(devicePixelRatio || 1, 2);
-        canvas.width = Math.max(1, w*ratio); canvas.height = Math.max(1, h*ratio);
-        const ctx = canvas.getContext('2d'); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h);
-        const tip = plot.querySelector('.density-trend-tooltip'); tip.hidden = true; canvas._hits = []; canvas._index = 0;
-        const colors = this.palette(), points = (this.series?.ash || []).filter(p => p.value !== null);
-        ctx.font = '13px "Microsoft YaHei", sans-serif';
-        if (w < 100) return;
-        if (!points.length || !this.meta) {
-            ctx.fillStyle = colors.muted; ctx.textAlign = 'center';
-            ctx.fillText(points.length ? '等待读取趋势数据' : '该时段暂无结算总灰分', w/2, h/2);
-            return;
-        }
-        const left = 78, right = 44, top = 12, bottom = 4, width = w-left-right, height = h-top-bottom;
-        const lo = Math.min(...points.map(p => p.value)), hi = Math.max(...points.map(p => p.value));
-        const pad = Math.max(.05, (hi-lo)*.15), min = lo-pad, max = hi+pad;
-        const start = Date.parse(this.meta.period.start), end = Date.parse(this.meta.period.end);
-        const x = t => left + (t-start)/(end-start)*width, y = v => top+(max-v)/(max-min)*height;
-        ctx.textAlign = 'right'; ctx.lineWidth = 1;
-        for (let i=0;i<=4;i++) {
-            const v=min+(max-min)*i/4, py=y(v);
-            ctx.strokeStyle=colors.grid; ctx.setLineDash([3,5]);
-            ctx.beginPath();ctx.moveTo(left,py);ctx.lineTo(w-right,py);ctx.stroke();
-            ctx.fillStyle=colors.muted;ctx.fillText(v.toFixed(2),left-10,py+4);
-        }
-        ctx.setLineDash([]);
-        // The pane directly above the density chart shares its time axis; the
-        // time labels are drawn once, under the lower chart only.
-        ctx.strokeStyle=colors.ash; ctx.fillStyle=colors.ash; ctx.lineWidth=2;
-        let link=null;
-        for (const p of points) {
-            if (link && p.t-link.t <= 75*60000) {
-                ctx.beginPath();ctx.moveTo(x(link.t),y(link.value));ctx.lineTo(x(p.t),y(p.value));ctx.stroke();
-            }
-            link=p;
-        }
-        for (const p of points) {
-            const px=x(p.t),py=y(p.value);
-            ctx.beginPath();ctx.arc(px,py,2.2,0,2*Math.PI);
-            if (p.provisional) ctx.stroke();  // provisional hours stay hollow
-            else ctx.fill();
-            canvas._hits.push({...p,x:px,y:py,text:this.ashDetail(p)});
-        }
-        canvas._hits.sort((a,b)=>a.t-b.t);
-        const show = hit => {
-            tip.textContent=hit.text;tip.hidden=false;
-            tip.style.left=Math.max(4,Math.min(hit.x+14,w-tip.offsetWidth-4))+'px';
-            tip.style.top=Math.max(4,Math.min(hit.y+12,h-tip.offsetHeight-4))+'px';
-        };
-        const point = event => {
-            const r=canvas.getBoundingClientRect(),px=event.clientX-r.left,py=event.clientY-r.top;
-            let best=null,distance=Infinity;
-            for(const hit of canvas._hits) {const d=Math.hypot(hit.x-px,hit.y-py);if(d<distance){best=hit;distance=d;}}
-            if(best&&distance<32){show(best);this.crosshairAt(best);}else{tip.hidden=true;this.hideCrosshair();}
-        };
-        canvas.onmousemove=point;canvas.onclick=point;
-        canvas.onmouseleave=()=>{tip.hidden=true;this.hideCrosshair();};
-        canvas.onkeydown=event=>{
-            const hits=canvas._hits;
-            if(!['Home','End','ArrowLeft','ArrowRight','Escape'].includes(event.key)||!hits.length)return;
-            event.preventDefault();if(event.key==='Escape'){tip.hidden=true;this.hideCrosshair();return;}
-            canvas._index=event.key==='Home'?0:event.key==='End'?hits.length-1:
-                Math.max(0,Math.min(hits.length-1,(canvas._index??-1)+(event.key==='ArrowRight'?1:-1)));
-            show(hits[canvas._index]);this.crosshairAt(hits[canvas._index]);
-        };
-        this.drawCrosshair();
-    },
-    draw() {
-        this.drawAsh();
-        const canvas = document.getElementById('density-trend-canvas'), plot = document.getElementById('density-trend-plot');
-        if (!canvas || !plot) return;
-        const w = plot.clientWidth, h = plot.clientHeight;
-        if (w < 100) return;
-        const ratio = Math.min(devicePixelRatio || 1, 2);
-        canvas.width = w*ratio; canvas.height = h*ratio;
-        const ctx = canvas.getContext('2d'); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h);
-        const tip = plot.querySelector('.density-trend-tooltip'); tip.hidden = true; canvas._hits = []; canvas._adviceLabel = null;
-        const colors = this.palette();
-        const groups = Object.entries(this.series || {}).filter(([key]) => this.visible[key]);
-        const values = groups.flatMap(([, points]) => points.map(p => p.value)).filter(Number.isFinite);
-        ctx.font = '13px "Microsoft YaHei", sans-serif'; ctx.fillStyle = colors.muted;
-        if (!values.length || !this.meta) {
-            ctx.textAlign = 'center'; ctx.fillText(this.meta ? '所选曲线暂无有效历史记录' : '等待读取趋势数据', w/2, h/2); return;
-        }
-        const left = 78, right = 44, top = 22, bottom = 52, width = w-left-right, height = h-top-bottom;
-        const lo = Math.min(...values), hi = Math.max(...values), pad = Math.max(.004,(hi-lo)*.18);
-        const min = lo-pad, max = hi+pad, start = Date.parse(this.meta.period.start), end = Date.parse(this.meta.period.end);
-        const x = t => left + (t-start)/(end-start)*width, y = v => top+(max-v)/(max-min)*height;
-        ctx.textAlign = 'right'; ctx.lineWidth = 1;
-        for (let i=0;i<=5;i++) {
-            const v=min+(max-min)*i/5, py=y(v); ctx.strokeStyle=colors.grid; ctx.setLineDash([3,5]);
-            ctx.beginPath();ctx.moveTo(left,py);ctx.lineTo(w-right,py);ctx.stroke();
-            ctx.fillStyle=colors.muted;ctx.fillText(v.toFixed(3),left-10,py+4);
-        }
-        ctx.setLineDash([]);
-        const ticks = Math.max(2,Math.floor(width/155));
-        for (let i=0;i<=ticks;i++) {
-            const t=start+(end-start)*i/ticks;
-            ctx.textAlign=i===0?'left':i===ticks?'right':'center';
-            ctx.fillText(this.time(t,true),x(t),h-20);
-        }
-        this.shadeDifference(ctx,this.differenceAreas(),x,y,colors.difference);
-        for (const [key, observations] of groups) {
-            // Missing A304 observations may be crossed only when the enclosing
-            // real endpoints meet the 1 h rule. Advice gaps stay untouched.
-            const points = key === 'A304' ? observations.filter(p => p.value !== null) : observations;
-            ctx.lineWidth = key==='advice'?3:2;
-            ctx.setLineDash([]);  // both curves are solid; advice dropped its dash on 2026-10-28
-            if (key === 'A304') {
-                ctx.strokeStyle=colors[key];ctx.fillStyle=colors[key];
-                ctx.beginPath();
-                this.trace(ctx, points, key, x, y);
-                ctx.stroke();
-            } else {
-                // A segment entering or leaving a no-advice hour is the red
-                // fallback at that hour's setpoint; valid advice stays orange.
-                // Null rows without a setpoint keep their line-breaking role.
-                let link=null;
-                for (const p of points) {
-                    if (p.value!==null && link && this.connected(link,p)) {
-                        ctx.strokeStyle=(link.missing||p.missing)?colors.missingAdvice:colors.advice;
-                        ctx.beginPath();ctx.moveTo(x(link.t),y(link.value));ctx.lineTo(x(p.t),y(p.value));ctx.stroke();
-                    }
-                    link=p;
-                }
-            }
-            ctx.strokeStyle=colors[key];ctx.fillStyle=colors[key];
-            let previous=null;
-            for (const [index,p] of points.entries()) {
-                const marked=this.showPoint(previous,p);
-                const isolated=!this.connected(previous,p) && !(points[index+1] && this.connected(p,points[index+1]));
-                previous=p;
-                if (p.value===null) continue;
-                const px=x(p.t),py=y(p.value);
-                if (marked) {ctx.fillStyle=p.missing?colors.missingAdvice:colors[key];ctx.beginPath();ctx.arc(px,py,2.4,0,2*Math.PI);ctx.fill();}
-                else if (isolated) {ctx.strokeStyle=p.missing?colors.missingAdvice:colors[key];ctx.beginPath();ctx.moveTo(px-3,py);ctx.lineTo(px+3,py);ctx.stroke();}
-                canvas._hits.push({...p,x:px,y:py,text:this.detail(p)});
-            }
-        }
-        // A newly started archive can span less than one pixel on a 7/30-day
-        // axis. Label its real endpoint, without moving or backdating records.
-        const latest = this.visible.advice && this.series.advice.filter(p => p.value !== null && !p.missing).at(-1);
-        if (latest) {
-            const px=x(latest.t), py=y(latest.value), label=`小时建议 ${this.num(latest.value)}`;
-            ctx.font='bold 13px "Microsoft YaHei", sans-serif';
-            const lw=ctx.measureText(label).width+20, lh=28;
-            const lx=Math.max(left,Math.min(px-lw/2,w-right-lw));
-            const ly=py-top>=44?py-44:py+16;
-            ctx.strokeStyle=colors.advice;ctx.lineWidth=1;ctx.setLineDash([]);
-            ctx.fillStyle=colors.background;ctx.fillRect(lx,ly,lw,lh);ctx.strokeRect(lx,ly,lw,lh);
-            ctx.fillStyle=colors.advice;ctx.textAlign='left';ctx.fillText(label,lx+10,ly+19);
-            canvas._adviceLabel={...latest,x:px,y:py,text:this.detail(latest),left:lx,top:ly,width:lw,height:lh};
-        }
-        canvas._hits.sort((a,b)=>a.t-b.t || a.key.localeCompare(b.key));
-        const show = hit => {
-            tip.textContent=hit.text;tip.hidden=false;
-            tip.style.left=Math.max(4,Math.min(hit.x+14,w-tip.offsetWidth-4))+'px';
-            tip.style.top=Math.max(4,Math.min(hit.y+12,h-tip.offsetHeight-4))+'px';
-        };
-        const point = event => {
-            const r=canvas.getBoundingClientRect(),px=event.clientX-r.left,py=event.clientY-r.top;
-            const label=canvas._adviceLabel;
-            if(label && px>=label.left && px<=label.left+label.width && py>=label.top && py<=label.top+label.height){show(label);return;}
-            let best=null,distance=Infinity;
-            for(const hit of canvas._hits) {const d=Math.hypot(hit.x-px,hit.y-py);if(d<distance){best=hit;distance=d;}}
-            if(best&&distance<32){show(best);this.crosshairAt(best);}else{tip.hidden=true;this.hideCrosshair();}
-        };
-        canvas.onmousemove=point;canvas.onclick=point;
-        canvas.onmouseleave=()=>{tip.hidden=true;this.hideCrosshair();};
-        canvas.onkeydown=event=>{
-            const hits=canvas._hits;
-            if(!['Home','End','ArrowLeft','ArrowRight','Escape'].includes(event.key)||!hits.length)return;
-            event.preventDefault();if(event.key==='Escape'){tip.hidden=true;this.hideCrosshair();return;}
-            canvas._index=event.key==='Home'?0:event.key==='End'?hits.length-1:
-                Math.max(0,Math.min(hits.length-1,(canvas._index??-1)+(event.key==='ArrowRight'?1:-1)));
-            show(hits[canvas._index]);this.crosshairAt(hits[canvas._index]);
-        };
-        this.drawCrosshair();
-    },
-};
+/* Real observations and actual archived hourly-card revisions, on a time axis. */
+const DensityTrendPage = {
+    hours: 168, range: null, inited: false, seq: 0, meta: null, page: 0,
+    visible: {A304: true, advice: true},
+    num(v) { return Number.isFinite(v) ? v.toFixed(3) : '—'; },
+    signed(v) {
+        if (!Number.isFinite(v)) return '—';
+        const rounded=Number(v.toFixed(3));
+        return (rounded>0?'+':'') + rounded.toFixed(3);
+    },
+    esc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); },
+    time(v, short = false) {
+        if (!v) return '—';
+        return new Date(v).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai', hourCycle:'h23',
+            ...(short ? {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'} : {})});
+    },
+    points(data) {
+        const shape = (points, key) => (points || []).map(p => ({...p, key, t: Date.parse(p.at),
+            value: Number.isFinite(p.value) ? p.value : null})).filter(p => Number.isFinite(p.t));
+        return {A304: shape(data.channels?.A304, 'A304'),
+            advice: this.adviceWithFallback(shape(data.channels?.A304, 'A304'), shape(data.suggestions, 'advice')),
+            ash: shape(data.ash, 'ash')};
+    },
+    adviceWithFallback(A304, advice) {
+        // An hour that ran on a known setpoint but produced no advice value
+        // falls back to that hour's setpoint and renders red, instead of a blank.
+        const anchors = new Map(A304.filter(p => p.origin === 'anchor' && Number.isFinite(p.value)
+            && p.apply_start).map(p => [p.apply_start, p]));
+        if (!anchors.size) return advice;
+        const seen = new Set(advice.map(p => p.apply_start));
+        const result = advice.map(p => {
+            const anchor = p.apply_start ? anchors.get(p.apply_start) : null;
+            if (p.value !== null || !anchor) return p;
+            return {...p, value: anchor.value, missing: true,
+                basis: {...(p.basis || {}), channels: ['A304'], value: anchor.value}};
+        });
+        for (const [start, anchor] of anchors)
+            if (!seen.has(start)) result.push({at: anchor.at, t: anchor.t, value: anchor.value, key: 'advice',
+                apply_start: start, origin: 'fallback', missing: true,
+                basis: {channels: ['A304'], value: anchor.value}});
+        return result.sort((a, b) => a.t-b.t || String(a.apply_start).localeCompare(String(b.apply_start)));
+    },
+    connected(a, b) {
+        if (!a || !b || a.key !== b.key || !Number.isFinite(a.value) || !Number.isFinite(b.value)) return false;
+        // Adjacent hourly anchors already form a continuous hourly series;
+        // their few-second capture jitter is not a missing-data gap. Preserve
+        // that existing cadence rule, then fill real gaps up to 1 h only.
+        if (b.key === 'A304') {
+            const elapsed = b.t-a.t;
+            const nearHour = p => Math.abs(p.t-Date.parse(p.apply_start))<=30000;
+            const adjacentAnchors = !b.break_before && a.origin==='anchor' && b.origin==='anchor' &&
+                Date.parse(b.apply_start)-Date.parse(a.apply_start)===3600000 && nearHour(a) && nearHour(b);
+            return elapsed>=0 && (adjacentAnchors || elapsed<=3600000);
+        }
+        if (b.break_before) return false;
+        if (b.key === 'advice' && JSON.stringify(a.basis?.channels) !== JSON.stringify(b.basis?.channels)) return false;
+        const hour = p => Math.floor(Date.parse(p.apply_start || p.at) / 3600000);
+        return b.t >= a.t && b.t - a.t <= 75 * 60000 && hour(b) - hour(a) <= 1;
+    },
+    trace(ctx, points, key, x, y) {
+        let previous = null;
+        for (const p of points) {
+            if (p.value !== null) {
+                if (this.connected(previous, p)) {
+                    if (key === 'A304') ctx.lineTo(x(p.t), y(previous.value));
+                    ctx.lineTo(x(p.t), y(p.value));
+                } else ctx.moveTo(x(p.t), y(p.value));
+            }
+            previous = p;
+        }
+    },
+    segments(points, key) {
+        const observations = key==='A304' ? points.filter(p => p.value!==null) : points;
+        const result = [];
+        for (let i=1;i<observations.length;i++) {
+            const a=observations[i-1], b=observations[i];
+            if (b.t>a.t && this.connected(a,b)) result.push({start:a.t,end:b.t,
+                from:a.value,to:key==='A304'?a.value:b.value});
+        }
+        return result;
+    },
+    differenceAreas() {
+        if (!this.visible.A304 || !this.visible.advice || !this.series) return [];
+        const setpoints=this.segments(this.series.A304,'A304'), advice=this.segments(this.series.advice,'advice');
+        const areas=[];
+        let i=0,j=0;
+        while (i<setpoints.length && j<advice.length) {
+            const a=setpoints[i], b=advice[j], start=Math.max(a.start,b.start), end=Math.min(a.end,b.end);
+            if (end>start) {
+                const at=t=>b.from+(b.to-b.from)*(t-b.start)/(b.end-b.start);
+                const from=at(start), to=at(end), d0=from-a.from, d1=to-a.from;
+                // Ignore storage float noise; don't invent a visible gap for equal values.
+                if (Math.max(Math.abs(d0),Math.abs(d1))>1e-6) {
+                    if (d0*d1<0) {
+                        const crossing=start+(end-start)*d0/(d0-d1);
+                        areas.push({start,end:crossing,setpoint:a.from,from,to:a.from},
+                            {start:crossing,end,setpoint:a.from,from:a.from,to});
+                    } else areas.push({start,end,setpoint:a.from,from,to});
+                }
+            }
+            if (a.end<=b.end) i++;
+            if (b.end<=a.end) j++;
+        }
+        return areas;
+    },
+    shadeDifference(ctx, areas, x, y, color) {
+        if (!areas.length) return;
+        ctx.save();ctx.fillStyle=color;ctx.globalAlpha=.2;ctx.beginPath();
+        for (const a of areas) {
+            ctx.moveTo(x(a.start),y(a.setpoint));ctx.lineTo(x(a.end),y(a.setpoint));
+            ctx.lineTo(x(a.end),y(a.to));ctx.lineTo(x(a.start),y(a.from));ctx.closePath();
+        }
+        // Fill only: polygon boundaries must never become connecting strokes.
+        ctx.fill();ctx.restore();
+    },
+    adviceRange() {
+        const times = (this.series?.advice || []).filter(p => Number.isFinite(p.value) && !p.missing).map(p => p.t);
+        if (!times.length || !this.meta) return null;
+        const start = Math.max(Math.floor(Date.parse(this.meta.period.start)/60000)*60000,
+            Math.floor((Math.min(...times)-30*60000)/60000)*60000);
+        const end = Math.min(Math.ceil(Date.parse(this.meta.period.end)/60000)*60000,
+            Math.ceil((Math.max(...times)+30*60000)/60000)*60000);
+        return {start: new Date(start).toISOString(), end: new Date(end).toISOString()};
+    },
+    focusAdvice() {
+        const range = this.adviceRange();
+        if (!range) return;
+        this.range = range;
+        for (const field of ['start', 'end']) document.getElementById('density-trend-'+field).value =
+            new Date(Date.parse(range[field])+8*3600000).toISOString().slice(0,16);
+        document.getElementById('density-trend-custom-fields').hidden = false;
+        document.getElementById('density-trend-custom').setAttribute('aria-expanded', 'true');
+        this.visible.advice = true;
+        document.querySelector('[data-density-series="advice"]').setAttribute('aria-pressed', 'true');
+        this.refresh();
+    },
+    showPoint(previous, point) {
+        if (point.value === null) return false;
+        if (point.key === 'A304') return point.origin === 'change';
+        // Fallback hours follow the same change rule: equal values stay a plain
+        // red line, a dot appears only where the level actually changes.
+        return this.connected(previous, point) && Math.abs(point.value - previous.value) >= .0005;
+    },
+    init() {
+        if (this.inited) return;
+        this.inited = true;
+        const byId = id => document.getElementById('density-trend-' + id);
+        document.getElementById('page-density-trend').classList.add('is-light');
+        byId('theme').onclick = () => {
+            const light = document.getElementById('page-density-trend').classList.toggle('is-light');
+            byId('theme').textContent = light ? '深色视图' : '浅色视图'; this.draw();
+        };
+        document.querySelectorAll('[data-t-range]').forEach(b => b.onclick = () => {
+            this.hours = Number(b.dataset.tRange); this.range = null; this.refresh();
+        });
+        byId('custom').onclick = () => {
+            const fields = byId('custom-fields'); fields.hidden = !fields.hidden;
+            byId('custom').setAttribute('aria-expanded', String(!fields.hidden));
+            if (!byId('end').value) {
+                const local = offset => new Date(Date.now() + offset + 8 * 3600000).toISOString().slice(0,16);
+                byId('start').value = local(-168 * 3600000); byId('end').value = local(0);
+            }
+        };
+        byId('query').onclick = () => {
+            const start = byId('start').value, end = byId('end').value;
+            if (!start || !end || end <= start) { this.status('请选择有效的起止时间，结束须晚于开始。'); return; }
+            this.range = {start: start + ':00+08:00', end: end + ':00+08:00'}; this.refresh();
+        };
+        byId('refresh').onclick = () => this.refresh();
+        byId('focus-advice').onclick = () => this.focusAdvice();
+        document.querySelectorAll('[data-density-series]').forEach(b => b.onclick = () => {
+            const key = b.dataset.densitySeries; this.visible[key] = !this.visible[key];
+            b.setAttribute('aria-pressed', String(this.visible[key])); this.draw();
+        });
+        byId('prev').onclick = () => { this.page--; this.renderActions(); };
+        byId('next').onclick = () => { this.page++; this.renderActions(); };
+        this.observer = new ResizeObserver(() => this.draw()); this.observer.observe(byId('plot'));
+        this.themeObserver = new MutationObserver(() => this.draw());
+        this.themeObserver.observe(document.documentElement, {attributes:true, attributeFilter:['data-theme','class']});
+        this.themeObserver.observe(document.body, {attributes:true, attributeFilter:['data-theme','class']});
+        document.addEventListener('visibilitychange', () => { if (!document.hidden && this.active()) this.refresh(); });
+        this.timer = setInterval(() => {
+            if (!document.hidden && this.active() && !this.range && !this.loading) this.refresh({keepPage:true});
+        }, 60000);
+        this.refresh();
+    },
+    active() { return document.getElementById('page-density-trend')?.classList.contains('active'); },
+    status(message) { document.getElementById('density-trend-status').textContent = message; },
+    async refresh({keepPage = false} = {}) {
+        const seq = ++this.seq, range = this.range, hours = this.hours;
+        this.loading = true;
+        this.status('正在读取所选时段…');
+        document.getElementById('density-trend-plot').setAttribute('aria-busy', 'true');
+        try {
+            const query = range ? 'start='+encodeURIComponent(range.start)+'&end='+encodeURIComponent(range.end) : 'limit='+hours;
+            const data = await Api.decisionEvidence('/density-trend?' + query);
+            if (seq !== this.seq) return;
+            this.meta = data; this.series = this.points(data); if (!keepPage) this.page = 0;
+            document.querySelectorAll('[data-t-range]').forEach(b => {
+                const chosen = !range && Number(b.dataset.tRange) === hours;
+                b.classList.toggle('btn-primary', chosen); b.setAttribute('aria-pressed', String(chosen));
+            });
+            document.getElementById('density-trend-custom').classList.toggle('btn-primary', !!range);
+            const advice = this.series.advice.filter(p => Number.isFinite(p.value) && !p.missing), latest = advice.at(-1);
+            document.getElementById('density-trend-caption').textContent =
+                `${range ? '自选时间' : hours === 168 ? '近7天' : '近30天'} · ${this.time(data.period.start, true)} — ${this.time(data.period.end, true)}`;
+            document.getElementById('density-trend-focus-advice').disabled = !latest;
+            this.status(''); this.renderActions(); this.draw();
+        } catch (error) {
+            if (seq !== this.seq) return;
+            this.meta = null; this.series = null; this.draw();
+            document.getElementById('density-trend-actions').innerHTML = '<tr><td colspan="5">该范围未能读取，请重试。</td></tr>';
+            document.getElementById('density-trend-caption').textContent = '所选时段读取失败';
+            document.getElementById('density-trend-focus-advice').disabled = true;
+            this.status(error.message || '读取失败，请稍后刷新。');
+        } finally {
+            if (seq === this.seq) {
+                this.loading = false;
+                document.getElementById('density-trend-plot').setAttribute('aria-busy', 'false');
+            }
+        }
+    },
+    renderActions() {
+        const actions = [...(this.meta?.actions || [])].reverse(), pages = Math.max(1, Math.ceil(actions.length/20));
+        this.page = Math.max(0, Math.min(pages-1, this.page));
+        document.getElementById('density-trend-actions').innerHTML = actions.length ? actions.slice(this.page*20, this.page*20+20).map(a => {
+            const advice=a.hourly_advice, value=advice?.value;
+            const tip=Number.isFinite(value) ? `调后观测 ${this.time(a.comparison_at)} · 建议存档于 ${this.time(advice.generated_at)} · 适用小时 ${this.time(advice.apply_start,true)}` :
+                '调后观测时刻没有对应小时的有效建议存档';
+            return `<tr><td>${this.esc(this.time(a.at))}${a.continuous ? '' : '<small>前后观测有间隔</small>'}</td><td>${this.esc(a.channel)}</td>`+
+                `<td>${this.num(a.before)} <span class="density-trend-arrow">→</span> <strong>${this.num(a.after)}</strong></td>`+
+                `<td title="${this.esc(tip)}">${this.num(value)}</td><td>${this.signed(a.difference)}</td></tr>`;
+        }).join('') : '<tr><td colspan="5">所选时段没有已记录的设定变化。</td></tr>';
+        document.getElementById('density-trend-page-info').textContent = `共 ${actions.length} 条 · ${this.page+1} / ${pages}`;
+        document.getElementById('density-trend-prev').disabled = this.page === 0;
+        document.getElementById('density-trend-next').disabled = this.page === pages-1;
+    },
+    palette() {
+        const css = getComputedStyle(document.getElementById('page-density-trend'));
+        const get = (v, fallback) => css.getPropertyValue(v).trim() || fallback;
+        return {A304:get('--trend-a304','#25897c'),
+            advice:get('--trend-advice','#ce8428'), muted:get('--text-secondary','#68758a'), grid:get('--border-color','#dce1eb'),
+            background:get('--bg-card','#fff'), difference:get('--trend-difference','#579ee8'),
+            missingAdvice:get('--trend-advice-missing','#d94f4f'), ash:get('--trend-ash','#8a7ae0')};
+    },
+    detail(p) {
+        if (p.key !== 'advice') return `${p.key} 设定密度  ${this.num(p.value)} g/cm³\n${this.time(p.at)}\n` +
+            ({anchor:'本小时基准观测',before:'调密前观测',change:'检测到设定变化'}[p.origin] || '历史观测') +
+            (p.break_before ? ' · 前后观测有间隔' : '');
+        if (p.missing) return `本小时建议无法给出（缺失必要计算数据）\n红线回落为当时设定密度 ${this.num(p.value)} g/cm³\n` +
+            `适用小时 ${this.time(p.apply_start, true)}\n` + (p.reason ? `原因：${p.reason}` : '');
+        return `本小时建议  ${this.num(p.value)} g/cm³\n存档于 ${this.time(p.at)}\n适用小时 ${this.time(p.apply_start, true)}\n` +
+            `固定设定基准 ${this.num(p.basis?.value)} (${p.basis?.channels?.join(' / ') || '—'})\n`+
+            `小时灰分 ${Number.isFinite(p.ash?.value) ? p.ash.value.toFixed(2)+'%' : '—'}${p.ash?.provisional ? '（暂估）' : ''}`;
+    },
+    ashDetail(p) {
+        return `小时结算总灰分  ${Number.isFinite(p.value) ? p.value.toFixed(2) : '—'} %\n${this.time(p.at)}` +
+            (p.provisional ? '\n暂估：对应重介化验待补录' : '');
+    },
+    crosshair: null,
+    crosshairAt(hit) {
+        this.crosshair = hit ? {t: hit.t, x: hit.x} : null;
+        this.drawCrosshair();
+    },
+    hideCrosshair() { this.crosshair = null; this.drawCrosshair(); },
+    stepValueAt(points, t, hold) {
+        // Latest observation at/before t (anchors carry a few seconds of jitter),
+        // valid while inside the bounded hold window.
+        let current = null;
+        for (const p of points) {
+            if (p.value === null) continue;
+            if (p.t <= t + 45000) current = p; else break;
+        }
+        return current && t - current.t <= hold ? current : null;
+    },
+    nearestValueAt(points, t, window) {
+        let best = null;
+        for (const p of points) {
+            if (p.value === null) continue;
+            const d = Math.abs(p.t - t);
+            if (d <= window && (!best || d < Math.abs(best.t - t))) best = p;
+        }
+        return best;
+    },
+    chip(ctx, x, y, lines, colors, w, h) {
+        ctx.font = 'bold 12px "Microsoft YaHei", sans-serif';
+        const text = lines.map((l, i) => ({l, c: colors[i]}));
+        const width = Math.max(...text.map(t => ctx.measureText(t.l).width)) + 16;
+        const height = lines.length * 17 + 8;
+        const left = x + width > w - 30 ? x - width - 10 : x + 10;
+        const top = Math.max(4, Math.min(y, h - height - 4));
+        ctx.fillStyle = this.palette().background;
+        ctx.strokeStyle = this.palette().muted; ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(left, top, width, height, 3) : ctx.rect(left, top, width, height);
+        ctx.fill(); ctx.stroke();
+        ctx.textAlign = 'left';
+        text.forEach((t, i) => { ctx.fillStyle = t.c; ctx.fillText(t.l, left + 8, top + 17 + i * 17); });
+    },
+    drawCrosshair() {
+        const stack = document.querySelector('.density-trend-stack'), overlay = document.getElementById('density-trend-crosshair');
+        if (!stack || !overlay) return;
+        const w = stack.clientWidth, h = stack.clientHeight;
+        const ratio = Math.min(devicePixelRatio || 1, 2);
+        overlay.width = Math.max(1, w*ratio); overlay.height = Math.max(1, h*ratio);
+        const ctx = overlay.getContext('2d');
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, w, h);
+        const state = this.crosshair;
+        if (!state || !this.series || !this.meta) return;
+        const colors = this.palette();
+        const ashH = document.getElementById('density-trend-ash-plot').clientHeight;
+        // One dashed vertical guide through both panes at the snapped instant.
+        ctx.strokeStyle = colors.muted; ctx.setLineDash([5, 4]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(state.x, 2); ctx.lineTo(state.x, h - 30); ctx.stroke();
+        ctx.setLineDash([]);
+        // Values at that instant: settled ash above, setpoint and advice below.
+        const ash = this.nearestValueAt(this.series.ash || [], state.t, 45*60000);
+        const setpoint = this.stepValueAt(this.series.A304 || [], state.t, 75*60000);
+        const advice = this.nearestValueAt(this.series.advice || [], state.t, 75*60000);
+        this.chip(ctx, state.x, 8, [ash ? `总灰分 ${ash.value.toFixed(2)}%${ash.provisional ? '（暂估）' : ''}` : '总灰分 —'],
+            [colors.ash], w, ashH);
+        const adviceText = !advice ? '小时建议 —' : advice.missing
+            ? `小时建议 无（回落 ${this.num(advice.value)}）` : `小时建议 ${this.num(advice.value)}`;
+        const adviceColor = !advice ? colors.muted : advice.missing ? colors.missingAdvice : colors.advice;
+        this.chip(ctx, state.x, ashH + 8,
+            [setpoint ? `设定密度 ${this.num(setpoint.value)}` : '设定密度 —', adviceText],
+            [setpoint ? colors.A304 : colors.muted, adviceColor], w, h - ashH);
+        this.chip(ctx, state.x, h - 56, [this.time(state.t, true)], [colors.muted], w, h);
+    },
+    drawAsh() {
+        // Aligned companion chart: settled hourly total ash on the same time axis.
+        const canvas = document.getElementById('density-trend-ash-canvas'), plot = document.getElementById('density-trend-ash-plot');
+        if (!canvas || !plot) return;
+        const w = plot.clientWidth, h = plot.clientHeight;
+        const ratio = Math.min(devicePixelRatio || 1, 2);
+        canvas.width = Math.max(1, w*ratio); canvas.height = Math.max(1, h*ratio);
+        const ctx = canvas.getContext('2d'); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h);
+        const tip = plot.querySelector('.density-trend-tooltip'); tip.hidden = true; canvas._hits = []; canvas._index = 0;
+        const colors = this.palette(), points = (this.series?.ash || []).filter(p => p.value !== null);
+        ctx.font = '13px "Microsoft YaHei", sans-serif';
+        if (w < 100) return;
+        if (!points.length || !this.meta) {
+            ctx.fillStyle = colors.muted; ctx.textAlign = 'center';
+            ctx.fillText(points.length ? '等待读取趋势数据' : '该时段暂无结算总灰分', w/2, h/2);
+            return;
+        }
+        const left = 78, right = 44, top = 12, bottom = 4, width = w-left-right, height = h-top-bottom;
+        const lo = Math.min(...points.map(p => p.value)), hi = Math.max(...points.map(p => p.value));
+        const pad = Math.max(.05, (hi-lo)*.15), min = lo-pad, max = hi+pad;
+        const start = Date.parse(this.meta.period.start), end = Date.parse(this.meta.period.end);
+        const x = t => left + (t-start)/(end-start)*width, y = v => top+(max-v)/(max-min)*height;
+        ctx.textAlign = 'right'; ctx.lineWidth = 1;
+        for (let i=0;i<=4;i++) {
+            const v=min+(max-min)*i/4, py=y(v);
+            ctx.strokeStyle=colors.grid; ctx.setLineDash([3,5]);
+            ctx.beginPath();ctx.moveTo(left,py);ctx.lineTo(w-right,py);ctx.stroke();
+            ctx.fillStyle=colors.muted;ctx.fillText(v.toFixed(2),left-10,py+4);
+        }
+        ctx.setLineDash([]);
+        // The pane directly above the density chart shares its time axis; the
+        // time labels are drawn once, under the lower chart only.
+        ctx.strokeStyle=colors.ash; ctx.fillStyle=colors.ash; ctx.lineWidth=2;
+        let link=null;
+        for (const p of points) {
+            if (link && p.t-link.t <= 75*60000) {
+                ctx.beginPath();ctx.moveTo(x(link.t),y(link.value));ctx.lineTo(x(p.t),y(p.value));ctx.stroke();
+            }
+            link=p;
+        }
+        for (const p of points) {
+            const px=x(p.t),py=y(p.value);
+            ctx.beginPath();ctx.arc(px,py,2.2,0,2*Math.PI);
+            if (p.provisional) ctx.stroke();  // provisional hours stay hollow
+            else ctx.fill();
+            canvas._hits.push({...p,x:px,y:py,text:this.ashDetail(p)});
+        }
+        canvas._hits.sort((a,b)=>a.t-b.t);
+        const show = hit => {
+            tip.textContent=hit.text;tip.hidden=false;
+            tip.style.left=Math.max(4,Math.min(hit.x+14,w-tip.offsetWidth-4))+'px';
+            tip.style.top=Math.max(4,Math.min(hit.y+12,h-tip.offsetHeight-4))+'px';
+        };
+        const point = event => {
+            const r=canvas.getBoundingClientRect(),px=event.clientX-r.left,py=event.clientY-r.top;
+            let best=null,distance=Infinity;
+            for(const hit of canvas._hits) {const d=Math.hypot(hit.x-px,hit.y-py);if(d<distance){best=hit;distance=d;}}
+            if(best&&distance<32){show(best);this.crosshairAt(best);}else{tip.hidden=true;this.hideCrosshair();}
+        };
+        canvas.onmousemove=point;canvas.onclick=point;
+        canvas.onmouseleave=()=>{tip.hidden=true;this.hideCrosshair();};
+        canvas.onkeydown=event=>{
+            const hits=canvas._hits;
+            if(!['Home','End','ArrowLeft','ArrowRight','Escape'].includes(event.key)||!hits.length)return;
+            event.preventDefault();if(event.key==='Escape'){tip.hidden=true;this.hideCrosshair();return;}
+            canvas._index=event.key==='Home'?0:event.key==='End'?hits.length-1:
+                Math.max(0,Math.min(hits.length-1,(canvas._index??-1)+(event.key==='ArrowRight'?1:-1)));
+            show(hits[canvas._index]);this.crosshairAt(hits[canvas._index]);
+        };
+        this.drawCrosshair();
+    },
+    draw() {
+        this.drawAsh();
+        const canvas = document.getElementById('density-trend-canvas'), plot = document.getElementById('density-trend-plot');
+        if (!canvas || !plot) return;
+        const w = plot.clientWidth, h = plot.clientHeight;
+        if (w < 100) return;
+        const ratio = Math.min(devicePixelRatio || 1, 2);
+        canvas.width = w*ratio; canvas.height = h*ratio;
+        const ctx = canvas.getContext('2d'); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.clearRect(0,0,w,h);
+        const tip = plot.querySelector('.density-trend-tooltip'); tip.hidden = true; canvas._hits = []; canvas._adviceLabel = null;
+        const colors = this.palette();
+        const groups = Object.entries(this.series || {}).filter(([key]) => this.visible[key]);
+        const values = groups.flatMap(([, points]) => points.map(p => p.value)).filter(Number.isFinite);
+        ctx.font = '13px "Microsoft YaHei", sans-serif'; ctx.fillStyle = colors.muted;
+        if (!values.length || !this.meta) {
+            ctx.textAlign = 'center'; ctx.fillText(this.meta ? '所选曲线暂无有效历史记录' : '等待读取趋势数据', w/2, h/2); return;
+        }
+        const left = 78, right = 44, top = 22, bottom = 52, width = w-left-right, height = h-top-bottom;
+        const lo = Math.min(...values), hi = Math.max(...values), pad = Math.max(.004,(hi-lo)*.18);
+        const min = lo-pad, max = hi+pad, start = Date.parse(this.meta.period.start), end = Date.parse(this.meta.period.end);
+        const x = t => left + (t-start)/(end-start)*width, y = v => top+(max-v)/(max-min)*height;
+        ctx.textAlign = 'right'; ctx.lineWidth = 1;
+        for (let i=0;i<=5;i++) {
+            const v=min+(max-min)*i/5, py=y(v); ctx.strokeStyle=colors.grid; ctx.setLineDash([3,5]);
+            ctx.beginPath();ctx.moveTo(left,py);ctx.lineTo(w-right,py);ctx.stroke();
+            ctx.fillStyle=colors.muted;ctx.fillText(v.toFixed(3),left-10,py+4);
+        }
+        ctx.setLineDash([]);
+        const ticks = Math.max(2,Math.floor(width/155));
+        for (let i=0;i<=ticks;i++) {
+            const t=start+(end-start)*i/ticks;
+            ctx.textAlign=i===0?'left':i===ticks?'right':'center';
+            ctx.fillText(this.time(t,true),x(t),h-20);
+        }
+        this.shadeDifference(ctx,this.differenceAreas(),x,y,colors.difference);
+        for (const [key, observations] of groups) {
+            // Missing A304 observations may be crossed only when the enclosing
+            // real endpoints meet the 1 h rule. Advice gaps stay untouched.
+            const points = key === 'A304' ? observations.filter(p => p.value !== null) : observations;
+            ctx.lineWidth = key==='advice'?3:2;
+            ctx.setLineDash([]);  // both curves are solid; advice dropped its dash on 2026-10-28
+            if (key === 'A304') {
+                ctx.strokeStyle=colors[key];ctx.fillStyle=colors[key];
+                ctx.beginPath();
+                this.trace(ctx, points, key, x, y);
+                ctx.stroke();
+            } else {
+                // A segment entering or leaving a no-advice hour is the red
+                // fallback at that hour's setpoint; valid advice stays orange.
+                // Null rows without a setpoint keep their line-breaking role.
+                let link=null;
+                for (const p of points) {
+                    if (p.value!==null && link && this.connected(link,p)) {
+                        ctx.strokeStyle=(link.missing||p.missing)?colors.missingAdvice:colors.advice;
+                        ctx.beginPath();ctx.moveTo(x(link.t),y(link.value));ctx.lineTo(x(p.t),y(p.value));ctx.stroke();
+                    }
+                    link=p;
+                }
+            }
+            ctx.strokeStyle=colors[key];ctx.fillStyle=colors[key];
+            let previous=null;
+            for (const [index,p] of points.entries()) {
+                const marked=this.showPoint(previous,p);
+                const isolated=!this.connected(previous,p) && !(points[index+1] && this.connected(p,points[index+1]));
+                previous=p;
+                if (p.value===null) continue;
+                const px=x(p.t),py=y(p.value);
+                if (marked) {ctx.fillStyle=p.missing?colors.missingAdvice:colors[key];ctx.beginPath();ctx.arc(px,py,2.4,0,2*Math.PI);ctx.fill();}
+                else if (isolated) {ctx.strokeStyle=p.missing?colors.missingAdvice:colors[key];ctx.beginPath();ctx.moveTo(px-3,py);ctx.lineTo(px+3,py);ctx.stroke();}
+                canvas._hits.push({...p,x:px,y:py,text:this.detail(p)});
+            }
+        }
+        // The always-on latest-advice label was retired: the curve now spans
+        // the whole window and the crosshair/hover shows values on demand.
+        canvas._adviceLabel = null;
+        canvas._hits.sort((a,b)=>a.t-b.t || a.key.localeCompare(b.key));
+        const show = hit => {
+            tip.textContent=hit.text;tip.hidden=false;
+            tip.style.left=Math.max(4,Math.min(hit.x+14,w-tip.offsetWidth-4))+'px';
+            tip.style.top=Math.max(4,Math.min(hit.y+12,h-tip.offsetHeight-4))+'px';
+        };
+        const point = event => {
+            const r=canvas.getBoundingClientRect(),px=event.clientX-r.left,py=event.clientY-r.top;
+            const label=canvas._adviceLabel;
+            if(label && px>=label.left && px<=label.left+label.width && py>=label.top && py<=label.top+label.height){show(label);return;}
+            let best=null,distance=Infinity;
+            for(const hit of canvas._hits) {const d=Math.hypot(hit.x-px,hit.y-py);if(d<distance){best=hit;distance=d;}}
+            if(best&&distance<32){show(best);this.crosshairAt(best);}else{tip.hidden=true;this.hideCrosshair();}
+        };
+        canvas.onmousemove=point;canvas.onclick=point;
+        canvas.onmouseleave=()=>{tip.hidden=true;this.hideCrosshair();};
+        canvas.onkeydown=event=>{
+            const hits=canvas._hits;
+            if(!['Home','End','ArrowLeft','ArrowRight','Escape'].includes(event.key)||!hits.length)return;
+            event.preventDefault();if(event.key==='Escape'){tip.hidden=true;this.hideCrosshair();return;}
+            canvas._index=event.key==='Home'?0:event.key==='End'?hits.length-1:
+                Math.max(0,Math.min(hits.length-1,(canvas._index??-1)+(event.key==='ArrowRight'?1:-1)));
+            show(hits[canvas._index]);this.crosshairAt(hits[canvas._index]);
+        };
+        this.drawCrosshair();
+    },
+};
