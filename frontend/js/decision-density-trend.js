@@ -274,7 +274,7 @@ const DensityTrendPage = {
             ctx.fillText(points.length ? '等待读取趋势数据' : '该时段暂无结算总灰分', w/2, h/2);
             return;
         }
-        const left = 64, right = 24, top = 12, bottom = 26, width = w-left-right, height = h-top-bottom;
+        const left = 78, right = 44, top = 12, bottom = 4, width = w-left-right, height = h-top-bottom;
         const lo = Math.min(...points.map(p => p.value)), hi = Math.max(...points.map(p => p.value));
         const pad = Math.max(.05, (hi-lo)*.15), min = lo-pad, max = hi+pad;
         const start = Date.parse(this.meta.period.start), end = Date.parse(this.meta.period.end);
@@ -287,12 +287,8 @@ const DensityTrendPage = {
             ctx.fillStyle=colors.muted;ctx.fillText(v.toFixed(2),left-10,py+4);
         }
         ctx.setLineDash([]);
-        const ticks = Math.max(2, Math.floor(width/155));
-        for (let i=0;i<=ticks;i++) {
-            const t=start+(end-start)*i/ticks;
-            ctx.textAlign=i===0?'left':i===ticks?'right':'center';
-            ctx.fillStyle=colors.muted; ctx.fillText(this.time(t,true),x(t),h-8);
-        }
+        // The pane directly above the density chart shares its time axis; the
+        // time labels are drawn once, under the lower chart only.
         ctx.strokeStyle=colors.ash; ctx.fillStyle=colors.ash; ctx.lineWidth=2;
         let link=null;
         for (const p of points) {
@@ -347,7 +343,7 @@ const DensityTrendPage = {
         if (!values.length || !this.meta) {
             ctx.textAlign = 'center'; ctx.fillText(this.meta ? '所选曲线暂无有效历史记录' : '等待读取趋势数据', w/2, h/2); return;
         }
-        const left = 64, right = 24, top = 22, bottom = 52, width = w-left-right, height = h-top-bottom;
+        const left = 78, right = 44, top = 22, bottom = 52, width = w-left-right, height = h-top-bottom;
         const lo = Math.min(...values), hi = Math.max(...values), pad = Math.max(.004,(hi-lo)*.18);
         const min = lo-pad, max = hi+pad, start = Date.parse(this.meta.period.start), end = Date.parse(this.meta.period.end);
         const x = t => left + (t-start)/(end-start)*width, y = v => top+(max-v)/(max-min)*height;
