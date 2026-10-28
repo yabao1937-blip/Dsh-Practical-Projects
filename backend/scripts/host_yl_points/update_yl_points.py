@@ -84,6 +84,27 @@ def collector_status(database, source_id):
         return dict(row) if row else {}
 
 
+def wait_lease_expired(database, source_id, timeout=300):
+    """Start.ps1 skips launching while an unexpired lease exists; let the old
+    collector's lease lapse first (same rule as the source updater)."""
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        status = collector_status(database, source_id)
+        lease = status.get('lease_until')
+        remaining = 0
+        if lease and status.get('owner'):
+            try:
+                remaining = max(0, (parse_utc(lease) - datetime.now(timezone.utc)).total_seconds())
+            except ValueError:
+                remaining = 0
+        if remaining == 0:
+            print('旧采集租约已过期，可以启动。')
+            return
+        print(f'等待旧采集租约自然过期（剩余 {remaining:.0f} 秒）…')
+        time.sleep(2)
+    raise SystemExit('旧采集租约长时间未过期；请稍后重跑本工具或用启动脚本拉起采集。')
+
+
 def wait_collector(database, source_id, timeout=300):
     started, last = time.monotonic(), None
     while time.monotonic() - started < timeout:
@@ -103,18 +124,28 @@ def wait_collector(database, source_id, timeout=300):
     raise SystemExit('等待采集器重连超时；请查看采集日志，配置修改与备份已保留。')
 
 
-def verify_samples(database, keys):
-    with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True, timeout=2)) as conn:
-        for key in keys:
-            row = conn.execute("SELECT sample FROM telemetry_readings WHERE point_key=?"
-                               " ORDER BY id DESC LIMIT 1", (key,)).fetchone()
-            sample = json.loads(row[0]) if row and row[0] else None
-            quality = (sample or {}).get('quality')
-            value = (sample or {}).get('value')
-            stamp = (sample or {}).get('received_at')
-            print(f'{key}: quality={quality} value={value} received={stamp}')
-            if quality != 'good':
-                raise SystemExit(f'{key} 最新样本质量不是 good；新地址可能仍不可读，可还原备份后重试。')
+def verify_samples(database, keys, restarted, expected_nodes):
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        rows = {}
+        with closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True, timeout=2)) as conn:
+            for key in keys:
+                row = conn.execute("SELECT sample FROM telemetry_readings WHERE point_key=?"
+                                   " AND received_at >= ? ORDER BY id DESC LIMIT 1", (key, restarted)).fetchone()
+                rows[key] = json.loads(row[0]) if row and row[0] else None
+        if all(rows.values()):
+            for key in keys:
+                sample = rows[key]
+                node = (sample.get('node_id') or '').rsplit('/', 1)[-1]
+                print(f"{key}: quality={sample.get('quality')} value={sample.get('value')}"
+                      f" node={sample.get('node_id')} received={sample.get('received_at')}")
+                if sample.get('quality') != 'good':
+                    raise SystemExit(f'{key} 新样本质量不是 good；可还原备份后重试。')
+                if sample.get('node_id') not in expected_nodes:
+                    raise SystemExit(f'{key} 新样本仍来自旧地址 {sample.get("node_id")}；请核对配置后重跑。')
+            return
+        time.sleep(5)
+    raise SystemExit('等待两个点位的新样本超时；采集可能未恢复，请查看采集日志。')
 
 
 def main():
@@ -141,11 +172,14 @@ def main():
     stop_script = Path(__file__).resolve().parent / 'StopOwnedCollector.ps1'
     if not stop_script.is_file():
         raise SystemExit('工具包缺少 StopOwnedCollector.ps1，请重新下载完整 ZIP。')
+    restarted = datetime.now(timezone.utc).isoformat(timespec='milliseconds')
     powershell(stop_script, '-InstallDir', str(root), cwd=root)
+    wait_lease_expired(root / 'backend/data/dense_medium.db', data['source_id'])
+    restarted = datetime.now(timezone.utc).isoformat(timespec='milliseconds')
     powershell(root / 'Start.ps1', '-NoBrowser', cwd=root)
     wait_collector(root / 'backend/data/dense_medium.db', data['source_id'])
     time.sleep(15)  # two poll cycles at the 5-second cadence
-    verify_samples(root / 'backend/data/dense_medium.db', keys)
+    verify_samples(root / 'backend/data/dense_medium.db', keys, restarted, set(MOVES.values()))
     print('完成：A416/A417 压滤机运行状态已改用新地址采集并验证。')
     return 0
 
