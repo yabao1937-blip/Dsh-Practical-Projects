@@ -53,8 +53,7 @@ def latest_measurements(db: Session = Depends(get_db)):
 
 @router.get("", response_model=ManualMeasurementList)
 def list_measurements(metric: ManualMetric | None = None,
-                      start: str | None = Query(None, max_length=64),
-                      end: str | None = Query(None, max_length=64),
+                      start: str | None = None, end: str | None = None,
                       limit: int = Query(20, ge=1, le=200), offset: int = Query(0, ge=0, le=1000000),
                       db: Session = Depends(get_db)):
     if db.bind.dialect.name == "sqlite":
