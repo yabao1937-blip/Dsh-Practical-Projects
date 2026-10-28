@@ -179,3 +179,49 @@ def test_js_python_model_total_and_original_advice_parity(inputs):
         r=calculate(case['cells'],store,now=NOW)
         for key in ('coarse_ash','heavy_amount','total_ash','suggested_density'):
             assert r[key]['value']==pytest.approx(expected[key],abs=1e-6)
+
+
+def two_system_cells(cells, level=50):
+    cells['sys402']['value'] = 0   # 401、402 运行，A、B 停 → 恰好两系统
+    cells['level']['value'] = level
+    return cells
+
+
+def test_two_systems_pin_coarse_ash_to_level_default(inputs):
+    cells,store=inputs
+    for level,expected in [(50,14),(30,14),(29.9,15),(12,15)]:
+        result=calculate(two_system_cells(deepcopy(cells),level),store,now=NOW)
+        assert result['coarse_ash']['value']==expected
+        assert result['coarse_ash']['status']=='calculated'
+        assert '两系统运行' in result['coarse_ash']['reason'] and '暂不参与' in result['coarse_ash']['reason']
+        assert result['input_derivations']['coarse_ash']['version']=='two-system-level-ash-v1'
+        assert result['input_derivations']['coarse_ash']['level_observed']==level
+        assert result['total_ash']['value'] is not None   # 三组分继续用默认灰分加权
+
+
+def test_two_systems_level_problems_block_coarse_ash(inputs):
+    cells,store=inputs
+    broken=two_system_cells(deepcopy(cells))
+    broken['level'].update(value=None,reason='无有效读数')
+    result=calculate(broken,store,now=NOW)
+    assert result['coarse_ash']['value'] is None
+    assert '两系统运行' in result['coarse_ash']['reason'] and '精磁尾液位' in result['coarse_ash']['reason']
+    assert result['total_ash']['value'] is None
+    stale=two_system_cells(deepcopy(cells))
+    stale['level']['observed_at']=(NOW-timedelta(seconds=120)).isoformat()
+    assert calculate(stale,store,now=NOW)['coarse_ash']['value'] is None
+    held=two_system_cells(deepcopy(cells))
+    held['level']['status']='held'
+    result=calculate(held,store,now=NOW)
+    assert result['coarse_ash']['value']==14 and result['coarse_ash']['status']=='held'
+
+
+def test_two_system_scheme_needs_all_four_states_and_model_path_survives(inputs):
+    cells,store=inputs
+    unknown=two_system_cells(deepcopy(cells))
+    unknown['sysB'].update(value=None,status='missing')   # 有一路状态未知 → 不能证明两系统
+    result=calculate(unknown,store,now=NOW)
+    assert result['coarse_ash']['value'] is None and '模型输入不完整' in result['coarse_ash']['reason']
+    assert 'coarse_ash' not in result['input_derivations']
+    three=deepcopy(cells)                                  # 三系统 → 现行模型链
+    assert calculate(three,store,now=NOW)['coarse_ash']['status']=='predicted'

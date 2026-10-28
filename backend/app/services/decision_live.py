@@ -18,6 +18,25 @@ LABELS = dict(raw_ash='原煤灰分', coal_amount='入洗原煤量', level='精�
     heavy_ash='重介精煤灰分', float_ash='浮精灰分', float_amount='浮精量',
     coarse_amount='粗精煤泥量', belt501='501瞬时带煤量', belt502='502瞬时带煤量', density='当前分选密度')
 
+# 2026-10-28: with exactly two systems running the wash-calibrated model no
+# longer holds; the level is then nearly constant and pins the ash directly.
+# Other model factors deliberately stay out of this scheme for now.
+TWO_SYSTEM_ASH = dict(version='two-system-level-ash-v1', input='level',
+    running_systems=2, level_threshold=30, above=14, below=15, factors='仅精磁尾液位；其余因子暂不参与')
+SYSTEM_KEYS = ('sys401', 'sys402', 'sysA', 'sysB')
+
+
+def running_systems(cells):
+    """Known count of running systems; None while any of the four states is unavailable."""
+    states = []
+    for key in SYSTEM_KEYS:
+        cell = cells.get(key)
+        value = cell.get('value') if isinstance(cell, dict) else cell
+        if value is None or not isinstance(value, (bool, int)) or int(value) not in (0, 1):
+            return None
+        states.append(int(value))
+    return sum(states)
+
 
 def numeric(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
@@ -104,7 +123,25 @@ def calculate(cells, store, target_min=8.5, target_max=9.0, now=None, shared_sou
                                activated_at=group.get('activated_at'), label=f'专家基准{expert_name} · 待现场验证')
     expert_detail = None
     feature_errors = [error for k in features_used if (error := problem(k))]
-    if feature_errors:
+    if running_systems(cells) == TWO_SYSTEM_ASH['running_systems']:
+        # Two-system scheme: the tailings level alone pins the coarse ash;
+        # every other model factor is deliberately out of this logic for now.
+        error = problem('level')
+        result['input_derivations']['coarse_ash'] = deepcopy(TWO_SYSTEM_ASH)
+        if error:
+            result['coarse_ash'] = output(reason='两系统运行，但'+error)
+        else:
+            level = cells['level']['value']
+            high = level >= TWO_SYSTEM_ASH['level_threshold']
+            value = TWO_SYSTEM_ASH['above'] if high else TWO_SYSTEM_ASH['below']
+            result['input_derivations']['coarse_ash'] = dict(deepcopy(TWO_SYSTEM_ASH), level_observed=level)
+            held = cells['level'].get('status') in ('held', 'stopped', 'default')
+            result['coarse_ash'] = output(value, 'held' if held else 'calculated',
+                ('采用沿用液位，仅供观察 · ' if held else '')+
+                f"两系统运行 · 液位 {level:g} {'≥' if high else '<'} {TWO_SYSTEM_ASH['level_threshold']:g}，"
+                f'粗精煤泥灰分默认 {value:g}%（其余因子暂不参与）')
+            result['warnings'].append('两系统运行：粗精煤泥灰分按液位默认值，模型因子暂不参与')
+    elif feature_errors:
         result['coarse_ash'] = output(reason='模型输入不完整：' + '；'.join(feature_errors))
     elif not valid_model:
         result['coarse_ash'] = output(reason='没有可用的 GPT 保存模型，或模型因子不匹配')

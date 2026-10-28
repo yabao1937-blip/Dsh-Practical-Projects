@@ -69,6 +69,20 @@ def test_obsolete_binding_cannot_override_ratio_and_new_binding_rejected(session
     assert response.status_code == 422
 
 
+def test_shared_snapshot_pins_coarse_ash_when_two_systems_run(sessions, seeded):
+    cfg, repo, values = seeded
+    cfg.history_interval_seconds = 5
+    running = list(values)
+    running[7:11] = [True, True, False, False]   # 恰好两系统运行（401、402 开，A、B 停）
+    send(repo, cfg, HOUR+timedelta(seconds=10), running)
+    with sessions() as db:
+        result = shared_snapshot(db, HOUR+timedelta(seconds=12))
+        assert result['coarse_ash']['value'] == 14
+        assert '两系统运行' in result['coarse_ash']['reason'] and '暂不参与' in result['coarse_ash']['reason']
+        assert result['input_derivations']['coarse_ash']['version'] == 'two-system-level-ash-v1'
+        assert result['cells']['coarse_ash']['value'] == 14   # 展示与模型输入一致
+
+
 def test_reference_roundtrip_and_hour_mean_keep_derived_values(sessions, seeded):
     cfg, repo, values = seeded
     cfg.history_interval_seconds = 5
