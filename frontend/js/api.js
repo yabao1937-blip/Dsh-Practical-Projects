@@ -33,18 +33,21 @@ window.Api = {
         if (this.isReadOnlyTest()) throw new Error(this.readOnlyMessage);
     },
 
-    async manualMeasurementsRequest(path = '', body, timeoutMs = 20000) {
-        if (body !== undefined) this.requireWritable();
+    async manualMeasurementsRequest(path = '', body, timeoutMs = 20000, method = '') {
+        // Any non-GET request mutates the database and needs the write guards.
+        const verb = (method || (body === undefined ? 'GET' : 'POST')).toUpperCase();
+        const writes = verb !== 'GET' && verb !== 'HEAD';
+        if (writes) this.requireWritable();
         const headers = {};
-        if (body !== undefined) {
-            headers['Content-Type'] = 'application/json';
+        if (body !== undefined) headers['Content-Type'] = 'application/json';
+        if (writes) {
             const token = this.writeToken();
             if (token) headers['X-DMCS-Token'] = token;
         }
         let response;
         try {
             response = await fetch(this.base + '/manual-measurements' + path, {
-                method: body === undefined ? 'GET' : 'POST', headers,
+                method: verb, headers,
                 ...(body === undefined ? {} : {body: JSON.stringify(body)}),
                 cache: 'no-store', signal: AbortSignal.timeout(timeoutMs),
             });
@@ -70,6 +73,9 @@ window.Api = {
     async getManualMeasurements(options = {}) {
         const query = new URLSearchParams({limit: String(options.limit || 20), offset: String(options.offset || 0)});
         if (options.metric) query.set('metric', options.metric);
+        // Optional inclusive observed-time window (UTC ISO strings).
+        if (options.start) query.set('start', options.start);
+        if (options.end) query.set('end', options.end);
         const result = await this.manualMeasurementsRequest('?' + query);
         if (!Array.isArray(result?.items) || !Number.isInteger(result.total)) throw new Error('补录记录返回异常');
         return result;
@@ -97,6 +103,28 @@ window.Api = {
                 || (definition && (result.name !== definition.name || result.unit !== definition.unit))
                 || (body.observed_at && Date.parse(result.observed_at) !== Date.parse(body.observed_at))) {
             throw new Error('未收到明确保存确认，请刷新记录核对后重试。');
+        }
+        return result;
+    },
+
+    async updateManualMeasurement(id, body, definition) {
+        const result = await this.manualMeasurementsRequest(`/${id}`, body, 20000, 'PATCH');
+        if (!Number.isInteger(result?.id) || result.id !== id || !Number.isFinite(result.value)
+                || (body.metric !== undefined && result.metric !== body.metric)
+                || (body.value !== undefined && result.value !== body.value)
+                || typeof result.observed_at !== 'string' || !Number.isFinite(Date.parse(result.observed_at))
+                || typeof result.created_at !== 'string' || !Number.isFinite(Date.parse(result.created_at))
+                || typeof result.name !== 'string' || !result.name.trim() || typeof result.unit !== 'string' || !result.unit.trim()
+                || (definition && (result.name !== definition.name || result.unit !== definition.unit))) {
+            throw new Error('未收到明确修改确认，请刷新记录核对后重试。');
+        }
+        return result;
+    },
+
+    async deleteManualMeasurement(id) {
+        const result = await this.manualMeasurementsRequest(`/${id}`, undefined, 20000, 'DELETE');
+        if (result?.ok !== true || result.id !== id) {
+            throw new Error('未收到明确删除确认，请刷新记录核对后重试。');
         }
         return result;
     },

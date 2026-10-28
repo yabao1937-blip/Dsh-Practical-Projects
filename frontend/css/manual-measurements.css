@@ -12,7 +12,15 @@
 .manual-measurements-component .measurement-history-scroll { max-height: 420px; overflow: auto; }
 .manual-measurements-component .data-table { min-width: 670px; }
 .manual-measurements-component .measurement-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; color: var(--text-muted); font-size: 12px; }
+.manual-measurements-component .measurement-actions { white-space: nowrap; }
+.manual-measurements-component .measurement-actions .btn { margin: 1px; }
 .manual-measurements-component button:disabled { opacity: .6; cursor: default; }
+.decision-manual-edit-dialog { position: fixed; inset: 0; margin: auto; width: min(430px, calc(100vw - 32px)); height: auto; min-height: 0; max-height: calc(100dvh - 32px); }
+.decision-manual-edit-dialog .manual-edit-header { cursor: default; touch-action: auto; user-select: text; }
+.decision-manual-edit-dialog .manual-edit-body { padding: 16px 20px 20px; }
+.decision-manual-edit-dialog .form-group { margin: 0 0 14px; }
+.decision-manual-edit-dialog input, .decision-manual-edit-dialog select { width: 100%; min-width: 0; box-sizing: border-box; }
+.decision-manual-edit-dialog .form-actions { margin-top: 4px; }
 .decision-manual-open { margin-right:auto; padding:9px 16px; border:1px solid var(--dm-cyan); border-radius:3px; color:var(--dm-cyan); background:transparent; }
 .decision-manual-open:hover { background:color-mix(in srgb,var(--dm-cyan) 9%,transparent); }
 .decision-manual-dialog { --bg-primary:#101934; --bg-secondary:#151f3f; --bg-card:#151f3f; --bg-input:#101934; --text-primary:#e4e9ff; --text-secondary:#c1cae5; --text-muted:#a2acce; --border-color:#34416c; --accent-blue:#98a7ff; --accent-green:#82d7b5; --accent-red:#ff9595; color-scheme:dark; position:fixed; inset:auto; z-index:950; box-sizing:border-box; width:min(620px,calc(100vw - 24px)); height:min(790px,calc(100dvh - 104px)); max-height:calc(100dvh - 24px); margin:0; padding:0; overflow:hidden; border:1px solid var(--border-color); border-top:3px solid var(--accent-blue); border-radius:3px; background:var(--bg-primary); color:var(--text-primary); box-shadow:0 8px 28px #0003; font-family:var(--font-main); font-size:13px; line-height:1.5; }

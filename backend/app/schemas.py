@@ -79,6 +79,23 @@ class ManualMeasurementIn(BaseModel):
         return self
 
 
+class ManualMeasurementUpdate(BaseModel):
+    """Partial edit of a stored measurement: only metric and value may change."""
+    model_config = ConfigDict(extra="forbid")
+    metric: ManualEntryMetric | None = None
+    value: float | None = Field(default=None, ge=0, strict=True, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_pair(self):
+        if self.metric is None and self.value is None:
+            raise ValueError("至少需要修改信息名或值")
+        if self.metric is not None and self.value is not None:
+            maximum = METRICS[self.metric]["maximum"]
+            if maximum is not None and self.value > maximum:
+                raise ValueError("灰分和煤泥含量须在 0–100% 之间")
+        return self
+
+
 class ManualMeasurementOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

@@ -16,9 +16,9 @@ const ManualMeasurementComponent = {
                 <div class="form-actions"><button type="submit" class="btn btn-primary" id="${id('submit')}" disabled>保存补录</button><button type="button" class="btn" id="${id('reset')}">重置</button></div>
                 <p id="${id('message')}" class="measurement-message" role="status" aria-live="polite"></p>
             </form>
-            <div class="measurement-history-heading"><h4>业务指标补录记录</h4><label>信息名 <select id="${id('filter')}"><option value="">全部信息</option></select></label></div>
-            <p class="measurement-help">按录入顺序显示，最新补录在前。</p>
-            <div class="table-scroll measurement-history-scroll"><table class="data-table"><thead><tr><th>时间（北京时间）</th><th>补录信息名</th><th>值</th><th>单位</th><th>录入时间</th></tr></thead><tbody id="${id('history')}"><tr><td colspan="5">尚未加载补录记录</td></tr></tbody></table></div>
+            <div class="measurement-history-heading"><h4>业务指标补录记录（近1个月）</h4><label>信息名 <select id="${id('filter')}"><option value="">全部信息</option></select></label></div>
+            <p class="measurement-help">按录入顺序显示近1个月（北京时间）的补录记录，最新在前。</p>
+            <div class="table-scroll measurement-history-scroll"><table class="data-table"><thead><tr><th>时间（北京时间）</th><th>补录信息名</th><th>值</th><th>单位</th><th>录入时间</th><th>操作</th></tr></thead><tbody id="${id('history')}"><tr><td colspan="6">尚未加载补录记录</td></tr></tbody></table></div>
             <div class="measurement-pagination"><span id="${id('count')}" aria-live="polite"></span><div><button type="button" class="btn btn-sm" id="${id('prev')}" disabled>上一页</button><button type="button" class="btn btn-sm" id="${id('next')}" disabled>下一页</button></div></div></div>`;
         const view = {root, prefix, el:name => document.getElementById(id(name)), definitions:null, history:null};
         view.el('form').addEventListener('submit', event => controller.submit(event, view));
@@ -32,6 +32,13 @@ const ManualMeasurementComponent = {
         view.el('prev').addEventListener('click', () => {controller.offset=Math.max(0,controller.offset-controller.pageSize);void controller.loadHistory();});
         view.el('next').addEventListener('click', () => {controller.offset+=controller.pageSize;void controller.loadHistory();});
         view.el('reset').addEventListener('click', () => controller.reset());
+        view.el('history').addEventListener('click', event => {
+            const button = event.target.closest('button[data-action]');
+            if (!button || button.disabled || !view.el('history').contains(button)) return;
+            const recordId = Number(button.dataset.id);
+            if (button.dataset.action === 'edit') controller.editRecord(recordId);
+            else if (button.dataset.action === 'delete') controller.deleteRecord(recordId);
+        });
         return view;
     },
 };
@@ -39,8 +46,9 @@ const ManualMeasurementComponent = {
 const ManualMeasurements = {
     ready:false, busy:false, initialized:false, definitions:[], definitionsPromise:null,
     offset:0, pageSize:20, total:0, sequence:0, pending:null, views:[],
+    items:null, editing:null, editBusy:false, editNotice:{text:'',status:''},
     draft:{metric:'',value:'',time:''}, filter:'', notice:{text:'',status:''},
-    history:'<tr><td colspan="5">尚未加载补录记录</td></tr>', count:'', historyLoaded:false,
+    history:'<tr><td colspan="6">尚未加载补录记录</td></tr>', count:'', historyLoaded:false,
     current() { return DecisionManualEntry.dialog?.open ? DecisionManualEntry.view : this.views[0]; },
     el(id) { return this.current()?.el(id); },
     active() { return !document.hidden && !!DecisionManualEntry.dialog?.open; },
@@ -141,28 +149,163 @@ const ManualMeasurements = {
             this.pending=null; this.draft={...this.draft,value:'',time:''};
             this.message(`已保存到数据库：${record.name} ${record.value} ${record.unit}，时间 ${this.time(record.observed_at)}${definition.archive_only?'（仅保存记录，不参与实时计算）':''}`,'success');
             this.offset=0; this.filter='';
-            if (window.Operations) window.Operations.manualMeasurementSaved();
-            if (definition.key === 'heavy_clean_coal_ash') {
-                if (typeof DecisionRecentAsh !== 'undefined' && typeof DecisionOverviewPage !== 'undefined')
-                    void DecisionRecentAsh.measurementSaved(DecisionOverviewPage);
-                if (typeof DecisionAshHistory !== 'undefined') void DecisionAshHistory.measurementSaved();
-            }
+            this.afterMeasurementChanged(definition.key);
             await this.loadHistory();
         } catch (error) { this.message(error.message || '未收到保存确认，已保留填写内容，请刷新记录核对后重试。','error'); }
         finally { this.setBusy(false); }
     },
-    async loadHistory() {
-        const sequence=++this.sequence, offset=this.offset, metric=this.filter;
+    afterMeasurementChanged(...metrics) {
+        // Manual measurements feed the decision chain; refresh derived views.
+        if (window.Operations) window.Operations.manualMeasurementSaved();
+        if (metrics.includes('heavy_clean_coal_ash')) {
+            if (typeof DecisionRecentAsh !== 'undefined' && typeof DecisionOverviewPage !== 'undefined')
+                void DecisionRecentAsh.measurementSaved(DecisionOverviewPage);
+            if (typeof DecisionAshHistory !== 'undefined') void DecisionAshHistory.measurementSaved();
+        }
+    },
+    windowStart() {
+        // Rolling one-natural-month window computed in the Asia/Shanghai business zone.
+        const now = new Date();
+        const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Shanghai', year:'numeric',
+            month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hourCycle:'h23'})
+            .formatToParts(now).map(part => [part.type, part.value]));
+        const year = Number(parts.year), month = Number(parts.month);
+        const previousYear = month === 1 ? year - 1 : year, previousMonth = month === 1 ? 12 : month - 1;
+        const day = Math.min(Number(parts.day), new Date(Date.UTC(previousYear, previousMonth, 0)).getUTCDate());
+        const start = new Date(`${previousYear}-${String(previousMonth).padStart(2,'0')}-${String(day).padStart(2,'0')}T${parts.hour}:${parts.minute}:${parts.second}+08:00`);
+        return Number.isFinite(start.getTime()) ? start.toISOString() : '';
+    },
+    recordById(id) { return (this.items || []).find(item => item.id === id) || null; },
+    ensureEditDialog() {
+        if (this.editDialog) return;
+        const dialog=document.createElement('dialog');
+        dialog.id='decision-manual-edit-dialog'; dialog.className='decision-manual-dialog decision-manual-edit-dialog';
+        dialog.setAttribute('aria-labelledby','decision-manual-edit-title');
+        dialog.innerHTML=`<header class="manual-dialog-header manual-edit-header"><div><h2 id="decision-manual-edit-title">修改补录记录</h2><p>仅修改信息名与值，补录时间保持不变</p></div><button type="button" aria-label="关闭修改补录记录">×</button></header>
+            <div class="manual-dialog-body manual-edit-body"><form id="decision-manual-edit-form" novalidate>
+                <p class="measurement-help" id="decision-manual-edit-summary"></p>
+                <div class="form-group"><label for="decision-manual-edit-metric">补录信息名</label><select id="decision-manual-edit-metric" required></select></div>
+                <div class="form-group"><label for="decision-manual-edit-value">值 <span id="decision-manual-edit-unit"></span></label><input type="number" id="decision-manual-edit-value" min="0" step="any" required placeholder="请输入数值"></div>
+                <p class="measurement-help" id="decision-manual-edit-purpose" hidden></p>
+                <div class="form-actions"><button type="submit" class="btn btn-primary" id="decision-manual-edit-save">保存修改</button><button type="button" class="btn" id="decision-manual-edit-cancel">取消</button></div>
+                <p class="measurement-message" id="decision-manual-edit-message" role="status" aria-live="polite"></p>
+            </form></div>`;
+        document.body.append(dialog);
+        this.editDialog=dialog;
+        dialog.querySelector('header button').addEventListener('click', () => this.closeEdit());
+        dialog.querySelector('#decision-manual-edit-cancel').addEventListener('click', () => this.closeEdit());
+        dialog.querySelector('#decision-manual-edit-form').addEventListener('submit', event => {event.preventDefault(); void this.submitEdit();});
+        dialog.querySelector('#decision-manual-edit-metric').addEventListener('change', () => this.renderEdit());
+        dialog.addEventListener('close', () => {this.editing=null; this.editNotice={text:'',status:''};});
+    },
+    editOptions() {
+        // Offered metrics plus the record's own metric, so legacy rows stay selectable.
+        if (!this.editing) return [];
+        const options=[...this.definitions];
+        if (!options.some(item => item.key === this.editing.metric))
+            options.push({key:this.editing.metric, name:this.editing.name, unit:this.editing.unit, maximum:null});
+        return options;
+    },
+    renderEdit() {
+        const dialog=this.editDialog, record=this.editing;
+        if (!dialog || !record) return;
+        const options=this.editOptions(), select=dialog.querySelector('#decision-manual-edit-metric');
+        const previous=select.value;
+        select.innerHTML=options.map(item => `<option value="${this.escape(item.key)}">${this.escape(item.name)}</option>`).join('');
+        select.value=options.some(item => item.key === previous) ? previous : record.metric;
+        const definition=options.find(item => item.key === select.value) || options[0];
+        dialog.querySelector('#decision-manual-edit-unit').textContent=definition ? `（${definition.unit}）` : '';
+        const input=dialog.querySelector('#decision-manual-edit-value');
+        if (definition?.maximum != null) input.max=definition.maximum; else input.removeAttribute('max');
+        const purpose=dialog.querySelector('#decision-manual-edit-purpose');
+        purpose.hidden=!definition?.archive_only;
+        purpose.textContent=definition?.archive_only ? '仅保存记录，不参与实时计算。' : '';
+        dialog.querySelector('#decision-manual-edit-summary').textContent=`原记录：${record.name} ${record.value} ${record.unit} · 时间 ${this.time(record.observed_at)}（不可修改）`;
+        select.disabled=this.editBusy || !options.length;
+        input.disabled=this.editBusy;
+        dialog.querySelector('#decision-manual-edit-cancel').disabled=this.editBusy;
+        const save=dialog.querySelector('#decision-manual-edit-save');
+        save.disabled=this.editBusy || !options.length;
+        save.textContent=this.editBusy ? '正在修改…' : '保存修改';
+        const message=dialog.querySelector('#decision-manual-edit-message');
+        message.textContent=this.editNotice.text; message.dataset.status=this.editNotice.status;
+    },
+    editRecord(id) {
+        if (this.busy || this.editBusy) return;
+        if (!this.writable()) { this.message(this.readOnly() ? Api.readOnlyMessage : '请通过服务器网页修改补录。','error'); return; }
+        if (!this.ready) return;
+        const record=this.recordById(id);
+        if (!record) { this.message('该补录记录不在当前列表中，请刷新记录后重试。','error'); return; }
+        this.editing={...record};
+        this.editNotice={text:'',status:''};
+        this.ensureEditDialog();
+        this.editDialog.classList.toggle('is-light', !!document.getElementById('decision-workspace')?.classList.contains('is-light'));
+        this.renderEdit();
+        this.editDialog.querySelector('#decision-manual-edit-value').value=String(record.value);
+        if (!this.editDialog.open) this.editDialog.showModal();
+        this.editDialog.querySelector('#decision-manual-edit-value').focus({preventScroll:true});
+    },
+    closeEdit() {
+        if (this.editBusy || !this.editDialog?.open) return;
+        this.editDialog.close();
+    },
+    async submitEdit() {
+        if (!this.editing || this.editBusy) return;
+        const dialog=this.editDialog, options=this.editOptions();
+        const metric=dialog.querySelector('#decision-manual-edit-metric').value;
+        const definition=options.find(item => item.key === metric);
+        const raw=dialog.querySelector('#decision-manual-edit-value').value.trim();
+        const value=Number(raw);
+        if (!raw || !Number.isFinite(value) || value < 0 || !definition || (definition.maximum != null && value > definition.maximum)) {
+            this.editNotice={text:'请输入有效数值：百分比为 0–100，煤量不得为负。',status:'error'};
+            this.renderEdit(); return;
+        }
+        const before=this.editing;
+        this.editBusy=true; this.editNotice={text:'正在修改补录记录…',status:''}; this.renderEdit();
         try {
-            const result=await Api.getManualMeasurements({offset,metric,limit:this.pageSize});
+            const record=await Api.updateManualMeasurement(before.id, {metric,value}, definition);
+            this.editBusy=false; this.closeEdit();
+            this.message(`已修改补录记录：${record.name} ${record.value} ${record.unit}，时间 ${this.time(record.observed_at)}`,'success');
+            this.afterMeasurementChanged(before.metric, record.metric);
+            await this.loadHistory();
+        } catch (error) {
+            this.editBusy=false;
+            this.editNotice={text:error.message || '未收到修改确认，请刷新记录核对后重试。',status:'error'};
+            this.renderEdit();
+        }
+    },
+    deleteRecord(id) {
+        if (this.busy || this.editBusy) return;
+        if (!this.writable()) { this.message(this.readOnly() ? Api.readOnlyMessage : '请通过服务器网页删除补录。','error'); return; }
+        const record=this.recordById(id);
+        if (!record) { this.message('该补录记录不在当前列表中，请刷新记录后重试。','error'); return; }
+        const description=`${record.name} ${record.value} ${record.unit}，时间 ${this.time(record.observed_at)}`;
+        if (!window.confirm(`确定删除该条补录记录？删除后不可恢复。\n${description}`)) return;
+        this.setBusy(true); this.message('正在删除补录记录…');
+        void Api.deleteManualMeasurement(record.id)
+            .then(() => {
+                this.message(`已删除补录记录：${description}`,'success');
+                this.afterMeasurementChanged(record.metric);
+                return this.loadHistory();
+            })
+            .catch(error => this.message(error.message || '未收到删除确认，请刷新记录核对后重试。','error'))
+            .finally(() => this.setBusy(false));
+    },
+    async loadHistory() {
+        const sequence=++this.sequence, offset=this.offset, metric=this.filter, start=this.windowStart();
+        try {
+            const result=await Api.getManualMeasurements({offset,metric,limit:this.pageSize,start});
             if (sequence !== this.sequence) return;
-            this.total=result.total; this.historyLoaded=true;
-            this.history=result.items.length ? result.items.map(row => `<tr><td>${this.escape(this.time(row.observed_at))}</td><td>${this.escape(row.name)}</td><td>${this.escape(row.value)}</td><td>${this.escape(row.unit)}</td><td>${this.escape(this.time(row.created_at))}</td></tr>`).join('') : '<tr><td colspan="5">暂无业务指标补录记录</td></tr>';
-            this.count=result.total ? `共 ${result.total} 条，显示第 ${offset+1}–${offset+result.items.length} 条` : '共 0 条';
+            this.total=result.total; this.historyLoaded=true; this.items=result.items;
+            this.history=result.items.length ? result.items.map(row => {
+                const actions=this.writable() ? `<button type="button" class="btn btn-sm" data-action="edit" data-id="${this.escape(row.id)}">修改</button> <button type="button" class="btn btn-sm btn-danger" data-action="delete" data-id="${this.escape(row.id)}">删除</button>` : '—';
+                return `<tr><td>${this.escape(this.time(row.observed_at))}</td><td>${this.escape(row.name)}</td><td>${this.escape(row.value)}</td><td>${this.escape(row.unit)}</td><td>${this.escape(this.time(row.created_at))}</td><td class="measurement-actions">${actions}</td></tr>`;
+            }).join('') : '<tr><td colspan="6">近1个月暂无业务指标补录记录</td></tr>';
+            this.count=result.total ? `近1个月共 ${result.total} 条，显示第 ${offset+1}–${offset+result.items.length} 条` : '近1个月共 0 条';
         } catch (error) {
             if (sequence !== this.sequence) return;
-            this.history=`<tr><td colspan="5">${this.escape(error.message || '补录记录加载失败，请稍后刷新。')}</td></tr>`;
-            this.count='记录加载失败'; this.historyLoaded=false;
+            this.history=`<tr><td colspan="6">${this.escape(error.message || '补录记录加载失败，请稍后刷新。')}</td></tr>`;
+            this.count='记录加载失败'; this.historyLoaded=false; this.items=null;
         }
         this.render();
     },

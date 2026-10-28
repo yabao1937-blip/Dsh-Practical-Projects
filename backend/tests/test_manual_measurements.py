@@ -223,3 +223,106 @@ def test_manual_latest_does_not_require_kepserver(setup, monkeypatch):
     monkeypatch.setattr(telemetry, "latest_view", unavailable)
     client.post(URL, json={"metric": "heavy_clean_coal_ash", "value": 8.5})
     assert client.get(URL + "/latest").json()["items"][0]["sample"]["value"] == 8.5
+
+
+def test_edit_changes_metric_and_value_in_database(setup):
+    client, sessions = setup
+    record = client.post(URL, json={"metric": "heavy_clean_coal_ash", "value": 8.5,
+                                    "observed_at": "2026-10-01T12:00+08:00"}).json()
+    edited = client.patch(f"{URL}/{record['id']}", json={"metric": "float_clean_coal_ash", "value": 10.5})
+    assert edited.status_code == 200, edited.text
+    body = edited.json()
+    assert (body["metric"], body["value"], body["name"], body["unit"]) == ("float_clean_coal_ash", 10.5, "浮精灰分", "%")
+    assert body["observed_at"] == record["observed_at"] and body["created_at"] == record["created_at"]
+    with sessions() as db:
+        stored = db.get(ManualMeasurement, record["id"])
+        assert (stored.metric, stored.value, stored.name, stored.unit) == ("float_clean_coal_ash", 10.5, "浮精灰分", "%")
+        assert stored.observed_at == record["observed_at"] and stored.created_at == record["created_at"]
+        assert stored.request_hash  # the original POST idempotency token survives edits
+    assert client.get(URL).json()["items"][0]["value"] == 10.5
+
+
+def test_edit_value_only_keeps_metric_and_metric_only_renames(setup):
+    client, _ = setup
+    record = client.post(URL, json={"metric": "raw_coal_slime_content", "value": 16.5}).json()
+    value_only = client.patch(f"{URL}/{record['id']}", json={"value": 20}).json()
+    assert (value_only["metric"], value_only["value"], value_only["name"]) == ("raw_coal_slime_content", 20, "原煤煤泥含量")
+    metric_only = client.patch(f"{URL}/{record['id']}", json={"metric": "coarse_slime_ash"}).json()
+    assert (metric_only["metric"], metric_only["value"], metric_only["name"], metric_only["unit"]) == \
+        ("coarse_slime_ash", 20, "粗精煤泥灰分", "%")
+
+
+def test_edit_validation_and_missing_record(setup):
+    client, sessions = setup
+    record = client.post(URL, json={"metric": "heavy_clean_coal_ash", "value": 8.5}).json()
+    for body in [{}, {"value": 100.01}, {"value": -1}, {"value": True}, {"metric": "unknown"},
+                 {"metric": "coarse_slime_amount", "value": 5}, {"metric": "heavy_clean_coal_ash", "value": 8, "unit": "%"}]:
+        assert client.patch(f"{URL}/{record['id']}", json=body).status_code == 422, body
+    with sessions() as db:
+        stored = db.get(ManualMeasurement, record["id"])
+        assert (stored.metric, stored.value) == ("heavy_clean_coal_ash", 8.5)
+    assert client.patch(f"{URL}/{record['id'] + 999}", json={"value": 9}).status_code == 404
+    with sessions.begin() as db:  # a retired amount row cannot jump into a 0-100% metric
+        db.add(ManualMeasurement(metric='coarse_slime_amount', name='粗精煤泥量', value=250.25, unit='t/h',
+            observed_at='2026-01-01T04:00:00.000+00:00', created_at='2026-01-01T04:00:00.000+00:00', request_hash='legacy'))
+    legacy = client.get(URL, params={"metric": "coarse_slime_amount"}).json()["items"][0]
+    assert client.patch(f"{URL}/{legacy['id']}", json={"value": 300}).json()["value"] == 300
+    assert client.patch(f"{URL}/{legacy['id']}", json={"metric": "heavy_clean_coal_ash"}).status_code == 422
+
+
+def test_edit_then_stale_client_retry_conflicts(setup):
+    client, _ = setup
+    body = {"metric": "heavy_clean_coal_ash", "value": 8.5, "client_id": "edit-retry"}
+    record = client.post(URL, json=body).json()
+    client.patch(f"{URL}/{record['id']}", json={"value": 9})
+    # The original POST keeps its idempotent reuse: the row exists (now edited).
+    retry = client.post(URL, json=body)
+    assert retry.status_code == 200 and retry.json()["value"] == 9
+    assert client.post(URL, json={**body, "value": 9.5}).status_code == 409
+
+
+def test_delete_removes_the_stored_row(setup):
+    client, sessions = setup
+    record = client.post(URL, json={"metric": "heavy_clean_coal_ash", "value": 8.5}).json()
+    removed = client.delete(f"{URL}/{record['id']}")
+    assert removed.status_code == 200 and removed.json() == {"ok": True, "id": record["id"]}
+    with sessions() as db:
+        assert db.get(ManualMeasurement, record["id"]) is None
+    assert client.get(URL).json()["total"] == 0
+    assert client.delete(f"{URL}/{record['id']}").status_code == 404
+
+
+def test_edit_and_delete_require_the_write_token(setup):
+    client, _ = setup
+    body = {"metric": "heavy_clean_coal_ash", "value": 8}
+    with TestClient(app, client=("10.92.25.107", 12345)) as remote:
+        record = remote.post(URL, json=body, headers={"X-DMCS-Token": "manual-test-token"}).json()
+        assert remote.patch(f"{URL}/{record['id']}", json={"value": 9}).status_code == 401
+        assert remote.patch(f"{URL}/{record['id']}", json={"value": 9},
+                            headers={"X-DMCS-Token": "wrong"}).status_code == 401
+        edited = remote.patch(f"{URL}/{record['id']}", json={"value": 9},
+                              headers={"X-DMCS-Token": "manual-test-token"})
+        assert edited.status_code == 200 and edited.json()["value"] == 9
+        assert remote.delete(f"{URL}/{record['id']}").status_code == 401
+        assert remote.delete(f"{URL}/{record['id']}", headers={"X-DMCS-Token": "manual-test-token"}).status_code == 200
+    assert client.get(URL).json()["total"] == 0
+
+
+def test_observed_time_window_filters_records(setup):
+    client, _ = setup
+    stamps = {"old": "2026-01-01T12:00+08:00", "edge": "2026-09-01T00:00+08:00",
+              "recent": "2026-10-15T12:00+08:00", "future": "2099-01-01T12:00+08:00"}
+    for label, observed in stamps.items():
+        client.post(URL, json={"metric": "heavy_clean_coal_ash", "value": 8, "observed_at": observed})
+    # Inclusive window in UTC: 2026-09-01 00:00 Beijing == 2026-08-31T16:00Z.
+    window = client.get(URL, params={"start": "2026-08-31T16:00:00Z", "end": "2026-10-20T12:00+08:00"}).json()
+    assert [item["id"] for item in window["items"]] == [3, 2]  # entry order: recent, then edge
+    assert window["total"] == 2
+    future_only = client.get(URL, params={"start": "2026-12-01T00:00"}).json()
+    assert future_only["total"] == 1 and future_only["items"][0]["id"] == 4
+    assert client.get(URL, params={"start": "2099-06-01T00:00"}).json()["total"] == 0
+    assert client.get(URL, params={"start": "2026-01-01T00:00", "end": "2026-02-01T00:00"}).json()["total"] == 1
+    assert client.get(URL).json()["total"] == 4  # without bounds the behaviour is unchanged
+    for bad in ("2026-02-30T00:00", "not-a-time", "2026-12-01"):  # date-only is not a valid bound
+        assert client.get(URL, params={"start": bad}).status_code == 422
+        assert client.get(URL, params={"end": bad}).status_code == 422

@@ -11,8 +11,10 @@ from ..auth import require_write
 from ..config import REMOTE_READONLY
 from ..database import get_db
 from ..models import ManualMeasurement
-from ..schemas import ManualMeasurementIn, ManualMeasurementList, ManualMeasurementOut, ManualMetric
-from ..services.manual_measurements import METRICS, ENTRY_METRICS, latest_points, request_hash, timestamp_now
+from ..schemas import (ManualMeasurementIn, ManualMeasurementList, ManualMeasurementOut, ManualMeasurementUpdate,
+                       ManualMetric)
+from ..services.manual_measurements import (METRICS, ENTRY_METRICS, latest_points, normalize_time, request_hash,
+                                            timestamp_now)
 
 class MeasurementRoute(APIRoute):
     def get_route_handler(self):
@@ -51,6 +53,8 @@ def latest_measurements(db: Session = Depends(get_db)):
 
 @router.get("", response_model=ManualMeasurementList)
 def list_measurements(metric: ManualMetric | None = None,
+                      start: str | None = Query(None, max_length=64),
+                      end: str | None = Query(None, max_length=64),
                       limit: int = Query(20, ge=1, le=200), offset: int = Query(0, ge=0, le=1000000),
                       db: Session = Depends(get_db)):
     if db.bind.dialect.name == "sqlite":
@@ -58,6 +62,20 @@ def list_measurements(metric: ManualMetric | None = None,
     query = db.query(ManualMeasurement)
     if metric is not None:
         query = query.filter(ManualMeasurement.metric == metric)
+    # Optional observed-time window (inclusive bounds, normalized to the same
+    # UTC ISO format as stored rows so plain string comparison stays ordered).
+    # Without the parameters the historical behaviour is unchanged.
+    for name, bound in (("start", start), ("end", end)):
+        if bound is None or not bound.strip():
+            continue
+        try:
+            normalized = normalize_time(bound)
+        except ValueError as exc:
+            raise HTTPException(422, f"{name} 时间无效：{exc}") from exc
+        if normalized is None:
+            raise HTTPException(422, f"{name} 时间无效")
+        column = ManualMeasurement.observed_at >= normalized if name == "start" else ManualMeasurement.observed_at <= normalized
+        query = query.filter(column)
     # Entry order lets an older backfilled measurement remain visible after saving.
     return {"total": query.count(), "items": query.order_by(ManualMeasurement.id.desc()).offset(offset).limit(limit).all()}
 
@@ -94,3 +112,39 @@ def create_measurement(body: ManualMeasurementIn, response: Response, db: Sessio
         raise
     db.refresh(record)
     return record
+
+
+@router.patch("/{record_id}", response_model=ManualMeasurementOut, dependencies=[Depends(require_write)])
+def update_measurement(record_id: int, body: ManualMeasurementUpdate, db: Session = Depends(get_db)):
+    """Edit only the metric and value; observed_at/created_at semantics stay fixed."""
+    record = db.get(ManualMeasurement, record_id)
+    if record is None:
+        raise HTTPException(404, "补录记录不存在或已删除")
+    metric = body.metric if body.metric is not None else record.metric
+    definition = METRICS[metric]
+    value = record.value if body.value is None else body.value
+    maximum = definition["maximum"]
+    if value < 0 or (maximum is not None and value > maximum):
+        raise HTTPException(422, "灰分和煤泥含量须在 0–100% 之间，煤量不得为负")
+    record.metric = metric
+    record.name = definition["name"]
+    record.unit = definition["unit"]
+    record.value = value
+    # Keep the original POST idempotency hash: it belongs to the creating
+    # submission (whose "server time" placeholder cannot be reconstructed
+    # here). A stale client retry of that POST still reuses this row and sees
+    # the edited content; a retry with different content keeps its 409.
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+@router.delete("/{record_id}", dependencies=[Depends(require_write)])
+def delete_measurement(record_id: int, db: Session = Depends(get_db)):
+    """Hard-delete the stored row (explicit user requirement, no tombstone)."""
+    record = db.get(ManualMeasurement, record_id)
+    if record is None:
+        raise HTTPException(404, "补录记录不存在或已删除")
+    db.delete(record)
+    db.commit()
+    return {"ok": True, "id": record_id}
