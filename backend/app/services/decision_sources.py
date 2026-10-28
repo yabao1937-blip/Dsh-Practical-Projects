@@ -142,7 +142,11 @@ def collect_shared(inputs, config):
                 'historical', record_id=row.id, created_at=iso_time(business_time(row.created_at)))
         # Plate-derived flotation output is the authoritative live source; an
         # older belt record must not mask it (same rule as the manual assay).
+        prior_amount = cells.get('float_amount') or {}
+        newer_amount = (prior_amount.get('metric') == 'float_clean_coal_amount' and prior_amount.get('observed_at')
+                        and business_time(prior_amount['observed_at']) >= business_time(row.ts))
         if (not inputs.manual(auto_paths=[('amountInputs', 'floatAmount')])
+                and not newer_amount
                 and cells.get('float_amount', {}).get('derivation') != PLATE_DERIVATION
                 and numeric(row.coal_amount)):
             cells['float_amount'] = cell(row.coal_amount, '历史浮精记录', iso_time(business_time(row.ts)), 'historical', record_id=row.id)

@@ -88,6 +88,18 @@ async function call(method, path_, body) {
         await page.waitForFunction(() => document.querySelector('#decision-measurement-count')?.textContent.includes('近1个月共 0 条'));
         assert.equal((await call('GET', '?limit=200')).data.total, 1);  // only the old seeded row remains
         report.steps.push('delete removed the edited row from the database');
+
+        // The new float-amount metric is enterable from the same form (t/h, no cap).
+        await page.selectOption('#decision-measurement-metric', 'float_clean_coal_amount');
+        await page.fill('#decision-measurement-value', '15');
+        await page.click('#decision-measurement-submit');
+        await page.waitForFunction(() => (document.querySelector('#decision-measurement-message') || {}).textContent?.includes('已保存到数据库：浮精量 15 t/h'));
+        await page.waitForFunction(() => document.querySelector('#decision-measurement-history')?.textContent.includes('浮精量'));
+        const amount = (await call('GET', '?limit=200&metric=float_clean_coal_amount')).data.items[0];
+        assert.equal(amount.value, 15);
+        assert.equal(amount.name, '浮精量');
+        assert.equal(amount.unit, 't/h');
+        report.steps.push('float amount entry saved via the manual form');
         await page.screenshot({path: path.join(output, 'after-delete.png')});
         await context.close();
 

@@ -153,7 +153,8 @@ def test_latest_points_exist_without_records(setup):
     assert result.status_code == 200
     points = result.json()["items"]
     assert {point["key"] for point in points} == {
-        "heavy_clean_coal_ash", "raw_coal_slime_content", "coarse_slime_amount", "float_clean_coal_ash"}
+        "heavy_clean_coal_ash", "raw_coal_slime_content", "coarse_slime_amount",
+        "float_clean_coal_ash", "float_clean_coal_amount"}
     assert all(point["source_id"] == "manual-measurements" and not point["available"]
                and point["sample"]["value"] is None for point in points)
 
@@ -194,10 +195,17 @@ def test_latest_tie_uses_last_entry_and_future_record_waits(setup):
 def test_archive_only_catalog_persistence_retry_and_legacy_history(setup):
     client, sessions = setup
     metrics = {item['key']: item for item in client.get(URL+'/metrics').json()['items']}
-    assert set(metrics) == {'heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_ash', 'float_clean_coal_ash'}
+    assert set(metrics) == {'heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_ash',
+                            'float_clean_coal_ash', 'float_clean_coal_amount'}
     assert metrics['coarse_slime_ash']['archive_only'] and metrics['coarse_slime_ash']['unit'] == '%'
     assert not metrics['float_clean_coal_ash']['archive_only']
     assert metrics['float_clean_coal_ash']['unit'] == '%' and metrics['float_clean_coal_ash']['name'] == '浮精灰分'
+    assert not metrics['float_clean_coal_amount']['archive_only']
+    assert metrics['float_clean_coal_amount']['unit'] == 't/h' and metrics['float_clean_coal_amount']['name'] == '浮精量'
+    entry = client.post(URL, json={'metric': 'float_clean_coal_amount', 'value': 15,
+                                   'observed_at': '2026-10-28T10:00+08:00'})
+    assert entry.status_code == 201 and entry.json()['unit'] == 't/h' and entry.json()['name'] == '浮精量'
+    assert client.delete(f"{URL}/{entry.json()['id']}").status_code == 200
     body = dict(metric='coarse_slime_ash', value=8.25, observed_at='2026-01-01T12:00+08:00', client_id='archive-retry')
     first = client.post(URL, json=body)
     assert first.status_code == 201

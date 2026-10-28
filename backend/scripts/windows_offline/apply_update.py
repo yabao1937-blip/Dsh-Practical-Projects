@@ -44,14 +44,17 @@ def manual_float_output_compatibility(data):
         raise ValueError('Unrecognized manual response metric values')
     metrics = {item.value for item in elements}
     base = {'heavy_clean_coal_ash','raw_coal_slime_content','coarse_slime_amount','coarse_slime_ash'}
-    if metrics not in (base,base|{'float_clean_coal_ash'}):
+    ash = base | {'float_clean_coal_ash'}
+    if metrics not in (base, ash, ash | {'float_clean_coal_amount'}):
         raise ValueError('Unknown manual response metrics')
-    if 'float_clean_coal_ash' in metrics:
+    additions = [m for m in ('float_clean_coal_ash', 'float_clean_coal_amount') if m not in metrics]
+    if not additions:
         return data
     lines = body.splitlines(keepends=True)
     last = elements[-1]
     offset = sum(len(line) for line in lines[:last.end_lineno-1]) + last.end_col_offset
-    return prefix + body[:offset] + b", 'float_clean_coal_ash'" + body[offset:]
+    suffix = (', ' + ', '.join(f"'{m}'" for m in additions)).encode('ascii')
+    return prefix + body[:offset] + suffix + body[offset:]
 
 
 def digest(path):
@@ -598,7 +601,8 @@ def rollback_schema_sources(root,manifest):
     path = root/'backend/data/dense_medium.db'
     with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True,timeout=5)) as database:
         row = database.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='manual_measurements'").fetchone()
-    return {SCHEMA_UPGRADE_PATH,MANUAL_OUTPUT_SCHEMA_PATH} if row and 'float_clean_coal_ash' in row[0] else set()
+    return {SCHEMA_UPGRADE_PATH,MANUAL_OUTPUT_SCHEMA_PATH} if row and (
+        'float_clean_coal_ash' in row[0] or 'float_clean_coal_amount' in row[0]) else set()
 
 
 def apply(package,root,manifest,report=lambda stage,message:None):

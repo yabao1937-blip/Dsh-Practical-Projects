@@ -14,6 +14,9 @@ METRICS = {
     # (coal_records category='float') by production/observation time; the latest
     # valid sample wins in the decision overview and hourly chain.
     "float_clean_coal_ash": {"name": "浮精灰分", "unit": "%", "maximum": 100},
+    # 2026-10-28: manual flotation amount entry (t/h). Feeds the same decision
+    # chain by observation time; plate-derived output keeps its live priority.
+    "float_clean_coal_amount": {"name": "浮精量", "unit": "t/h", "maximum": None},
 }
 # Retain the old amount definition for historical reads and legacy point users.
 ENTRY_METRICS = {key: value for key, value in METRICS.items() if key != "coarse_slime_amount"}

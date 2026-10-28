@@ -7,11 +7,14 @@ KNOWN_METRIC_SETS = [
     BASE_METRICS,
     BASE_METRICS + ['coarse_slime_ash'],
     BASE_METRICS + ['coarse_slime_ash', 'float_clean_coal_ash'],
+    BASE_METRICS + ['coarse_slime_ash', 'float_clean_coal_ash', 'float_clean_coal_amount'],
 ]
-METRIC_LABELS = {'coarse_slime_ash': '粗精煤泥灰分', 'float_clean_coal_ash': '浮精灰分'}
+METRIC_LABELS = {'coarse_slime_ash': '粗精煤泥灰分', 'float_clean_coal_ash': '浮精灰分',
+    'float_clean_coal_amount': '浮精量'}
 
 
-def update_manual_metric_constraint(conn, include_ash=True, include_float_ash=False):
+def update_manual_metric_constraint(conn, include_ash=True, include_float_ash=False,
+                                    include_float_amount=False):
     """Expand the SQLite catalog without losing old readings or their identities.
 
     Called inside the startup/Alembic transaction. A downgrade never drops assays.
@@ -26,7 +29,8 @@ def update_manual_metric_constraint(conn, include_ash=True, include_float_ash=Fa
     if sorted(allowed) not in [sorted(s) for s in KNOWN_METRIC_SETS]:
         raise RuntimeError('手工补录指标约束与预期不符，未修改数据库')
     wanted = BASE_METRICS + (['coarse_slime_ash'] if include_ash else []) \
-        + (['float_clean_coal_ash'] if include_float_ash else [])
+        + (['float_clean_coal_ash'] if include_float_ash else []) \
+        + (['float_clean_coal_amount'] if include_float_amount else [])
     if set(wanted) == set(allowed):
         return
     for metric in set(allowed) - set(wanted):
@@ -71,7 +75,7 @@ def upgrade_schema(engine):
             if 'client_id' not in cols:
                 conn.exec_driver_sql('ALTER TABLE heavy_samples ADD COLUMN client_id VARCHAR(64)')
             conn.exec_driver_sql('CREATE UNIQUE INDEX IF NOT EXISTS uq_heavy_client_id ON heavy_samples(client_id)')
-            update_manual_metric_constraint(conn, include_float_ash=True)
+            update_manual_metric_constraint(conn, include_float_ash=True, include_float_amount=True)
             cols = {r[1] for r in conn.exec_driver_sql('PRAGMA table_info(manual_measurements)')}
             if cols and 'time_basis' not in cols:
                 conn.exec_driver_sql("ALTER TABLE manual_measurements ADD COLUMN time_basis VARCHAR(32) NOT NULL DEFAULT 'legacy-lag-2h'")

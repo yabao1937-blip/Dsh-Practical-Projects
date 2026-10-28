@@ -102,7 +102,7 @@ class ManualMeasurement(Base):
         Index("ix_manual_measurement_metric_id", "metric", "id"),
         Index("ix_manual_measurement_effective_latest", "metric", "time_basis", "observed_at", "id"),
         CheckConstraint("value >= 0", name="ck_manual_measurement_nonnegative"),
-        CheckConstraint("metric IN ('heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_amount', 'coarse_slime_ash', 'float_clean_coal_ash')", name="ck_manual_measurement_metric"),
+        CheckConstraint("metric IN ('heavy_clean_coal_ash', 'raw_coal_slime_content', 'coarse_slime_amount', 'coarse_slime_ash', 'float_clean_coal_ash', 'float_clean_coal_amount')", name="ck_manual_measurement_metric"),
         CheckConstraint("metric = 'coarse_slime_amount' OR value <= 100", name="ck_manual_measurement_percentage"),
     )
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

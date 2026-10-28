@@ -385,3 +385,43 @@ def test_manual_float_ash_competes_with_belt_records_by_time(sessions, seeded, m
         inputs, cells = collect_float_cells(db)
         assert cells['float_ash']['source'] == '历史浮精记录' and cells['float_ash']['value'] == 10.8
         assert inputs.collect()['float_ash']['value'] == 10.8
+
+
+def test_manual_float_amount_participates_in_total_ash(sessions, seeded):
+    # Baseline: the seeded store manual float value 40 feeds the three-part total ash.
+    with sessions() as db:
+        live = shared_snapshot(db)
+        assert live['cells']['float_amount']['value'] == 40
+        assert live['total_ash']['value'] == pytest.approx((8.5*435+9*40+9.2*25)/500)
+    # A newer manual amount entry (the new 补录 metric) replaces the stored 40.
+    with sessions.begin() as db:
+        add_manual(db, 15, HOUR-timedelta(minutes=1), HOUR-timedelta(seconds=30), 'float_clean_coal_amount')
+    with sessions() as db:
+        live = shared_snapshot(db)
+        cell = live['cells']['float_amount']
+        assert cell['value'] == 15 and cell['status'] == 'manual' and cell['metric'] == 'float_clean_coal_amount'
+        assert cell['unit'] == 't/h'
+        assert live['total_ash']['value'] == pytest.approx((8.5*460+9*15+9.2*25)/500)
+
+
+def test_manual_float_amount_competes_with_belt_records_by_time(sessions, seeded):
+    with sessions.begin() as db:
+        db.delete(db.get(AutoState, 'amountInputs'))
+        db.add(float_belt_row(HOUR-timedelta(seconds=20), 11.2, amount=27))
+    with sessions.begin() as db:
+        add_manual(db, 15, HOUR-timedelta(minutes=5), HOUR-timedelta(minutes=4), 'float_clean_coal_amount')
+    with sessions() as db:
+        inputs, cells = collect_float_cells(db)
+        assert cells['float_amount']['source'] == '历史浮精记录' and cells['float_amount']['value'] == 27
+    # A manual entry newer than the belt record wins; the older record cannot mask it.
+    with sessions.begin() as db:
+        add_manual(db, 15, HOUR-timedelta(seconds=10), HOUR-timedelta(seconds=5), 'float_clean_coal_amount')
+    with sessions() as db:
+        inputs, cells = collect_float_cells(db)
+        assert cells['float_amount']['value'] == 15 and cells['float_amount']['metric'] == 'float_clean_coal_amount'
+    # A later belt record overtakes the manual entry again: latest sample wins.
+    with sessions.begin() as db:
+        db.add(float_belt_row(HOUR-timedelta(seconds=4), 10.8, amount=22))
+    with sessions() as db:
+        inputs, cells = collect_float_cells(db)
+        assert cells['float_amount']['source'] == '历史浮精记录' and cells['float_amount']['value'] == 22

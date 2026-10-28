@@ -306,6 +306,6 @@ class Inputs:
         result["float_ash"] = self.manual("float_clean_coal_ash", [("floatAshInput",)],
             record=("float", "ash_content", None)) or self.default("float_ash")
         result["float_amount"] = self.float_plate_cell() or self.manual(
-            auto_paths=[("amountInputs", "floatAmount")],
+            "float_clean_coal_amount", auto_paths=[("amountInputs", "floatAmount")],
             record=("float", "coal_amount", None)) or cell(reason="无浮精量手工记录或默认值")
         return result
