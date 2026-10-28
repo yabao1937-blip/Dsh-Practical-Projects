@@ -18,8 +18,24 @@ const DensityTrendPage = {
         const shape = (points, key) => (points || []).map(p => ({...p, key, t: Date.parse(p.at),
             value: Number.isFinite(p.value) ? p.value : null})).filter(p => Number.isFinite(p.t));
         return {A304: shape(data.channels?.A304, 'A304'),
-            advice: this.adviceWithFallback(shape(data.channels?.A304, 'A304'), shape(data.suggestions, 'advice')),
+            advice: this.adviceWithFallback(shape(data.channels?.A304, 'A304'),
+                this.hourlyAdvice(shape(data.suggestions, 'advice'))),
             ash: shape(data.ash, 'ash')};
+    },
+    hourlyAdvice(rows) {
+        // One plotted point per application hour, at the hour itself: a newer
+        // revision replaces the older estimate; intermediate archive times
+        // (e.g. 9:23, 9:28) no longer get their own points. The real archive
+        // time stays visible in the hover text via `archived`.
+        const byHour = new Map();
+        for (const p of rows) {
+            const current = byHour.get(p.apply_start);
+            if (!current || p.t >= current.t) byHour.set(p.apply_start, p);  // >=: at equal stamps the later row (newer) wins
+        }
+        return [...byHour.values()].map(p => {
+            const hour = p.apply_start ? Date.parse(p.apply_start) : NaN;
+            return Number.isFinite(hour) ? {...p, archived: p.at, at: p.apply_start, t: hour} : p;
+        }).sort((a, b) => a.t - b.t || String(a.apply_start).localeCompare(String(b.apply_start)));
     },
     adviceWithFallback(A304, advice) {
         // An hour that ran on a known setpoint but produced no advice value
@@ -249,7 +265,7 @@ const DensityTrendPage = {
             (p.break_before ? ' · 前后观测有间隔' : '');
         if (p.missing) return `本小时建议无法给出（缺失必要计算数据）\n红线回落为当时设定密度 ${this.num(p.value)} g/cm³\n` +
             `适用小时 ${this.time(p.apply_start, true)}\n` + (p.reason ? `原因：${p.reason}` : '');
-        return `本小时建议  ${this.num(p.value)} g/cm³\n存档于 ${this.time(p.at)}\n适用小时 ${this.time(p.apply_start, true)}\n` +
+        return `本小时建议  ${this.num(p.value)} g/cm³\n存档于 ${this.time(p.archived || p.at)}\n适用小时 ${this.time(p.apply_start, true)}\n` +
             `固定设定基准 ${this.num(p.basis?.value)} (${p.basis?.channels?.join(' / ') || '—'})\n`+
             `小时灰分 ${Number.isFinite(p.ash?.value) ? p.ash.value.toFixed(2)+'%' : '—'}${p.ash?.provisional ? '（暂估）' : ''}`;
     },

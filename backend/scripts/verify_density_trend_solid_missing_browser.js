@@ -48,12 +48,13 @@ const output = path.resolve(__dirname, '../../output/playwright/density-trend-so
                 apply_start: stamp(h*60), basis: {channels: ['A304'], value: 1.48}, ...extra});
             const data = {period: {start: stamp(-60), end: stamp(5*60)},
                 channels: {A304: [anchor(0, 1.48), anchor(1, 1.48), anchor(2, 1.48), anchor(3, 1.49), anchor(4, 1.50)]},
-                suggestions: [advice(0, 1.52), advice(1, null, {reason: '小时灰分覆盖不足'}),
+                suggestions: [advice(0, 1.50), advice(0, 1.52),  // two revisions: latest wins
+                    advice(1, null, {reason: '小时灰分覆盖不足'}),
                     /* hour 2 has no archived row at all */ advice(3, 1.53), advice(4, 1.53)],
                 ash: [{at: stamp(0), value: 8.4, provisional: true}, {at: stamp(60), value: 8.6, provisional: false},
                     {at: stamp(180), value: 9.0, provisional: false}]};
             const series = chart.points(data);
-            const result = {advice: series.advice.map(p => ({h: Math.round((p.t-t)/hour), value: p.value, missing: !!p.missing}))};
+            const result = {advice: series.advice.map(p => ({h: Math.round((p.t-t)/hour), ms: p.t - t, value: p.value, missing: !!p.missing}))};
             chart.meta = data; chart.series = series; chart.visible = {A304: true, advice: true};
             const canvas = document.getElementById('density-trend-canvas'), ctx = canvas.getContext('2d');
             const ashCanvas = document.getElementById('density-trend-ash-canvas');
@@ -102,6 +103,9 @@ const output = path.resolve(__dirname, '../../output/playwright/density-trend-so
         });
         const s = report.synthetic;
         // Hour 1 (blocked row) and hour 2 (no row) both fall back to that hour's setpoint.
+        const base = Date.parse('2026-10-24T01:00:00Z');
+        assert.ok(s.advice.every(p => Math.abs(p.ms - p.h*3600000) < 1), 'points sit on the hour: ' + JSON.stringify(s.advice.map(x => [x.h, x.ms])));
+        assert.equal(s.advice.length, 5, 'revisions collapse to one point per hour');
         assert.deepEqual(s.advice.map(p => [p.h, p.value, p.missing]),
             [[0, 1.52, false], [1, 1.48, true], [2, 1.48, true], [3, 1.53, false], [4, 1.53, false]]);
         const colors = s.segments.map(x => x.color), palette = await page.evaluate(() => DensityTrendPage.palette());
