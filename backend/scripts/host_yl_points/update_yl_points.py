@@ -22,7 +22,12 @@ MOVES = {
     'ns=2;s=TIA_4_2.TIA_4_2.A416/YL_STATE': 'ns=2;s=XMZX-YM.YM4_2.A416/YL_STATE',
     'ns=2;s=TIA_4_2.TIA_4_2.A417/YL_STATE': 'ns=2;s=XMZX-YM.YM4_2.A417/YL_STATE',
 }
-NEW_DEVICE = 'XMZX-YM.YM4_2'
+NEW_DEVICE = 'YM4_2'
+# Channel-true item ids (2026-10-29): KEPServer channel XMZX-YM, device YM4_2.
+NEW_ITEM = {
+    'ns=2;s=XMZX-YM.YM4_2.A416/YL_STATE': 'XMZX-YM.YM4_2.A416/YL_STATE',
+    'ns=2;s=XMZX-YM.YM4_2.A417/YL_STATE': 'XMZX-YM.YM4_2.A417/YL_STATE',
+}
 
 
 def parse_utc(value):
@@ -50,7 +55,17 @@ def patch(config, apply):
     if not pending and not done:
         raise SystemExit('配置中找不到 A416/A417 压滤机运行状态点位（旧或新地址均无），未做任何修改')
     if not pending:
-        print('两个点位已经指向新地址，无需修改。')
+        print('两个点位已经指向新地址。')
+    meta_pending = [p for p in data.get('points', []) if p.get('node_id') in NEW_ITEM and (p.get('device') != NEW_DEVICE or p.get('item_id') != NEW_ITEM[p['node_id']])]
+    if meta_pending and not pending:
+        backup = config.with_name(config.name + f'.backup-{datetime.now().strftime("%Y%m%d-%H%M%S")}')
+        shutil.copy2(config, backup)
+        for point in meta_pending:
+            point['device'] = NEW_DEVICE
+            point['item_id'] = NEW_ITEM[point['node_id']]
+        config.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\r\n', encoding='utf-8')
+        print(f'已按 KEPServer 实际结构修正设备名/item_id（{len(meta_pending)} 点，备份 {backup.name}））')
+        return data, meta_pending
         return data, []
     if not apply:
         for node in pending:
@@ -63,10 +78,13 @@ def patch(config, apply):
         node = point.get('node_id')
         if node in MOVES and node in pending:
             point['node_id'] = MOVES[node]
+        if point.get('node_id') in NEW_ITEM:
             point['device'] = NEW_DEVICE
+            point['item_id'] = NEW_ITEM[point['node_id']]
     config.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\r\n', encoding='utf-8')
     for node in pending:
-        print(f'已修改 {node} -> {MOVES[node]}（key/item_id 保持不变）')
+        print(f'已修改 {node} -> {MOVES[node]}')
+    print(f'设备名与 item_id 已按 KEPServer 实际结构改为 {NEW_DEVICE} / XMZX-YM.YM4_2.*（key 保持不变）')
     print('原配置已备份为 ' + backup.name)
     return data, pending
 

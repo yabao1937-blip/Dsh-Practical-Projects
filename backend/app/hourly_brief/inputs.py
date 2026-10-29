@@ -7,7 +7,8 @@ from sqlalchemy import select
 
 from ..models import AutoState, CalcLog, CoalRecord, Setting
 from ..services.resolvers import INSTRUMENT_DEFAULT, measurement_number, manual_valid
-from ..telemetry.derived import FOUR_SYSTEM_MEMBERS, DESLIMING_MEMBERS, FLOAT_PRESS_MEMBERS, DENSITY_AVERAGE_MEMBERS
+from ..telemetry.derived import (FOUR_SYSTEM_MEMBERS, DESLIMING_MEMBERS, FLOAT_PRESS_MEMBERS, DENSITY_AVERAGE_MEMBERS,
+    PRESS_STATE_ITEM_ALIASES)
 from ..telemetry.domain import availability, definition_id, iso_time, parse_time
 from ..telemetry.models import TelemetryPoint, TelemetryReading, TelemetrySource
 from ..telemetry.retained import MEMORY, density_history, raw_sample, usable_at_receipt
@@ -45,7 +46,15 @@ class Inputs:
         self.cutoff = iso_time(hour)
         self.points = {}
         for p in db.scalars(select(TelemetryPoint).where(TelemetryPoint.enabled.is_(True))):
-            self.points.setdefault(p.config.get("item_id"), []).append(p)
+            item = p.config.get("item_id")
+            self.points.setdefault(item, []).append(p)
+            # A416/A417 press states answer to either their pre- or
+            # post-rename item id; register both so group lookups survive
+            # the metadata migration in either order.
+            alias = PRESS_STATE_ITEM_ALIASES.get(item) or next(
+                (new for new, old in PRESS_STATE_ITEM_ALIASES.items() if old == item), None)
+            if alias:
+                self.points.setdefault(alias, []).append(p)
         self.sources = {s.source_id: s for s in db.scalars(select(TelemetrySource))}
         auto_rows = list(db.scalars(select(AutoState)))
         self.auto = {r.key: r.value for r in auto_rows
