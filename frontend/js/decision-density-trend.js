@@ -1,7 +1,7 @@
 /* Real observations and actual archived hourly-card revisions, on a time axis. */
 const DensityTrendPage = {
     hours: 168, range: null, inited: false, seq: 0, meta: null, page: 0,
-    visible: {A304: true, advice: true},
+    visible: {A304: true, advice: true}, aligned: false,
     num(v) { return Number.isFinite(v) ? v.toFixed(3) : '—'; },
     signed(v) {
         if (!Number.isFinite(v)) return '—';
@@ -17,10 +17,42 @@ const DensityTrendPage = {
     points(data) {
         const shape = (points, key) => (points || []).map(p => ({...p, key, t: Date.parse(p.at),
             value: Number.isFinite(p.value) ? p.value : null})).filter(p => Number.isFinite(p.t));
-        return {A304: shape(data.channels?.A304, 'A304'),
-            advice: this.adviceWithFallback(shape(data.channels?.A304, 'A304'),
-                this.hourlyAdvice(shape(data.suggestions, 'advice'))),
-            ash: shape(data.ash, 'ash')};
+        const A304 = shape(data.channels?.A304, 'A304');
+        const advice = this.hourlyAdvice(shape(data.suggestions, 'advice'));
+        return {A304, advice: this.adviceWithFallback(A304, advice),
+            ash: this.aligned ? this.alignedAsh(advice, data.period) : shape(data.ash, 'ash')};
+    },
+    alignedAsh(advice, period) {
+        // Use the SAME selected revision as the advice curve. Later settlement
+        // revisions and red setpoint fallbacks are not that advice's inputs.
+        const start = Date.parse(period?.start), end = Date.parse(period?.end);
+        return advice.map(p => {
+            const ash = p.ash || {}, t = Date.parse(p.apply_start);
+            const sourceStart = Date.parse(ash.start), sourceEnd = Date.parse(ash.end);
+            const valid = Number.isFinite(p.value) && !p.missing && Number.isFinite(ash.value) &&
+                ash.value >= 0 && ash.value <= 100 && Number.isFinite(sourceStart) &&
+                Number.isFinite(sourceEnd) && sourceEnd > sourceStart && sourceEnd <= t;
+            return {key: 'ash', aligned: true, at: p.apply_start, t, apply_start: p.apply_start,
+                value: valid ? ash.value : null, source_start: ash.start, source_end: ash.end,
+                archived: p.archived || p.at, revision: ash.revision, provisional: !!ash.provisional};
+        }).filter(p => Number.isFinite(p.t) && p.t >= start && p.t <= end);
+    },
+    setAligned(aligned) {
+        this.aligned = !!aligned;
+        const byId = id => document.getElementById('density-trend-' + id);
+        byId('alignment').setAttribute('aria-pressed', String(this.aligned));
+        byId('alignment').classList.toggle('btn-primary', this.aligned);
+        byId('chart-title').textContent = this.aligned ? '建议依据灰分 / 设定密度 / 小时建议' : '总灰分 / 设定密度 / 小时建议';
+        byId('chart-note').textContent = this.aligned
+            ? '灰分 % · 密度 g/cm³ · 北京时间 · 灰分按建议适用小时对齐（空心点＝暂估）'
+            : '总灰分 % · 密度 g/cm³ · 北京时间 · 同一时间轴上下对齐 · 总灰分为小时结算值（空心点＝暂估）';
+        byId('ash-label').textContent = this.aligned ? '建议依据灰分' : '总灰分';
+        byId('ash-canvas').setAttribute('aria-label', (this.aligned ? '按建议适用小时对齐的建议依据灰分趋势图' : '小时结算总灰分趋势图') +
+            '，左右方向键查看记录，Home 和 End 跳至首尾');
+        if (this.meta) this.series = this.points(this.meta);
+        this.crosshair = null;
+        byId('canvas')._index = 0;
+        this.draw();
     },
     hourlyAdvice(rows) {
         // One plotted point per application hour, at the hour itself: a newer
@@ -169,6 +201,7 @@ const DensityTrendPage = {
         document.querySelectorAll('[data-t-range]').forEach(b => b.onclick = () => {
             this.hours = Number(b.dataset.tRange); this.range = null; this.refresh();
         });
+        byId('alignment').onclick = () => this.setAligned(!this.aligned);
         byId('custom').onclick = () => {
             const fields = byId('custom-fields'); fields.hidden = !fields.hidden;
             byId('custom').setAttribute('aria-expanded', String(!fields.hidden));
@@ -270,6 +303,10 @@ const DensityTrendPage = {
             `小时灰分 ${Number.isFinite(p.ash?.value) ? p.ash.value.toFixed(2)+'%' : '—'}${p.ash?.provisional ? '（暂估）' : ''}`;
     },
     ashDetail(p) {
+        if (p.aligned) return `建议依据灰分  ${Number.isFinite(p.value) ? p.value.toFixed(2) : '—'} %\n` +
+            `原生产时段 ${this.time(p.source_start, true)} — ${this.time(p.source_end, true)}\n` +
+            `对应建议小时 ${this.time(p.apply_start, true)}\n建议存档于 ${this.time(p.archived)}` +
+            (p.provisional ? '\n暂估：对应重介化验待补录' : '');
         return `小时结算总灰分  ${Number.isFinite(p.value) ? p.value.toFixed(2) : '—'} %\n${this.time(p.at)}` +
             (p.provisional ? '\n暂估：对应重介化验待补录' : '');
     },
@@ -330,10 +367,13 @@ const DensityTrendPage = {
         ctx.beginPath(); ctx.moveTo(state.x, 2); ctx.lineTo(state.x, h - 30); ctx.stroke();
         ctx.setLineDash([]);
         // Values at that instant: settled ash above, setpoint and advice below.
-        const ash = this.nearestValueAt(this.series.ash || [], state.t, 45*60000);
+        const sameHour = points => points.find(p => Number.isFinite(p.value) &&
+            Math.floor(p.t / 3600000) === Math.floor(state.t / 3600000));
+        const ash = this.aligned ? sameHour(this.series.ash || []) : this.nearestValueAt(this.series.ash || [], state.t, 45*60000);
         const setpoint = this.stepValueAt(this.series.A304 || [], state.t, 75*60000);
-        const advice = this.nearestValueAt(this.series.advice || [], state.t, 75*60000);
-        this.chip(ctx, state.x, 8, [ash ? `总灰分 ${ash.value.toFixed(2)}%${ash.provisional ? '（暂估）' : ''}` : '总灰分 —'],
+        const advice = this.aligned ? sameHour(this.series.advice || []) : this.nearestValueAt(this.series.advice || [], state.t, 75*60000);
+        const ashName = this.aligned ? '建议依据灰分' : '总灰分';
+        this.chip(ctx, state.x, 8, [ash ? `${ashName} ${ash.value.toFixed(2)}%${ash.provisional ? '（暂估）' : ''}` : `${ashName} —`],
             [colors.ash], w, ashH);
         const adviceText = !advice ? '小时建议 —' : advice.missing
             ? `小时建议 无（回落 ${this.num(advice.value)}）` : `小时建议 ${this.num(advice.value)}`;
@@ -357,7 +397,7 @@ const DensityTrendPage = {
         if (w < 100) return;
         if (!points.length || !this.meta) {
             ctx.fillStyle = colors.muted; ctx.textAlign = 'center';
-            ctx.fillText(points.length ? '等待读取趋势数据' : '该时段暂无结算总灰分', w/2, h/2);
+            ctx.fillText(points.length ? '等待读取趋势数据' : this.aligned ? '该时段暂无可对齐的建议灰分存档' : '该时段暂无结算总灰分', w/2, h/2);
             return;
         }
         const left = 78, right = 44, top = 12, bottom = 4, width = w-left-right, height = h-top-bottom;
