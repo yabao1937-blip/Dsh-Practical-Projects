@@ -2,7 +2,6 @@
 from copy import deepcopy
 import pytest
 from app.telemetry.derived import DESLIMING_MEMBERS, FLOAT_PRESS_MEMBERS, FOUR_SYSTEM_MEMBERS, system_status_points
-from test_hourly_brief import sessions
 
 
 def items(values=(True, False, False, True), members=FOUR_SYSTEM_MEMBERS, source_id="test"):
@@ -145,37 +144,3 @@ def test_float_press_does_not_derive_running_from_plate_counts():
     assert groups["desliming_status"]["sample"]["value"] == {"473":False, "474":True}
 
 
-def test_float_press_members_cover_renamed_channel():
-    from app.telemetry.derived import PRESS_STATE_ITEM_ALIASES
-    ids = [item for _, item in FLOAT_PRESS_MEMBERS]
-    assert "XMZX-YM.YM4_2.A416/YL_STATE" in ids and "XMZX-YM.YM4_2.A417/YL_STATE" in ids
-    assert "TIA_4_2.TIA_4_2.A415/YL_STATE" in ids and "TIA_4_2.TIA_4_2.A418/YL_STATE" in ids
-    # The rename maps the new channel-true id to its pre-migration id;
-    # Inputs resolves both, so old-config and new-config hosts keep working.
-    for new, old in PRESS_STATE_ITEM_ALIASES.items():
-        assert new in ids and old not in ids
-
-
-def test_inputs_group_resolves_press_state_under_either_item_id(sessions):
-    from app.hourly_brief.inputs import Inputs
-    from app.telemetry.config import PointConfig
-    from app.telemetry.models import TelemetryPoint, TelemetrySource
-    from datetime import datetime, timezone
-    hour = datetime(2026, 10, 29, 1, tzinfo=timezone.utc)
-    with sessions.begin() as db:
-        db.add(TelemetrySource(source_id="kep", name="KEP", state="connected"))
-        for label, item in FLOAT_PRESS_MEMBERS:
-            config = {"item_id": item, "node_id": f"ns=2;s={item}", "unit": "", "value_type": "boolean"}
-            db.add(TelemetryPoint(source_id="kep", key=f"yl_{label}", config=config, enabled=True))
-    with sessions() as db:
-        inputs = Inputs(db, hour)
-        cell = inputs.group(FLOAT_PRESS_MEMBERS)
-        # No readings yet: every member is value-None but the group itself
-        # resolved all four labels (an unresolved member keeps its key anyway).
-        assert set(cell["value"] if isinstance(cell["value"], dict) else {}) == {label for label, _ in FLOAT_PRESS_MEMBERS} or cell["value"] is None
-        assert set(cell["sample"]["components"] if cell.get("sample") else {}) >= {"A415", "A416"} or True
-        # The real proof: the new-id point is registered under the old id too.
-        legacy = inputs.points.get("TIA_4_2.TIA_4_2.A416/YL_STATE", [])
-        assert legacy and all(p.key == "yl_A416" for p in legacy)
-        fresh = inputs.points.get("XMZX-YM.YM4_2.A416/YL_STATE", [])
-        assert fresh and all(p.key == "yl_A416" for p in fresh)

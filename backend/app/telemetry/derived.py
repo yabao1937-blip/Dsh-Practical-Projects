@@ -12,18 +12,11 @@ DESLIMING_MEMBERS = (
     ("473", "TIA_3_3.TIA_3_3.473/if_prod"),
     ("474", "TIA_3_3.TIA_3_3.474/if_prod"),
 )
-FLOAT_PRESS_MEMBERS = (
-    ("A415", "TIA_4_2.TIA_4_2.A415/YL_STATE"),
-    ("A416", "XMZX-YM.YM4_2.A416/YL_STATE"),
-    ("A417", "XMZX-YM.YM4_2.A417/YL_STATE"),
-    ("A418", "TIA_4_2.TIA_4_2.A418/YL_STATE"),
+FLOAT_PRESS_MEMBERS = tuple(
+    (label, f"TIA_4_2.TIA_4_2.{label}/YL_STATE") for label in ("A415", "A416", "A417", "A418")
 )
-# 2026-10-29: A416/A417 moved to the renamed OPC channel. Both item ids name
-# the same physical tag during the migration; lookups accept either.
-PRESS_STATE_ITEM_ALIASES = {
-    "XMZX-YM.YM4_2.A416/YL_STATE": "TIA_4_2.TIA_4_2.A416/YL_STATE",
-    "XMZX-YM.YM4_2.A417/YL_STATE": "TIA_4_2.TIA_4_2.A417/YL_STATE",
-}
+# 2026-10-29 revert: all four presses back on the original TIA_4_2 channel.
+PRESS_STATE_ITEM_ALIASES = {}
 STATUS_GROUPS = (
     {"key":"four_system_status", "name":"四系统运行状态（组合）", "device":"四系统组合",
      "tag_name":"四系统运行状态", "description":"401、402、A、B 四路状态组合", "members":FOUR_SYSTEM_MEMBERS},

@@ -19,14 +19,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 MOVES = {
-    'ns=2;s=TIA_4_2.TIA_4_2.A416/YL_STATE': 'ns=2;s=XMZX-YM.YM4_2.A416/YL_STATE',
-    'ns=2;s=TIA_4_2.TIA_4_2.A417/YL_STATE': 'ns=2;s=XMZX-YM.YM4_2.A417/YL_STATE',
+    'ns=2;s=XMZX-YM.YM4_2.A416/YL_STATE': 'ns=2;s=TIA_4_2.TIA_4_2.A416/YL_STATE',
+    'ns=2;s=XMZX-YM.YM4_2.A417/YL_STATE': 'ns=2;s=TIA_4_2.TIA_4_2.A417/YL_STATE',
 }
-NEW_DEVICE = 'YM4_2'
-# Channel-true item ids (2026-10-29): KEPServer channel XMZX-YM, device YM4_2.
+NEW_DEVICE = 'TIA_4_2'
+# 2026-10-29 revert: restore the original TIA_4_2 channel identity.
 NEW_ITEM = {
-    'ns=2;s=XMZX-YM.YM4_2.A416/YL_STATE': 'XMZX-YM.YM4_2.A416/YL_STATE',
-    'ns=2;s=XMZX-YM.YM4_2.A417/YL_STATE': 'XMZX-YM.YM4_2.A417/YL_STATE',
+    'ns=2;s=TIA_4_2.TIA_4_2.A416/YL_STATE': 'TIA_4_2.TIA_4_2.A416/YL_STATE',
+    'ns=2;s=TIA_4_2.TIA_4_2.A417/YL_STATE': 'TIA_4_2.TIA_4_2.A417/YL_STATE',
 }
 
 
