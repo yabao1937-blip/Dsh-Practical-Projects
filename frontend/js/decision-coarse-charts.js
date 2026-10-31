@@ -22,7 +22,7 @@ const DecisionCoarseCharts = {
             (!model.feature_names || JSON.stringify(model.feature_names)===JSON.stringify(App.MLR_FEATURES));
     },
     dailyModel(store,saved) {
-        // Pure GPT training uses a private facade for range/tolerance, never the DS/current production state.
+        // Pure GPT training uses a private facade for range/tolerance, never the current production state.
         const range=['all','jun_jul','30d'].includes(saved.range)?saved.range:'all';
         const tolerance=Number.isFinite(saved.tolerance)?saved.tolerance:(store.coarseTolerance ?? .8);
         const reader=Object.create(App);reader.store={...store,coarseTolerance:tolerance};

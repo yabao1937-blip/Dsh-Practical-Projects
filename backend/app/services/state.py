@@ -7,6 +7,7 @@ import json
 import hashlib
 from sqlalchemy import select
 from ..gpt_coarse.repository import active as active_gpt_expert
+from .coarse_model_policy import gpt_only_store
 
 from ..models import (
     AutoState, CalcLog, CoalRecord, CoarseModel, Setting, HeavySample,
@@ -137,4 +138,4 @@ def load_store(db, model_at=None) -> dict:
                              for s in db.query(HeavySample).order_by(HeavySample.ts, HeavySample.id)]
     store['gptExpertModel'] = active_gpt_expert(db, model_at)
     store['_revision'] = state_revision(db)
-    return store
+    return gpt_only_store(store)

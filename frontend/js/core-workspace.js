@@ -10,7 +10,7 @@ const CoreWorkspace = {
         document.getElementById('maintenance-nav').hidden=false;
         const descriptions={
             'page-telemetry':'KEP 实时值 · 采集连接状态',
-            'page-coarse':'GPT / DS 分析 · 模型训练与版本核对',
+            'page-coarse':'GPT 分析 · 模型训练与版本核对',
             'page-float':'浮精历史与影响分析',
         };
         const tools=document.getElementById('maintenance-pages');

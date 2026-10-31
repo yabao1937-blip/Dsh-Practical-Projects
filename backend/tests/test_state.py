@@ -1,6 +1,7 @@
 """P5 后端侧：静态托管 + /state 整库快照"""
 import json
 from pathlib import Path
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -8,6 +9,19 @@ from app.main import app
 
 client = TestClient(app)
 SEED = json.loads((Path(__file__).resolve().parent.parent / "data" / "seed_store.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture(autouse=True)
+def isolated_seed_state():
+    # A retired DS seed intentionally cannot overwrite a GPT trained by another
+    # test; reset only this disposable test database before each state contract.
+    from app.database import SessionLocal
+    from app.models import AutoState, CoarseModel
+    with SessionLocal() as db:
+        db.query(CoarseModel).delete()
+        db.query(AutoState).filter(AutoState.key == 'coarseModelVariants').delete()
+        db.commit()
+    assert client.put('/api/v1/state?force=true', json=SEED).status_code == 200
 
 
 def test_static_serves_index():
@@ -32,9 +46,9 @@ def test_state_feeds_dashboard():
     store = client.get("/api/v1/state").json()
     guide, _ = build_density_guidance(store)
     d = {"totalAsh": guide["actualTotal"], "coarseAsh": resolve_coarse_ash(store)}
-    # 2026-09 皮带分工改造后:heavyAsh=502在线(8.1) → 公式 totalAsh=8.5488
-    assert abs(d["totalAsh"] - 8.5488) < 1e-6
-    assert abs(d["coarseAsh"] - 13.67) < 1e-6
+    # 无 GPT 的历史夹具不再使用 DS 预测：读取最新化验粗灰 12.83，组分加权为 8.4821。
+    assert abs(d["totalAsh"] - 8.4821) < 1e-6
+    assert d["coarseAsh"] == max(SEED["coarseCoal"], key=lambda r: r["timestamp"])["ash_content"]
 
 
 def test_state_stale_guard():

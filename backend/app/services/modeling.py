@@ -10,7 +10,7 @@ MLR_FEATURES = ['raw_ash', 'coal_amount', 'sysA', 'sysB', 'sys401', 'sys402',
 
 def predict_coarse_ash(rec, model):
     """与前端 predictCoarseAsh 一致：缺失因子用训练均值补全。"""
-    if not rec:
+    if not rec or not model:
         return None
     feats = MLR_FEATURES
     means = model.get("imputeMeans") or model.get("means") or [0] * len(feats)
@@ -20,7 +20,7 @@ def predict_coarse_ash(rec, model):
         v = rec.get(f)
         if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v):
             v = means[j] if j < len(means) else 0.0
-        # GPT 专用覆盖约束。DS 和旧存档没有此标记，保留原预测路径。
+        # GPT 专用覆盖约束。没有此标记的历史数值夹具保留原预测路径。
         if model.get("inputPolicy") == "clip-training-range":
             bounds = model.get("inputBounds") or []
             if j < len(bounds) and bounds[j] is not None:

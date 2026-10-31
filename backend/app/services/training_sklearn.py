@@ -1,9 +1,9 @@
-"""DS 原版 MLR/PLS 的 sklearn 对拍求解器（DS/GPT 入口由 routers/training.py 选择）。
+"""通用 MLR/PLS 数值求解器的 sklearn 对拍实现，仅供离线数值校验。
 
 职责划分（对应评审建议）：
 - 预处理（_constCols / z-score ddof=1 / 缺失均值补全）、折内预处理 LOOCV 选 λ、
-  PLS 折内预处理 LOOCV 选 A、生产模型选择 —— 全部复用 training.py 的精确逻辑，
-  保证离散决策（drop / λ 网格点 / A / production）与前端 JS 逐位一致；
+  PLS 折内预处理 LOOCV 选 A —— 复用 training.py 的精确逻辑，
+  保证 drop / λ 网格点 / A 与保留的数值夹具一致；
 - 只把「最终系数求解」换成 sklearn：
     MLR  → Ridge(alpha=λ, fit_intercept=True, solver='svd')，喂预标准化 Z + 原始 y；
     PLS  → PLSRegression(n_components=A, scale=False)，喂预标准化 Z + 中心化 y。
@@ -14,7 +14,7 @@ from sklearn.cross_decomposition import PLSRegression
 from sklearn.linear_model import Ridge
 
 from .training import (_col_means_std, _const_cols, _js_round, _mean, _metrics, _impute,
-                       _orchestrate, _standardize, _std, _un_drop, train_mlr, train_pls)
+                       _standardize, _std, _un_drop, train_mlr, train_pls)
 
 
 def _drop_cols(X, drop):
@@ -89,8 +89,3 @@ def train_pls_sklearn(X, y, tol=0.8, amax=None):
     return {"type": "pls", "intercept": intercept, "coefs": full["coefs"], "means": full["means"],
             "stds": full["stds"], "stdCoef": full["stdCoef"], "A": A, "yhat": yhat,
             "metrics": m, "n": n, "k": k, "drop": drop}
-
-
-def train_coarse_model_sklearn(records, range_="jun_jul", tol=0.8):
-    """sklearn 版训练编排（最终系数用 Ridge / PLSRegression，选型口径与前端逐位一致）。"""
-    return _orchestrate(records, range_, tol, train_mlr_sklearn, train_pls_sklearn)

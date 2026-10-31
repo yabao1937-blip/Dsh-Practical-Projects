@@ -4,7 +4,7 @@
    - saveStore/loadStore：localStorage 持久化，http 下额外镜像 PUT /api/v1/state
    - 算法：取值链 resolve*、总灰分 calcTotalAsh、密度建议 computeDensityGuidance、
            粗灰预测 predictCoarseAsh
-   - 训练：DS _trainCoarseDs / GPT _trainCoarseRows + retrainCoarseModelAsync（后端同算法）
+   - 训练：GPT _trainCoarseRows + retrainCoarseModelAsync（后端同算法）
    ======================================== */
 
 const App = {
@@ -21,7 +21,7 @@ const App = {
         alerts: [],
         // 多因素粗精煤泥灰分模型（MLR + PLS）
         coarseModel: null,            // {mlr, pls, production, trainedAt, n, tolerance}
-        coarseModelVariants: {},      // DS / GPT 各自最近一次训练的完整模型
+        coarseModelVariants: {},      // GPT 最近一次训练的完整模型；旧存档只读保留
         coarseModelHistory: [],       // 每次重训练的拟合度快照（持续优化追踪）
         coarseTolerance: 0.8,         // 合格判定容差（±%），可在粗精煤泥页调整
         coarseTrainRange: 'jun_jul',  // 训练数据范围：jun_jul=仅6-7月(出厂口径) | 30d=近30天 | all=全部
@@ -235,7 +235,7 @@ const App = {
         const settings = Object.fromEntries(keys.filter(key => Object.hasOwn(data.settings, key))
             .map(key => [key, data.settings[key]]));
         // A bootstrap started before an explicit full read must not erase its
-        // newer completed history or DS model when the bootstrap arrives last.
+        // newer completed history or saved GPT model when the bootstrap arrives last.
         if (!this._readOnlyFullStateLoaded)
             this.store = Object.assign(JSON.parse(JSON.stringify(this._readOnlyDefaults || this.store)), settings);
         this._readOnlyBootstrap = data;
@@ -2561,39 +2561,22 @@ const App = {
         is_stoppage: '停机/低负荷', level: '精磁尾液位(%)'
     },
 
-    // 出厂默认模型：基于"粗精煤泥灰分影响因素6.16-7.14.xlsx"(113条)训练的多因素回归
-    // MLR 标准化正规方程 + PLS(NIPALS)，按留一交叉验证 Q² 选优生产模型；缺失因子均值补全
-    // 注：Excel 无"停机"列，is_stoppage 系数置0（导入数据时按 带煤量<=10 自动推断）
-    DEFAULT_COARSE_MODEL: {
-        type: 'pls', n: 113, trainPeriod: '2026-06-16 ~ 2026-07-14',
-        intercept: 26.551004,
-        coefs: [0.013260, -0.001465, -2.254154, 0.609851, -0.928724, 1.236704, 0.795503, -0.995461, 0.0, -0.181664],
-        means:  [35.970708, 846.307080, 0.964602, 0.584071, 0.672566, 0.823009, 0.902655, 0.929204, 0.0, 55.658407],
-        stds:   [17.671356, 256.937020, 0.185607, 0.495077, 0.471367, 0.383361, 0.297748, 0.257627, 1.0, 12.471265],
-        stdCoef:[0.067562, -0.108522, -0.120631, 0.087052, -0.126220, 0.136696, 0.068292, -0.073943, 0.0, -0.653220],
-        metrics: { r2: 0.522635, adjR2: 0.480924, rmse: 2.385691, mae: 1.767178, passRate: 32.743363, q2: 0.421805 }
-    },
 
-    // 备选 MLR 模型（同一数据集），供"对比查看"与出厂回退
-    DEFAULT_COARSE_MODEL_MLR: {
-        type: 'mlr', n: 113, trainPeriod: '2026-06-16 ~ 2026-07-14',
-        intercept: 26.782596,
-        coefs: [0.014085, -0.002248, -5.014370, 1.597108, 0.068595, 2.378673, 1.086430, -0.668272, 0.0, -0.176086],
-        means:  [35.970708, 846.307080, 0.964602, 0.584071, 0.672566, 0.823009, 0.902655, 0.929204, 0.0, 55.658407],
-        stds:   [17.671356, 256.937020, 0.185607, 0.495077, 0.471367, 0.383361, 0.297748, 0.257627, 1.0, 12.471265],
-        stdCoef:[0.071763, -0.166564, -0.268344, 0.227975, 0.009323, 0.262920, 0.093268, -0.049639, 0.0, -0.633163],
-        metrics: { r2: 0.534243, adjR2: 0.493545, rmse: 2.356507, mae: 1.759189, passRate: 31.858407, q2: 0.402075 }
-    },
-
-    // DS/GPT 版本由模型指标识别，兼容升级前的存档。
+    // 只接受有 GPT 版本标记的兼容模型；旧存档不再作为预测回退。
     coarseEngine(model = this.store.coarseModel) {
-        // 兼容没有版本字段的旧存档：v2 属于 GPT，其余属于 DS。
-        return model && model.mlr && model.mlr.metrics && model.mlr.metrics.version === 2 ? 'gpt' : 'ds';
+        return model?.engine !== 'ds' && model?.mlr?.metrics?.version === 2 &&
+            model?.pls?.metrics?.version === 2 ? 'gpt' : 'unavailable';
+    },
+
+    coarseModelGroup() {
+        const current = this.store.coarseModel, saved = this.store.coarseModelVariants?.gpt;
+        if (this.coarseEngine(current) === 'gpt') return current;
+        return this.coarseEngine(saved) === 'gpt' ? saved : null;
     },
 
     _rememberCoarseModel() {
         if (!this.store.coarseModelVariants) this.store.coarseModelVariants = {};
-        if (this.store.coarseModel) {
+        if (this.coarseEngine() === 'gpt') {
             const engine = this.coarseEngine(), current = this.store.coarseModel;
             const saved = this.store.coarseModelVariants[engine];
             // /state 的兼容模型表只返回部分字段。同一模型不覆盖完整快照，避免丢失 lambda/drop。
@@ -2603,27 +2586,11 @@ const App = {
         }
     },
 
-    async switchCoarseEngine(engine) {
-        if (!['ds', 'gpt'].includes(engine)) return false;
-        this._rememberCoarseModel();
-        const saved = this.store.coarseModelVariants[engine];
-        const range = this.store.coarseTrainRange || 'jun_jul';
-        const tol = this.store.coarseTolerance ?? .8;
-        if (!saved || saved.range !== range || saved.tolerance !== tol) {
-            return this.retrainCoarseModelAsync(range, engine);
-        }
-        this.store.coarseModel = saved;
-        this.refreshCoarsePredictions();
-        this.saveStore();
-        return true;
-    },
 
-    // 取当前生效的粗精煤泥模型（优先生产模型，缺则回退出厂默认）。
+    // 取现有 GPT 兼容模型；没有模型时保持缺失，不调用旧版出厂参数。
     getCoarseModel(which) {
-        which = which || (this.store.coarseModel ? this.store.coarseModel.production : 'pls');
-        if (this.store.coarseModel && this.store.coarseModel[which]) return this.store.coarseModel[which];
-        if (which === 'mlr') return this.DEFAULT_COARSE_MODEL_MLR;
-        return this.DEFAULT_COARSE_MODEL;
+        const group = this.coarseModelGroup();
+        return group?.[which || group.production] || null;
     },
 
     // 用指定模型预测一条记录的灰分；缺失因子用训练集均值补全
@@ -2631,6 +2598,8 @@ const App = {
         if (!rec) return null;
         const feats = this.MLR_FEATURES;
         const model = this.getCoarseModel(which);
+        if (!Number.isFinite(model?.intercept) || !Array.isArray(model?.coefs) ||
+            model.coefs.length !== feats.length || !model.coefs.every(Number.isFinite)) return null;
         const means = model.imputeMeans || model.means || feats.map(() => 0);
         let y = model.intercept;
         for (let j = 0; j < feats.length; j++) {
@@ -2666,25 +2635,6 @@ const App = {
     },
 
     // 从 coarseCoal 构造训练集 X/y（按训练范围过滤，缺失因子列均值补全）
-    _buildCoarseXY(range) {
-        const feats = this.MLR_FEATURES;
-        const rows = this.filterTrainRows(range);
-        // 按时间排序：时间序列交叉验证与"预测下一小时"语义依赖时间先后
-        rows.sort((a, b) => { const ta = String(a.timestamp || ''), tb = String(b.timestamp || ''); return ta < tb ? -1 : ta > tb ? 1 : 0; });
-        if (rows.length < feats.length + 2) return null;
-        const means = feats.map(f => {
-            const vals = rows.map(r => r[f]).filter(v => Number.isFinite(v));
-            return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-        });
-        const X = rows.map(r => feats.map((f, i) => {
-            const v = r[f];
-            return Number.isFinite(v) ? v : null;
-        }));
-        const y = rows.map(r => r.ash_content);
-        return { X, y, means, rows };
-    },
-
-    // 粗灰专用训练 v2：按完整日期验证，专家假设由时间验证选择。
     _coarseRows(records) {
         const unique = new Map();
         records.forEach(r => {
@@ -2871,27 +2821,11 @@ const App = {
         return {...models, production, n: rows.length};
     },
 
-    // DS 原版编排：留一验证训练、原版时间验证选择采样生产算法。
-    _trainCoarseDs(range) {
-        const d = this._buildCoarseXY(range);
-        if (!d) return null;
-        const mlr = this.trainMlr(d.X, d.y);
-        const pls = this.trainPls(d.X, d.y, this.MLR_FEATURES.length);
-        if (!mlr || !pls) return null;
-        mlr.imputeMeans = d.means; pls.imputeMeans = d.means;
-        const mlrQ2t = this._timeCvQ2(d.X, d.y, 'mlr');
-        const plsQ2t = this._timeCvQ2(d.X, d.y, 'pls', this.MLR_FEATURES.length);
-        mlr.metrics.q2Time = mlrQ2t == null ? null : +mlrQ2t.toFixed(4);
-        pls.metrics.q2Time = plsQ2t == null ? null : +plsQ2t.toFixed(4);
-        const production = mlrQ2t != null && plsQ2t != null
-            ? (plsQ2t >= mlrQ2t ? 'pls' : 'mlr') : (pls.metrics.q2 >= mlr.metrics.q2 ? 'pls' : 'mlr');
-        return {mlr, pls, production, n: d.rows.length};
-    },
 
-    trainCoarseModel(range, engine = this.coarseEngine()) {
+    trainCoarseModel(range, engine = 'gpt') {
         const useRange = range || this.store.coarseTrainRange || 'jun_jul';
-        if (!['ds', 'gpt'].includes(engine)) return false;
-        const result = engine === 'gpt' ? this._trainCoarseRows(this.filterTrainRows(useRange)) : this._trainCoarseDs(useRange);
+        if (engine !== 'gpt') return false;
+        const result = this._trainCoarseRows(this.filterTrainRows(useRange));
         if (!result) return false;
         const {mlr, pls, production, n} = result;
         const mlrQ2t = mlr.metrics.q2Time, plsQ2t = pls.metrics.q2Time;
@@ -2927,17 +2861,18 @@ const App = {
 
     // 仅重算最新预测值（5分钟滚动用，不重训练）
     refreshCoarsePredictions() {
-        const which = this.store.coarseModel ? this.store.coarseModel.production : 'mlr';
+        const which = this.coarseModelGroup()?.production || 'mlr';
         this.store.coarseCoal.forEach(r => {
-            r.predicted_ash = +this.predictCoarseAsh(r, which).toFixed(4);
+            const value = this.predictCoarseAsh(r, which);
+            r.predicted_ash = Number.isFinite(value) ? +value.toFixed(4) : null;
         });
     },
 
     // http 先同步再训练；服务端已保存模型，不再以旧版本整库覆盖。file:// 本地训练。
     // 返回 Promise<boolean>；成功时已更新 store.coarseModel / coarseModelHistory / predicted_ash 并 saveStore。
-    async retrainCoarseModelAsync(range, engine = this.coarseEngine()) {
+    async retrainCoarseModelAsync(range, engine = 'gpt') {
         range = range || this.store.coarseTrainRange || 'jun_jul';
-        if (!['ds', 'gpt'].includes(engine)) return false;
+        if (engine !== 'gpt') return false;
         if (window.Api && window.location.protocol.startsWith('http')) {
             try {
                 const sync = await this.flushMirrorNow();
@@ -3028,89 +2963,6 @@ const App = {
         return {X: X.map(r => r.map((v, j) => Number.isFinite(v) ? v : means[j])), means};
     },
 
-    _ridgeContext(X, y) {
-        const filled = this._impute(X);
-        const {means, stds} = this._colMeansStd(filled.X);
-        const Z = this._standardize(filled.X, means, stds), k = means.length + 1;
-        const A = Array.from({length: k}, () => new Array(k).fill(0)), b = new Array(k).fill(0);
-        Z.forEach((row, i) => {
-            const v = [1, ...row];
-            for (let p = 0; p < k; p++) {
-                b[p] += v[p] * y[i];
-                for (let q = 0; q < k; q++) A[p][q] += v[p] * v[q];
-            }
-        });
-        const active = A.slice(1).map((r, j) => r[j + 1]).filter(v => v > 1e-12);
-        const diag = active.length ? this._mean(active) : 0;
-        for (let j = 1; j < k; j++) if (A[j][j] <= 1e-12) A[j][j] = 1;
-        return {A, b, diag, means, stds, impute: filled.means};
-    },
-
-    trainMlr(X, y) {
-        const rawX = X, filled = this._impute(X); X = filled.X;
-        const drop = this._constCols(X);
-        const Xd = drop.length ? X.map(r => r.filter((_, j) => !drop.includes(j))) : X;
-        const n = Xd.length, k = Xd[0].length;
-        const { means, stds } = this._colMeansStd(Xd);
-        const Z = this._standardize(Xd, means, stds);
-        const K = k + 1;                       // 设计矩阵 [1, Z]
-        const A = [], b = new Array(K).fill(0);
-        for (let p = 0; p < K; p++) A[p] = new Array(K).fill(0);
-        for (let i = 0; i < n; i++) {
-            for (let p = 0; p < K; p++) {
-                const mp = (p === 0) ? 1 : Z[i][p - 1];
-                b[p] += mp * y[i];
-                for (let q = p; q < K; q++) { const mq = (q === 0) ? 1 : Z[i][q - 1]; A[p][q] += mp * mq; }
-            }
-        }
-        for (let p = 0; p < K; p++) for (let q = 0; q < p; q++) A[p][q] = A[q][p];
-        // 岭回归：λ 在网格上按留一交叉误差选优（λ=0 即普通最小二乘；截距列不惩罚）
-        let diagMean = 0;
-        for (let p = 1; p < K; p++) diagMean += A[p][p];
-        diagMean /= Math.max(1, K - 1);
-        const factors = [0, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1];
-        const folds = rawX.map((_, i) => this._ridgeContext(rawX.filter((_, r) => r !== i), y.filter((_, r) => r !== i)));
-        let best = null;
-        for (const factor of factors) {
-            const lam = factor * diagMean;
-            const Ar = lam > 0 ? A.map((row, i) => row.map((v, j) => (i === j && j > 0) ? v + lam : v)) : A;
-            const beta = this.solveLinearSystem(Ar, b);
-            if (!beta) continue;
-            let sse = 0;
-            for (let i = 0; i < n; i++) {
-                const f = folds[i];
-                const ar = f.A.map((row, p) => row.map((v, q) => p === q && p > 0 ? v + factor * f.diag : v));
-                const fitted = this.solveLinearSystem(ar, f.b);
-                if (!fitted) { sse = Infinity; break; }
-                let yh = fitted[0];
-                rawX[i].forEach((v, j) => { yh += fitted[j + 1] * ((Number.isFinite(v) ? v : f.impute[j]) - f.means[j]) / f.stds[j]; });
-                sse += (y[i] - yh) ** 2;
-            }
-            if (!best || sse < best.sse) best = { sse, lam, beta };
-        }
-        if (!best) return null;
-        const betaStd = best.beta;
-
-        const coefs = new Array(k);
-        let intercept = betaStd[0];
-        for (let j = 0; j < k; j++) { coefs[j] = betaStd[1 + j] / stds[j]; intercept -= coefs[j] * means[j]; }
-        const yhat = Xd.map(r => { let s = intercept; for (let j = 0; j < k; j++) s += coefs[j] * r[j]; return s; });
-        const m = this._metrics(y, yhat, k);
-        const stdY = this._std(y);
-        const stdCoef = coefs.map((c, j) => stdY > 0 ? c * stds[j] / stdY : 0);
-
-        // LOOCV Q² 直接复用 λ 选优时的留一误差
-        const sst = this._sst(y);
-        m.q2 = sst > 0 ? 1 - best.sse / sst : 0;
-        m.lambda = best.lam;
-
-        // 将被剔除的常数特征列补回（系数0，均值0，std1）
-        const full = this._unDrop({ coefs, means, stds, stdCoef }, drop, X[0].length);
-        return { type: 'mlr', intercept, coefs: full.coefs, means: full.means, stds: full.stds, stdCoef: full.stdCoef, yhat, metrics: m, n, k, drop, lambda: best.lam, imputeMeans: filled.means };
-    },
-
-    // ---------- PLS1 NIPALS（A 由 LOOCV 选优） ----------
-    // Z: 标准化 X(n×k), yc: 中心化 y(n), A: 分量数 → 返回 {W,P,C,Bstd}
     _plsCore(Z, yc, A) {
         const n = Z.length, k = Z[0].length;
         const X0 = Z.map(r => r.slice()), y0 = yc.slice();
@@ -3139,53 +2991,6 @@ const App = {
         return { W, P, C, Bstd };
     },
 
-    trainPls(X, y, Amax) {
-        const rawX = X, filled = this._impute(X); X = filled.X;
-        const drop = this._constCols(X);
-        const Xd = drop.length ? X.map(r => r.filter((_, j) => !drop.includes(j))) : X;
-        const n = Xd.length, k = Xd[0].length;
-        const { means, stds } = this._colMeansStd(Xd);
-        const Z = this._standardize(Xd, means, stds);
-        const yMean = this._mean(y), stdY = this._std(y);
-        const yc = y.map(v => v - yMean);
-        Amax = Math.min(Amax || k, k);
-
-        // 每个训练折独立填补、标准化和中心化，验证样本不参与拟合。
-        let bestA = 1, bestQ2 = -Infinity;
-        const sst = this._sst(y);
-        if (n >= 10) {
-            const sseByA = new Array(Amax + 1).fill(0);
-            for (let i = 0; i < n; i++) {
-                const fold = this._impute(rawX.filter((_, r) => r !== i));
-                const stats = this._colMeansStd(fold.X);
-                const Zt = this._standardize(fold.X, stats.means, stats.stds);
-                const yt = y.filter((_, r) => r !== i), ym = this._mean(yt), yct = yt.map(v => v - ym);
-                const test = rawX[i].map((v, j) => ((Number.isFinite(v) ? v : fold.means[j]) - stats.means[j]) / stats.stds[j]);
-                for (let A = 1; A <= Amax; A++) {
-                    const core = this._plsCore(Zt, yct, A);
-                    let pred = ym;
-                    for (let j = 0; j < test.length; j++) pred += core.Bstd[j] * test[j];
-                    const e = y[i] - pred; sseByA[A] += e * e;
-                }
-            }
-            for (let A = 1; A <= Amax; A++) { const q = sst > 0 ? 1 - sseByA[A] / sst : 0; if (q > bestQ2) { bestQ2 = q; bestA = A; } }
-        }
-
-        const core = this._plsCore(Z, yc, bestA);
-        const coefs = new Array(k);
-        let intercept = yMean;
-        for (let j = 0; j < k; j++) { coefs[j] = core.Bstd[j] / stds[j]; intercept -= coefs[j] * means[j]; }
-        const yhat = Xd.map(r => { let s = intercept; for (let j = 0; j < k; j++) s += coefs[j] * r[j]; return s; });
-        const m = this._metrics(y, yhat, k);
-        m.q2 = bestQ2;
-        const stdCoef = coefs.map((c, j) => stdY > 0 ? c * stds[j] / stdY : 0);
-
-        // 将被剔除的常数特征列补回（系数0，均值0，std1）
-        const full = this._unDrop({ coefs, means, stds, stdCoef }, drop, X[0].length);
-        return { type: 'pls', intercept, coefs: full.coefs, means: full.means, stds: full.stds, stdCoef: full.stdCoef, A: bestA, yhat, metrics: m, n, k, drop, imputeMeans: filled.means };
-    },
-
-    // 用训练好的模型对一条完整特征向量预测（缺失值回退训练均值）
     _predictFromModelVec(xrow, mdl) {
         let s = mdl.intercept;
         const nf = mdl.coefs.length;
@@ -3201,65 +3006,6 @@ const App = {
 
     // 时间序列交叉验证（walk-forward）：按时间先后滚动，前段训练、后段测试，池化测试误差 → Q²
     // 更贴近"用过去数据预测下一小时"的真实能力（留一交叉会偷看未来，高估模型）
-    _timeCvQ2(X, y, kind, Amax) {
-        const n = X.length;
-        if (n < 30) return null;
-        const b1 = Math.max(12, Math.round(n * 0.7));
-        const b2 = Math.max(b1 + 8, Math.round(n * 0.85));
-        const blocks = [[b1, b2], [b2, n]];
-        let sse = 0, sst = 0, cnt = 0;
-        for (const [s, e] of blocks) {
-            if (e - s < 5) continue;
-            const Xtr = X.slice(0, s), ytr = y.slice(0, s);
-            const Xte = X.slice(s, e), yte = y.slice(s, e);
-            let mdl = null;
-            if (kind === 'mlr') mdl = this.trainMlr(Xtr, ytr);
-            else mdl = this.trainPls(Xtr, ytr, Amax || Math.min(8, Xtr[0].length));
-            if (!mdl) continue;
-            const ym = this._mean(yte);
-            for (let i = 0; i < yte.length; i++) {
-                const e = yte[i] - this._predictFromModelVec(Xte[i], mdl);
-                sse += e * e; sst += (yte[i] - ym) ** 2; cnt++;
-            }
-        }
-        if (cnt < 10) return null;
-        return sst > 0 ? 1 - sse / sst : 0;
-    },
-
-    // 找出零方差（常数）列：训练时剔除，避免设计矩阵奇异
-    _constCols(X) {
-        const k = X[0].length, n = X.length;
-        const cols = [];
-        for (let j = 0; j < k; j++) {
-            const first = X[0][j];
-            let constant = true;
-            for (let i = 1; i < n; i++) { if (X[i][j] !== first) { constant = false; break; } }
-            if (constant) { cols.push(j); continue; }
-            // 与前面已保留列完全重复（共线）也剔除，避免正规方程奇异
-            for (let p = 0; p < j; p++) {
-                if (cols.includes(p)) continue;
-                let dup = true;
-                for (let i = 0; i < n; i++) { if (X[i][j] !== X[i][p]) { dup = false; break; } }
-                if (dup) { cols.push(j); break; }
-            }
-        }
-        return cols;
-    },
-
-    // 将被剔除的常数列补回模型数组（占位系数0、均值0、std1、标准化系数0）
-    _unDrop(model, drop, fullK) {
-        if (!drop || drop.length === 0) return model;
-        const out = { coefs: new Array(fullK).fill(0), means: new Array(fullK).fill(0),
-                      stds: new Array(fullK).fill(1), stdCoef: new Array(fullK).fill(0) };
-        let idx = 0;
-        for (let j = 0; j < fullK; j++) {
-            if (drop.includes(j)) continue;
-            out.coefs[j] = model.coefs[idx]; out.means[j] = model.means[idx];
-            out.stds[j] = model.stds[idx]; out.stdCoef[j] = model.stdCoef[idx];
-            idx++;
-        }
-        return out;
-    }
 };
 
 // 页面加载完成后初始化

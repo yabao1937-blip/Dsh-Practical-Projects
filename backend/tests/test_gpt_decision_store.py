@@ -67,7 +67,7 @@ def install_case(sessions, case):
                 impute_means=[4], n=22, tolerance=.6, train_range='fixture',
                 trained_at='2026-10-08 09:58:00', created_at=before))
             db.add(CoarseModel(method='pls', is_current=False, intercept=4, coefs=[0]*10,
-                means=[1], stds=[2], std_coef=[3], metrics={'version': 1}, pls_A=2,
+                means=[1], stds=[2], std_coef=[3], metrics={'version': 1 if case == 'ds_only' else 2}, pls_A=2,
                 impute_means=[4], n=23, tolerance=.7, train_range='fixture2',
                 trained_at='2026-10-08 09:59:00', created_at=before))
         if case in ('expert8', 'expert9'):

@@ -2,12 +2,13 @@
 
 This adapter preserves the legacy model representation and raw setting/auto
 values.  Caller-specific time gates still live in shared_snapshot.  It does not
-load historical coal tables, compute state revisions or modify DS storage.
+load historical coal tables, compute state revisions or modify historical model storage.
 """
 from sqlalchemy import select
 
 from ..gpt_coarse.repository import active as active_gpt_expert
 from ..models import AutoState, CoarseModel, Setting
+from ..services.coarse_model_policy import gpt_only_store
 
 
 AUTO_KEYS = frozenset(('coarseModelVariants', 'densityLastMoveAt', 'densityActionLatch'))
@@ -53,4 +54,4 @@ def load_decision_store(db, model_at=None):
         store['coarseModel'] = group
 
     store['gptExpertModel'] = active_gpt_expert(db, model_at)
-    return store
+    return gpt_only_store(store)

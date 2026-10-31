@@ -72,7 +72,7 @@ def install(baseline_state, model_directory):
     # 独立连接，不能复用其他已导入模块的全局 engine / SessionLocal。
     engine = create_engine("sqlite:///" + destination.as_posix())
     session_factory = sessionmaker(bind=engine)
-    saved_ds = copy.deepcopy(state["coarseModelVariants"].get("ds"))
+    state["coarseModelVariants"] = {}
     current = bundle["models"]["sample"]
     state["coarseCoal"] = records
     state["coarseModel"] = current
@@ -102,8 +102,8 @@ def install(baseline_state, model_directory):
             pass_rate=active["metrics"]["passRate"], detail=detail))
         session.flush()
         loaded = load_store(session)
-        if loaded["coarseModelVariants"].get("ds") != saved_ds:
-            raise ValueError("DS 快照发生变化，回滚安装")
+        if set(loaded["coarseModelVariants"]) != {"gpt"}:
+            raise ValueError("仅应保存 GPT 模型，回滚安装")
         if len(loaded["coarseCoal"]) != bundle["audit"]["totalN"]:
             raise ValueError("落库记录数量不符，回滚安装")
         restored = loaded["coarseModel"][current["production"]]

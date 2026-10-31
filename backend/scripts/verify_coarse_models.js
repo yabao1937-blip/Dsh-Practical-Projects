@@ -1,4 +1,4 @@
-// 粗灰页面缓存、算法切换和训练同步的无网络回归。
+// GPT 页面缓存、旧模型隔离和训练同步的无网络回归；只训练内存夹具，不保存模型。
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -43,56 +43,59 @@ const rows = [{timestamp: '2026-02-30 10:00:00', ash_content: 12},
     {timestamp: '2026-01-01 10:00:00', ash_content: Infinity}];
 assert.equal(App._coarseRows(rows).length, 0);
 
-(async () => {
-    // DS 原版回归 + 往返切换不重训、不覆盖另一版本。
-    App.store.coarseCoal = seed.coarseCoal;
-    App.store.coarseTrainRange = 'jun_jul';
-    assert.equal(App.trainCoarseModel('jun_jul', 'gpt'), true);
-    let gpt = App.store.coarseModel;
-    assert.equal(await App.switchCoarseEngine('ds'), true);
-    const ds = App.store.coarseModel;
-    assert.equal(App.coarseEngine(), 'ds');
-    const dsSnapshot = JSON.stringify(App.store.coarseModelVariants.ds);
-    assert.equal(App.trainCoarseModel('jun_jul', 'gpt'), true);
-    gpt = App.store.coarseModel;
-    assert.equal(JSON.stringify(App.store.coarseModelVariants.ds), dsSnapshot);
-    assert.equal(App.store.coarseModel.mlr.metrics.trainingRevision, 'gpt-coverage-robust-20260922');
-    assert.equal(await App.switchCoarseEngine('ds'), true);
-    for (const method of ['mlr', 'pls']) {
-        assert(Math.abs(ds[method].metrics.r2 - seed.coarseModel[method].metrics.r2) < 1e-6);
-        assert(Math.abs(ds[method].metrics.q2 - seed.coarseModel[method].metrics.q2) < 1e-6);
-        ds[method].coefs.forEach((v, j) => assert(Math.abs(v - seed.coarseModel[method].coefs[j]) < 1e-6));
-    }
-    const dsDaily = page._ensureDailyModel();
-    assert(dsDaily && !dsDaily.mlr.metrics.version);
-    // 固定夹具在原版 2668ec1 日模型上的结果；容差 1e-6。
-    assert(Math.abs(dsDaily.mlr.metrics.r2 - .7725384424407182) < 1e-6);
-    assert(Math.abs(dsDaily.mlr.metrics.q2 - .4877032665509692) < 1e-6);
-    assert(Math.abs(dsDaily.pls.metrics.r2 - .79965773887981) < 1e-6);
-    assert(Math.abs(dsDaily.pls.metrics.q2 - .4525513805231349) < 1e-6);
-    assert(dsDaily.days.every(d => [0, 1].includes(d.desliming473)));
-    const historyN = App.store.coarseModelHistory.length;
-    assert.equal(await App.switchCoarseEngine('gpt'), true);
-    assert.equal(App.coarseEngine(), 'gpt');
-    assert.equal(App.store.coarseModel, gpt);
-    assert.equal(App.store.coarseModelVariants.ds, ds);
-    const gptDaily = page._ensureDailyModel();
-    assert.equal(gptDaily.mlr.metrics.version, 2);
-    assert.notEqual(dsDaily, gptDaily);
-    assert.equal(await App.switchCoarseEngine('ds'), true);
-    assert.equal(App.store.coarseModel, ds);
-    assert.equal(App.store.coarseModelHistory.length, historyN);
-    const saved = JSON.parse(JSON.stringify(App.store));
-    App.store = saved; // 模拟重新加载，版本由模型事实推断。
-    assert.equal(App.coarseEngine(), 'ds');
-    const savedGpt = JSON.stringify(App.store.coarseModelVariants.gpt);
-    assert.equal(App.trainCoarseModel('jun_jul', 'ds'), true);
-    assert.equal(JSON.stringify(App.store.coarseModelVariants.gpt), savedGpt);
-    App.store.coarseCoal = seed.coarseCoal.slice(0, 4);
-    App.store.coarseTrainRange = '30d';
-    assert.equal(await App.switchCoarseEngine('gpt'), false);
-    assert.equal(App.coarseEngine(), 'ds');
+// 无 GPT 时详情不崩溃；缺失预测不能按 0 计入累计灰分。
+const beforeDetail = {model: App.store.coarseModel, bank: App.store.coarseModelVariants,
+    rows: App.store.coarseCoal, open: App.openModal, pred: page._pred};
+App.store.coarseModel = null;
+App.store.coarseModelVariants = {};
+App.store.coarseCoal = [{timestamp: '2026-10-31 10:00:00', ash_content: 12, coal_amount: 100, level: 50},
+    {timestamp: '2026-10-31 10:01:00', ash_content: 13, coal_amount: 200, level: 50}];
+elements['coarse-view-mode'].value = 'sample';
+let detail;
+App.openModal = (_title, html) => { detail = html; };
+page.showCardDetail('predict');
+assert(detail.includes('模型不可用'));
+page.showCardDetail('cumulative');
+assert(detail.includes('<strong>—</strong>'));
+page._pred = row => row.coal_amount === 100 ? 12 : null;
+page.showCardDetail('cumulative');
+assert(detail.includes('<strong>12.00%</strong>'));
+page._pred = beforeDetail.pred;
+App.openModal = beforeDetail.open;
+App.store.coarseModel = beforeDetail.model;
+App.store.coarseModelVariants = beforeDetail.bank;
+App.store.coarseCoal = beforeDetail.rows;
 
+(async () => {
+
+    // 旧存档仍保留，但不能再参与预测或触发旧训练分支。
+    const gpt = App.store.coarseModel;
+    const preserved = JSON.stringify(gpt), old = structuredClone(seed.coarseModel);
+    App.store.coarseModel = old;
+    App.store.coarseModelVariants = {gpt, ds: old};
+    assert.equal(App.coarseEngine(), 'unavailable');
+    assert.equal(App.getCoarseModel('mlr'), gpt.mlr);
+    const example = seed.coarseCoal[0];
+    assert.equal(App.predictCoarseAsh(example, 'mlr'), App._coarsePredict(example, gpt.mlr));
+    assert.equal(App.trainCoarseModel('all', 'ds'), false);
+    assert.equal(await App.retrainCoarseModelAsync('all', 'ds'), false);
+    assert.equal(App.coarseEngine({...old, engine: 'gpt'}), 'unavailable', 'A name cannot upgrade old parameters');
+    assert.equal(App.coarseEngine({...gpt, engine: 'ds'}), 'unavailable', 'Explicit retired engine is rejected');
+    for (const name of ['switchCoarseEngine', '_trainCoarseDs', 'trainMlr', 'trainPls', 'DEFAULT_COARSE_MODEL'])
+        assert.equal(typeof App[name], 'undefined', name + ' is retired');
+    for (const name of ['switchEngine', '_trainDailyDs', 'loadCoarseForward'])
+        assert.equal(typeof page[name], 'undefined', name + ' is retired');
+    delete App.store.coarseModelVariants.gpt;
+    assert.equal(App.getCoarseModel(), null);
+    assert.equal(App.predictCoarseAsh(example), null, 'No zero-valued or factory fallback');
+    App.store.coarseCoal = [structuredClone(example)];
+    App.refreshCoarsePredictions();
+    assert.equal(App.store.coarseCoal[0].predicted_ash, null);
+    App.store.coarseModel = gpt;
+    assert.equal(JSON.stringify(gpt), preserved);
+    assert.equal(JSON.stringify(old), JSON.stringify(seed.coarseModel), 'Historic snapshot was not modified');
+    const html = fs.readFileSync(path.join(__dirname, '../../frontend/index.html'), 'utf8');
+    assert(!html.includes('coarse-engine-ds') && !html.includes('CoarsePage.switchEngine'));
     ctx.window.location.protocol = 'http:';
     App.store._revision = 'before';
     App.store.coarseCoal = seed.coarseCoal;
@@ -123,5 +126,5 @@ assert.equal(App._coarseRows(rows).length, 0);
     assert.equal(await App.retrainCoarseModelAsync('all'), false);
     assert.equal(App.store._revision, 'after');
     assert.equal(App._mirrorConflict, true);
-    console.log('Coarse DS/GPT: original parity, switching, persistence, daily cache, range and training sync passed');
+    console.log('GPT: compatible predictions, retired-model isolation, daily cache, range and training sync passed');
 })().catch(e => { console.error(e); process.exitCode = 1; });

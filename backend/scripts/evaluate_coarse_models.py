@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.services.coarse_training import aggregate_daily, prepare_rows, select, train_models
 from app.services.importer import parse_coarse_factors
 from app.services.modeling import MLR_FEATURES, predict_coarse_ash
-from app.services.training import _metrics, train_coarse_model, train_mlr, train_pls
+from app.services.training import _metrics
 
 
 def load_source(root):
@@ -74,14 +74,6 @@ def score(rows, model):
                                      [predict_coarse_ash(r, model) for r in rows], 0)}
 
 
-def legacy_daily(rows):
-    for r in rows:
-        r = dict(r)
-        for f in MLR_FEATURES[2:9]:
-            r[f] = 1 if r[f] is not None and r[f] > .5 else 0
-        yield r
-
-
 def evaluate(records):
     report = {}
     for mode, rows in (("sample", records), ("daily", aggregate_daily(records))):
@@ -90,16 +82,6 @@ def evaluate(records):
         if not development or not holdout:
             raise ValueError("需要6–7月开发数据和8–9月检验数据")
         optimized = train_models(development)
-        if mode == "sample":
-            old = train_coarse_model([dict(r) for r in development], "all")
-            old_model = old[old["production"]]
-            old_test = holdout
-        else:
-            old_train, old_test = list(legacy_daily(development)), list(legacy_daily(holdout))
-            X = [[r[f] for f in MLR_FEATURES] for r in old_train]
-            y = [r["ash_content"] for r in old_train]
-            mlr, pls = train_mlr(X, y), train_pls(X, y)
-            old_model = pls if pls["metrics"]["q2"] >= mlr["metrics"]["q2"] else mlr
         mean_model = {"intercept": sum(r["ash_content"] for r in development) / len(development), "coefs": []}
         selected = optimized[optimized["production"]]
         # 消融只报告开发集时间验证；不能用检验集决定专家权重。
@@ -113,7 +95,7 @@ def evaluate(records):
                         "selected": optimized["production"], "config": selected["config"],
                         "developmentSelection": choices,
                         "developmentAblation": ablation,
-                        "legacy": score(old_test, old_model), "optimized": score(holdout, selected),
+                        "optimized": score(holdout, selected),
                         "meanBaseline": score(holdout, mean_model)}
         final = train_models(rows)
         report[mode]["allDataModels"] = {"production": final["production"], "n": final["n"],

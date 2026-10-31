@@ -1,4 +1,4 @@
-"""只读比较 GPT 优化前后；DS 仅作固定参照，不写数据库或源记录。
+"""只读比较 GPT 优化前后，不写数据库或源记录。
 
 python backend/scripts/evaluate_gpt_optimization.py
 可指定 --records JSON 替代数据库；报告保留数据哈希和旧算法 Git 版本。
@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend"))
 from app.services import coarse_training as current
 from app.services.modeling import MLR_FEATURES, predict_coarse_ash
-from app.services.training import _impute, _metrics, train_coarse_model, train_mlr, train_pls
+from app.services.training import _metrics
 
 BASELINE_REF = "401003800afeeccbb74195966f9d78031cf90591"
 
@@ -52,23 +52,6 @@ def summarize(result, rows):
             "nestedTimeValidation": model["metrics"]["pipelineValidation"]}
 
 
-def ds_reference(rows, daily):
-    if not daily:
-        result = train_coarse_model([dict(r) for r in rows], "all")
-        model = result[result["production"]]
-    else:
-        days = current.aggregate_daily(rows)
-        for day in days:
-            for feature in MLR_FEATURES[2:9]:
-                day[feature] = int(sum(r.get(feature) == 1 for r in day["records"]) > len(day["records"]) / 2)
-        X, _ = _impute([[r.get(f) for f in MLR_FEATURES] for r in days])
-        y = [r["ash_content"] for r in days]
-        mlr, pls = train_mlr(X, y), train_pls(X, y)
-        model = pls if pls["metrics"]["q2"] >= mlr["metrics"]["q2"] else mlr
-    return {"method": model["type"], "metrics": model["metrics"],
-            "note": "DS 原版只读参照；Q²为留一验证，不与GPT时间Q²直接排序"}
-
-
 def evaluate(records):
     old = baseline_module()
     rows = current.prepare_rows(records)
@@ -78,7 +61,7 @@ def evaluate(records):
              "sha256": hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()}
     results = {}
     for mode, data in (("sample", rows), ("daily", current.aggregate_daily(rows))):
-        results[mode] = {"DS": ds_reference(rows, mode == "daily")}
+        results[mode] = {}
         for name, algorithm in (("before", old), ("after", current)):
             fitted = algorithm.train_models(data)
             if fitted is None:

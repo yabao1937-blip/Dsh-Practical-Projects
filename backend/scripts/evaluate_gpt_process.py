@@ -1,4 +1,4 @@
-"""只读比较独立 GPT 改进与 DS：同一外层日期，保留各自训练/聚合方法。
+"""只读评估独立 GPT：保留原有按日期时间检验。
 
 python backend/scripts/evaluate_gpt_process.py
 历史数据已用于开发；此报告不是新数据验收。仅写报告，不写数据库或保存模型。
@@ -11,25 +11,7 @@ from pathlib import Path
 
 from evaluate_gpt_optimization import ROOT, current, read_records, summarize
 from app.services.modeling import MLR_FEATURES, predict_coarse_ash
-from app.services.training import _impute, _metrics, train_coarse_model, train_mlr, train_pls
-
-
-def ds_model(rows, daily):
-    if not daily:
-        fitted = train_coarse_model([dict(r) for r in rows], "all")
-        return fitted[fitted["production"]]
-    X, _ = _impute([[r.get(f) for f in MLR_FEATURES] for r in rows])
-    y = [r["ash_content"] for r in rows]
-    mlr, pls = train_mlr(X, y), train_pls(X, y)
-    return pls if pls["metrics"]["q2"] >= mlr["metrics"]["q2"] else mlr
-
-
-def ds_days(rows):
-    days = current.aggregate_daily(rows)
-    for day in days:
-        for feature in MLR_FEATURES[2:9]:
-            day[feature] = int(sum(r.get(feature) == 1 for r in day["records"]) > len(day["records"]) / 2)
-    return days
+from app.services.training import _metrics
 
 
 def scored(rows, model):
@@ -75,7 +57,7 @@ def compare(records):
     previous = json.loads(previous_path.read_text(encoding="utf-8"))
     same_input = digest == previous["audit"]["sha256"]
     report = {"revision": current.TRAINING_REVISION,
-              "protocol": "同一外层日期与目标；DS保留自身聚合和选参。开发期历史复核，不是新数据独立验收。",
+              "protocol": "固定外层日期与目标。开发期历史复核，不是新数据独立验收。",
               "audit": {"rows": len(rows), "days": len({r["timestamp"][:10] for r in rows}),
                         "first": rows[0]["timestamp"], "last": rows[-1]["timestamp"], "sha256": digest},
               "previousGptSnapshot": str(previous_path.relative_to(ROOT)),
@@ -83,7 +65,6 @@ def compare(records):
     for daily in (False, True):
         mode = "daily" if daily else "sample"
         data = current.aggregate_daily(rows) if daily else rows
-        ds_data = ds_days(rows) if daily else rows
         fitted = current.train_models(data)
         if not fitted:
             report["results"][mode] = {"unavailable": True}
@@ -93,40 +74,17 @@ def compare(records):
         gpt["selectionPolicy"] = active["metrics"]["selectionPolicy"]
         gpt["inputPolicy"] = active["inputPolicy"]
         gpt["feedbackStudy"] = feedback_study(data)
-        full_ds = ds_model(ds_data, daily)
-        ds = {"production": full_ds["type"], "training": full_ds["metrics"]}
-        actual, pred, windows = [], [], []
-        for s, e in current.folds(ds_data, outer=True):
-            model = ds_model(ds_data[:s], daily)
-            actual.extend(r["ash_content"] for r in ds_data[s:e])
-            pred.extend(predict_coarse_ash(r, model) for r in ds_data[s:e])
-            windows.append({"trainEnd": ds_data[s-1]["timestamp"], "testStart": ds_data[s]["timestamp"],
-                            "testEnd": ds_data[e-1]["timestamp"], "n": e-s, "production": model["type"]})
-        ds["nestedTimeValidation"] = {**_metrics(actual, pred, 0), "n": len(actual), "folds": windows}
-        # 两者必须比较相同日期、相同目标，不允许因筛选/聚合漏行而悄悄改变难度。
-        assert [r["timestamp"] for r in data] == [r["timestamp"] for r in ds_data]
-        assert [r["ash_content"] for r in data] == [r["ash_content"] for r in ds_data]
-        assert [(w["trainEnd"], w["testStart"], w["testEnd"], w["n"]) for w in windows] == [
-            (w["trainEnd"], w["testStart"], w["testEnd"], w["n"]) for w in gpt["nestedTimeValidation"]["folds"]]
-        for name, values in (("GPT", data), ("DS", ds_data)):
-            early = [r for r in values if r["timestamp"] < "2026-08-01"]
-            later = [r for r in values if r["timestamp"] >= "2026-08-01"]
-            if not later or len(early) < 12:
-                continue
-            if name == "GPT":
-                early_fitted = current.train_models(early)
-                if not early_fitted:
-                    continue
+        early = [r for r in data if r["timestamp"] < "2026-08-01"]
+        later = [r for r in data if r["timestamp"] >= "2026-08-01"]
+        if later and len(early) >= 12:
+            early_fitted = current.train_models(early)
+            if early_fitted:
                 model = early_fitted[early_fitted["production"]]
-            else:
-                model = ds_model(early, daily)
-            target = gpt if name == "GPT" else ds
-            target["fixedHistoricalComparison"] = {"developmentN": len(early), **scored(later, model)}
-            if name == "GPT":
-                target["fixedHistoricalComparison"]["outsideTrainingRangeN"] = sum(
+                gpt["fixedHistoricalComparison"] = {"developmentN": len(early), **scored(later, model)}
+                gpt["fixedHistoricalComparison"]["outsideTrainingRangeN"] = sum(
                     any(isinstance(r.get(f), (int, float)) and not (b[0] <= r[f] <= b[1])
                         for f, b in zip(MLR_FEATURES, model["inputBounds"])) for r in later)
-        report["results"][mode] = {"DS": ds, "GPT": gpt}
+        report["results"][mode] = {"GPT": gpt}
         if same_input:
             report["results"][mode]["previousGPT"] = previous["results"][mode]["after"]
     return report

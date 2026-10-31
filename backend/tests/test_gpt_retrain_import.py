@@ -92,7 +92,7 @@ def test_mismatched_model_parameters_are_rejected(archive):
         validate_bundle(records, broken)
 
 
-def test_install_uses_own_database_preserves_ds_and_refuses_overwrite(tmp_path, monkeypatch):
+def test_install_uses_own_database_filters_ds_and_refuses_overwrite(tmp_path, monkeypatch):
     monkeypatch.setattr(installer, "ROOT", tmp_path)
     (tmp_path / "backend/data").mkdir(parents=True)
     baseline = tmp_path / "baseline.json"
@@ -103,7 +103,7 @@ def test_install_uses_own_database_preserves_ds_and_refuses_overwrite(tmp_path, 
     with sqlite3.connect(target) as con:
         assert con.execute("select count(*) from coal_records where category='coarse'").fetchone()[0] == 213
         variants = json.loads(con.execute("select value from auto_state where key='coarseModelVariants'").fetchone()[0])
-        assert variants["ds"] == ds
+        assert set(variants) == {"gpt"}
         run_ids = {row[0] for row in con.execute("select train_run_id from coarse_models")}
         assert run_ids == {con.execute("select train_run_id from coarse_model_history").fetchone()[0]}
     before = target.read_bytes()

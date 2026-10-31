@@ -72,33 +72,6 @@ def test_pls_parity_vs_oracle():
     assert pls["A"] == golden["A"] == 2
 
 
-def test_train_coarse_model_parity_vs_oracle():
-    d, cc, xy = _load()
-    golden = d["coarseModel"]
-    gold_hist = d["history"][-1]
-    gold_pred = [r["predicted_ash"] for r in d["coarseCoal"]]
-
-    cc2 = copy.deepcopy(cc)
-    res = T.train_coarse_model(cc2, "jun_jul", 0.8)
-    assert res is not None
-    assert res["production"] == golden["production"] == "pls"
-    assert res["mlr"]["metrics"]["q2Time"] == golden["mlr"]["metrics"]["q2Time"]
-    assert res["pls"]["metrics"]["q2Time"] == golden["pls"]["metrics"]["q2Time"]
-
-    # history 逐字段（已 round4/1/3）
-    h = res["history"]
-    for m in ("mlr", "pls"):
-        for k in ("r2", "passRate", "q2", "q2Time", "rmse", "mae"):
-            assert h[m][k] == gold_hist[m][k], f"history.{m}.{k}"
-    assert h["pls"]["A"] == gold_hist["pls"]["A"] == 2
-    assert h["production"] == gold_hist["production"] == "pls"
-    assert h["n"] == gold_hist["n"] == 113
-
-    # 回填 predicted_ash round4 逐值一致
-    pred = [r["predicted_ash"] for r in cc2]
-    assert pred == gold_pred
-
-
 def test_mlr_sklearn_equivalent():
     d, cc, xy = _load()
     a = T.train_mlr(xy["X"], xy["y"], 0.8)
@@ -147,18 +120,6 @@ def test_js_round_mirrors_tofixed():
     assert T._js_round(4.35, 1) == 4.3        # double 精确值 4.3499... → 下舍
     assert T._js_round(-0.25, 1) == -0.3      # 负数平局远离零
     assert T._js_round(1.5, 0) == 2.0
-
-
-def test_q2time_none_fallback_to_q2():
-    """n<30 时 _time_cv_q2 返回 None，production 回退 LOOCV q2 选型。"""
-    d, cc, xy = _load()
-    sub = [dict(r) for r in d["coarseCoal"][:20]]
-    res = T.train_coarse_model(sub, "jun_jul", 0.8)
-    assert res is not None
-    assert res["mlr"]["metrics"]["q2Time"] is None
-    assert res["pls"]["metrics"]["q2Time"] is None
-    expected = "pls" if res["pls"]["metrics"]["q2"] >= res["mlr"]["metrics"]["q2"] else "mlr"
-    assert res["production"] == expected
 
 
 def _rec(ts):

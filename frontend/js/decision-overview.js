@@ -384,12 +384,10 @@ const DecisionOverviewPage = {
         const reader = this.readFacade(), store = reader.store;
         const guide = reader.computeDensityGuidance();
         const total = reader.resolveTotalAshEx();
-        const productionEngine = store.coarseModel ? reader.coarseEngine() : 'default';
-        const engineLabel = {gpt:'GPT',ds:'DS',default:'出厂默认'}[productionEngine];
-        const modelGroup = view === 'production' ? store.coarseModel :
-            (productionEngine === 'gpt' ? store.coarseModel : store.coarseModelVariants?.gpt);
-        const model = modelGroup && (view === 'production' || reader.coarseEngine(modelGroup) === 'gpt') ?
-            modelGroup[modelGroup.production] : (view === 'production' ? reader.getCoarseModel() : null);
+        const modelGroup = reader.coarseModelGroup();
+        const productionEngine = modelGroup ? 'gpt' : 'unavailable';
+        const engineLabel = modelGroup ? 'GPT' : '模型不可用';
+        const model = modelGroup?.[modelGroup.production] || null;
         const coarse = reader._latestByTime(store.coarseCoal), floating = reader._latestByTime(store.floatCoal);
         const amounts = {heavy:reader.resolveAmount('denseAmount'),float:reader.resolveAmount('floatAmount'),coarse:reader.resolveAmount('coarseAmount')};
         const ashes = {heavy:reader.getHeavyAsh(),float:reader.resolveFloatAsh(),coarse:reader.resolveCoarseAsh()};

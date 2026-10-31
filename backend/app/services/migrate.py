@@ -48,6 +48,8 @@ def _j(v: Any) -> str:
 
 
 def _plan(store: dict) -> dict:
+    from .coarse_model_policy import gpt_only_store
+    store = gpt_only_store(store, importing=True)
     """把 store 规划为 {表名: [记录 dict]}，不写库。"""
     plan: dict[str, list[dict]] = {t: [] for t in (
         "coal_records", "calc_logs", "manual_entries", "heavy_samples",
@@ -461,6 +463,8 @@ def replace(store: dict, force: bool = False, require_revision: bool = False) ->
     覆盖前会自动备份（见 backup_database），路径写在响应的 backup 字段里；
     响应同时给出 owned（本次拥有并重写的表）与 untouched（未触碰的表），便于诊断。
     """
+    from .coarse_model_policy import gpt_only_store
+    store = gpt_only_store(store, importing=True)
     p = _plan(store)
     backup_path = backup_database("force") if force else None
     if force and not backup_path:

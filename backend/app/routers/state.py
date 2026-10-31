@@ -9,6 +9,7 @@ from ..config import REMOTE_READONLY
 from ..database import get_db
 from ..services import migrate
 from ..services.state import load_store
+from ..services.coarse_model_policy import gpt_only_store
 
 router = APIRouter(prefix="/state", tags=["状态"])
 
@@ -18,7 +19,7 @@ def get_state(db: Session = Depends(get_db)):
     """返回前端 App.store 等价结构（DB → store 桥接）"""
     if REMOTE_READONLY:
         from ..remote_readonly.startup import startup_view
-        return startup_view('state')
+        return gpt_only_store(startup_view('state'))
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))  # 数据与版本来自同一读快照
     return load_store(db)

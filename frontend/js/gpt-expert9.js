@@ -1,4 +1,4 @@
-/* Independent expert GPT model. Never writes the legacy DS/model mirror. */
+/* Independent expert GPT model. Never writes the compatible model mirror. */
 const GptExpert9 = {
     features:['raw_ash','coal_amount','sysA','sysB','sys401','sys402','desliming473','desliming474','level'],
     labels:['原煤灰分','小时带煤量','A系统','B系统','401系统','402系统','473脱粉','474脱粉','精磁尾液位'],
@@ -42,19 +42,7 @@ const GptExpert9 = {
             if(Date.now()-this.lastAttempt>=5000) this.load(true);
         }
     },
-    active() { return (this.view || (this.group || !this.loaded || this.error?'gpt':App.coarseEngine()))==='gpt' && (!!this.group || !this.loaded || !!this.error); },
-    choose(engine) {
-        if(!this.group && this.loaded && !this.error) return false;
-        if(engine==='ds' && document.getElementById('page-coarse').classList.contains('gpt-expert-active')) this.restorePending=true;
-        this.view=engine;
-        if(engine==='gpt') { CoarsePage.stopAutoRoll(); this.load(); CoarsePage.refresh(); return true; }
-        return false;
-    },
-    restoreLegacy() {
-        if(!this.restorePending) return;
-        this.restorePending=false;
-        if(this.legacyRolling && !CoarsePage.rollTimer) CoarsePage.startAutoRoll();
-    },
+    active() { return !!this.group || !this.loaded || !!this.error; },
     chartSnapshot(mode='sample') {
         const group=this.group,model=this.activeModel(group),source=group.rows,features=this.modelFeatures(model);
         const samples=source.map(r=>({key:r.timestamp,label:r.timestamp,tick:r.timestamp.slice(5,16),day:r.day,
@@ -79,15 +67,10 @@ const GptExpert9 = {
     },
     panel() {
         const page=document.getElementById('page-coarse'),enabled=this.active();
-        if(enabled && !page.classList.contains('gpt-expert-active')) this.legacyRolling=!!CoarsePage.rollTimer || !CoarsePage.trendChart;
         page.classList.toggle('gpt-expert-active',enabled);
         if(!enabled) return false;
         CoarsePage.stopAutoRoll();
         CoarsePage.updateAmountCard();
-        for(const engine of ['ds','gpt']) {
-            const button=document.getElementById('coarse-engine-'+engine);
-            button.classList.toggle('btn-primary',engine==='gpt');button.setAttribute('aria-pressed',String(engine==='gpt'));button.disabled=false;
-        }
         let panel=document.getElementById('gpt-expert-panel');
         if(!panel) { panel=document.createElement('div');panel.id='gpt-expert-panel';page.append(panel); }
         const key=JSON.stringify([this.group?.artifact_id,this.error,this.loaded]);
