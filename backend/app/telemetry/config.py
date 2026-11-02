@@ -43,6 +43,9 @@ class CollectorConfig(BaseModel):
     retry_min_seconds: float = Field(default=1, ge=0.1, le=30)
     retry_max_seconds: float = Field(default=30, ge=0.1, le=120)
     history_interval_seconds: float = Field(default=60, ge=1, le=3600)
+    # Supplement only the semantic magnetic-tailings level point. A finer
+    # existing global history cadence always wins; None disables supplementation.
+    level_history_interval_seconds: float | None = Field(default=30, ge=1, le=3600)
     # Compatibility with deployed config files; positive legacy values no longer
     # enable raw deletion. The separate verified retention worker owns 30/365-day
     # archival; a collector can never delete referenced history by itself.

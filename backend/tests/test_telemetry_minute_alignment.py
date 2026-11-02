@@ -233,14 +233,25 @@ def test_worker_minute_spool_contains_only_periodic_points_and_one_lag_event(set
     assert asyncio.run(run_collector(cfg, repo, Spool(tmp_path/'spool', cfg.source_id),
                                      stop=stop, reader_factory=lambda _: Reader())) == 0
     assert len(reads) == 37
-    assert len(envelopes) == 4
-    assert [len(p['alignment_evidence']) for p in envelopes] == [0, 0, 1, 1]
-    assert all(len(p['samples']) == 2 for p in envelopes)
+    full = [p for p in envelopes if p['storage_policy'] == 'periodic-v1']
+    supplemental = [p for p in envelopes if p['storage_policy'] == 'point-history-v1']
+    assert len(full) == 4 and len(supplemental) == 3
+    assert [len(p['alignment_evidence']) for p in full] == [0, 0, 1, 1]
+    assert all(len(p['samples']) == 2 for p in full)
+    assert all(len(p['samples']) == 1 for p in supplemental)
     with repo.sessions() as db:
         rows = list(db.scalars(select(TelemetryReading)))
         periodic = [row for row in rows if row.sample['storage_kind'] == 'periodic']
-        aligned = [row for row in rows if row.sample['storage_kind'] == 'alignment-evidence']
+        extra = [row for row in rows if row.sample['storage_kind'] == 'level-periodic']
         assert len(periodic) == 8
-        assert len(aligned) == 2
+        assert len(extra) == 3
         assert all(row.sample['cadence_seconds'] == 60 for row in periodic)
-        assert all(row.sample['cadence_seconds'] == 5 for row in aligned)
+        assert all(row.sample['cadence_seconds'] == 30 for row in extra)
+        # Lag evidence reuses the same original poll already saved by the 30s
+        # policy, without a second SQL row or changing the minute envelope.
+        for envelope in full:
+            for evidence in envelope['alignment_evidence']:
+                matching = [row for row in rows if row.batch_id == evidence['batch_id']
+                            and row.point_key == evidence['point_key']]
+                assert len(matching) == 1
+                assert matching[0].received_at == evidence['sample']['received_at']

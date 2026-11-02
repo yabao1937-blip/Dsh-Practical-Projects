@@ -11,8 +11,9 @@ from sqlalchemy.exc import OperationalError
 from .opcua import ConfigurationError, OpcUaReader
 from .repository import CollectorBusy, LeaseLost
 from .spool import SpoolError
-from .domain import parse_time
-from .realtime import RuntimePublisher, select_alignment_evidence, select_hour_boundary_evidence
+from .domain import definition_id, parse_time
+from .realtime import (ALIGNMENT_LEVEL_ITEM, RuntimePublisher,
+                       select_alignment_evidence, select_hour_boundary_evidence)
 
 log = logging.getLogger("dmcs.collector")
 
@@ -162,6 +163,12 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
         attempt = 0
         last_bucket = None
         last_quality = None
+        last_level_bucket = None
+        level_points = [point for point in cfg.points if point.item_id == ALIGNMENT_LEVEL_ITEM]
+        level_point = level_points[0] if len(level_points) == 1 else None
+        level_interval = cfg.level_history_interval_seconds
+        supplement_level = (level_point is not None and level_interval is not None
+                            and level_interval < cfg.history_interval_seconds)
         try:
             while not halt.is_set():
                 try:
@@ -183,6 +190,11 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
                             periodic = (cfg.history_interval_seconds <= cfg.poll_seconds
                                         or last_bucket is None or bucket != last_bucket)
                             changed_quality = last_quality is not None and quality != last_quality
+                            level_sample = next((sample for sample in samples
+                                if supplement_level and sample.get('key') == level_point.key
+                                and sample.get('definition_id') == definition_id(level_point.model_dump())), None)
+                            level_bucket = (int(parse_time(level_sample['received_at']).timestamp() // level_interval)
+                                            if level_sample is not None else None)
                             try:
                                 # All spool operations run in this event loop;
                                 # only repository calls run in a worker thread.
@@ -202,6 +214,19 @@ async def run_collector(cfg, repository, spool, *, once=False, stop=None, reader
                                     spool.enqueue(batch)
                                     if periodic:
                                         last_bucket = bucket
+                                    if level_bucket is not None:
+                                        last_level_bucket = level_bucket
+                                elif level_bucket is not None and level_bucket != last_level_bucket:
+                                    # Keep the original poll's identity/timestamps/quality. This
+                                    # envelope is history only: it must not advance full-batch
+                                    # snapshots, memory, history clocks or decision evidence.
+                                    batch.update(storage_policy='point-history-v1',
+                                        storage_kind='level-periodic', cadence_seconds=level_interval,
+                                        point_config=level_point.model_dump(),
+                                        samples=[dict(level_sample, storage_kind='level-periodic',
+                                                      cadence_seconds=level_interval)])
+                                    spool.enqueue(batch)
+                                    last_level_bucket = level_bucket
                                 last_quality = quality
                             except Exception as exc:
                                 failed("spool_enqueue", exc)

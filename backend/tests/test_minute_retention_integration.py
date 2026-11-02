@@ -13,6 +13,7 @@ from app.decision_hourly.models import (DecisionCycleHour, DecisionCycleSample,
 from app.decision_hourly.references import walk
 from app.decision_hourly.service import build_hour, prepare_record, save_record
 from app.hourly_brief.inputs import LEVEL
+from app.routers.telemetry import history
 from app.services.decision_sources import shared_snapshot
 from app.storage_retention.models import RetentionArchive, RetentionHourBasis
 from app.storage_retention.service import run_tick
@@ -72,12 +73,25 @@ def test_minute_spool_to_original_decision_cold_archive_and_permanent_hour(sessi
     repo.persist(cfg, 'owner', replay)
     repo.persist(cfg, 'owner', replay)
     spool.ack(pending)
+    level_point = next(point for point in cfg.points if point.item_id == LEVEL)
+    supplemental_at = now+timedelta(seconds=30)
+    supplemental_sample = normalize(level_point, 55, 0, supplemental_at, supplemental_at, supplemental_at)
+    supplemental = dict(source_id=cfg.source_id, batch_id=uuid4().hex,
+        storage_policy='point-history-v1', storage_kind='level-periodic', cadence_seconds=30,
+        point_config=level_point.model_dump(),
+        samples=[dict(supplemental_sample, storage_kind='level-periodic', cadence_seconds=30)])
+    pending = spool.enqueue(supplemental)
+    repo.persist(cfg, 'owner', spool.read(pending))
+    spool.ack(pending)
 
     with sessions.begin() as db:
         auxiliary = db.scalar(select(TelemetryReading).where(
             TelemetryReading.batch_id == evidence[0]['batch_id'],
             TelemetryReading.point_key == evidence[0]['point_key']))
         auxiliary_id = auxiliary.id
+        supplemental_id = db.scalar(select(TelemetryReading.id).where(
+            TelemetryReading.batch_id == supplemental['batch_id']))
+        assert supplemental_id is not None
         assert auxiliary.sample['value'] == 33
         assert auxiliary.received_at == iso_time(now-timedelta(seconds=90))
         assert auxiliary.sample['cadence_seconds'] == 5
@@ -116,6 +130,14 @@ def test_minute_spool_to_original_decision_cold_archive_and_permanent_hour(sessi
         assert db.get(DecisionCycleSample, slot) is None
         assert db.get(DecisionEvidenceArchive, iso_time(start)) is None
         assert db.get(TelemetryReading, auxiliary_id) is None
+        assert db.get(TelemetryReading, supplemental_id) is None
+        cold_history = history(source_id=cfg.source_id, point_key=level_point.key,
+                               limit=100, before_id=None, db=db)
+        original_supplement = next(row for row in cold_history['items'] if row['id'] == supplemental_id)
+        assert original_supplement['storage_kind'] == 'level-periodic'
+        assert original_supplement['cadence_seconds'] == 30
+        assert original_supplement['received_at'] == iso_time(supplemental_at)
+        assert original_supplement['value'] == 55
         cold = read_sample(db, slot)
         assert cold['snapshot'] == original['snapshot']
         assert cold['sampled_at'] == original['sampled_at']

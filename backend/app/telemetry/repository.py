@@ -5,7 +5,7 @@ from re import fullmatch
 from sqlalchemy import select, text
 
 from ..database import SessionLocal
-from .config import CollectorConfig
+from .config import CollectorConfig, PointConfig
 from .domain import availability, definition_id, iso_time, parse_time, utc_now
 from .models import TelemetryPoint, TelemetryReading, TelemetrySource
 from .derived import density_average_points, system_status_points
@@ -88,6 +88,10 @@ class TelemetryRepository:
             source = self._owned(db, cfg.source_id, owner)
             source.heartbeat_at = iso_time(now)
             source.lease_until = iso_time(now + timedelta(seconds=cfg.lease_seconds))
+            if batch.get('storage_policy') == 'point-history-v1':
+                self._persist_level_history(db, cfg.source_id, batch)
+                db.commit()
+                return
             self._persist_alignment_evidence(db, cfg, batch)
             self._persist_hour_boundary_evidence(db, cfg, batch)
             for sample in batch["samples"]:
@@ -129,6 +133,43 @@ class TelemetryRepository:
                     source.last_sample_at = received
             remember_density(db, cfg.source_id)
             db.commit()
+
+    @staticmethod
+    def _persist_level_history(db, source_id, batch):
+        """Save one original poll without changing any full-batch state.
+
+        The envelope owns its original point definition so queued history can
+        replay after a point is renamed, disabled or rebound in current config.
+        """
+        original_config = batch.get('point_config')
+        point_config = PointConfig.model_validate(original_config)
+        samples = batch.get('samples')
+        cadence = batch.get('cadence_seconds')
+        if (batch.get('storage_kind') != 'level-periodic'
+                or point_config.item_id != ALIGNMENT_LEVEL_ITEM
+                or not isinstance(samples, list) or len(samples) != 1
+                or isinstance(cadence, bool) or not isinstance(cadence, (int, float)) or not 1 <= cadence <= 3600
+                or batch.get('alignment_evidence') or batch.get('hour_boundary_evidence')
+                or not isinstance(batch.get('batch_id'), str)
+                or not fullmatch(r'[a-f0-9]{32}', batch['batch_id'])):
+            raise ValueError('invalid level history envelope')
+        sample = samples[0]
+        point = db.get(TelemetryPoint, (source_id, point_config.key))
+        if (point is None or not isinstance(sample, dict) or sample.get('runtime_only')
+                or sample.get('key') != point_config.key
+                # Preserve the envelope's original numeric representation:
+                # validating legacy default 1/0 coerces them to 1.0/0.0.
+                or sample.get('definition_id') != definition_id(original_config)
+                or sample.get('node_id') != point_config.node_id or sample.get('unit') != point_config.unit
+                or sample.get('storage_kind') != 'level-periodic' or sample.get('cadence_seconds') != cadence):
+            raise ValueError('invalid level history identity')
+        parse_time(sample['received_at'])
+        existing = db.scalar(select(TelemetryReading.id).where(
+            TelemetryReading.source_id == source_id, TelemetryReading.point_key == point_config.key,
+            TelemetryReading.batch_id == batch['batch_id']))
+        if existing is None:
+            db.add(TelemetryReading(source_id=source_id, point_key=point_config.key,
+                batch_id=batch['batch_id'], received_at=sample['received_at'], sample=sample))
 
     @staticmethod
     def _persist_alignment_evidence(db, cfg, batch):
