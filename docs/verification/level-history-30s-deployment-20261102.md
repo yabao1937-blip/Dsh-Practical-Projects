@@ -1,6 +1,6 @@
 # 液位 30 秒部署：单点队列的回滚兼容保护
 
-2026-11-02。用户已授权窄范围主机部署；当前完成本地实现、测试与候选准备，发布/主机安装仍由主代理在候选验收后推进。本报告不把本地通过称为主机已生效。
+2026-11-02。用户已授权窄范围主机部署；当前完成本地实现、测试和独立验收，并按主代理最终批准发布到下载服务。主机安装尚待用户本地执行，本报告不把本地通过或发布称为主机已生效。
 
 ## 必要修正与范围
 
@@ -42,4 +42,10 @@
 
 只读后验收：实时完整点集仍约 5 秒；普通 `periodic/60` 仍约 60 秒；液位合并 `periodic/60` 和 `level-periodic/30` 后约 30 秒，额外对齐/质量/整点证据另列。`level-periodic` 补点自身通常相隔 60 秒，不能单看这一种行断定全液位周期。液位配对仍为已核实的 90 秒，实际配置、模型和旧历史保留。
 
-下载服务入口是 `backend/scripts/offline_transfer.py`，监听配置为 `10.255.2.6:8765`，正式 ZIP 在 `outputs/offline-win10-x64/extras/ProjectUpdate.zip`；页面源码的标签为“下载本次项目更新包（保留主机数据库）”。本轮候选阶段没有覆盖此包或改 IP/网关/防火墙；当前可达性只读核对结果交主代理协调，发布仍待候选验收。
+实际 v2 独立审查：ZIP 原字节、全部 payload/控制脚本 SHA、Python 编译、PowerShell 静态语法及 8 个安装/冲突/中断/回滚场景全部通过，exit 0。业务来源仍为 f7a0196，更新器保护来源为 1ca7174；没有把两者的全部父提交同步到主机。
+
+主代理随后最终批准发布 SHA-256=`f64398ae7aa10cf8e7ca3c2b2365f271e6dca34ab08d21a1336084f17320df3a`、32,551 字节的 v2。正式 ZIP 已原子更新到 `outputs/offline-win10-x64/extras/ProjectUpdate.zip`，原正式包完整保留为同目录 `ProjectUpdate-before-level-history-30s-20261102-211fe74718bc.zip`（原 SHA-256=`211fe74718bc90f361c41ab00b9a33ec8202184328f5ec3f25cdeb8fca4d2ec0`）。下载配置、latest 元数据、服务源码、IP/网关/防火墙均未改。
+
+下载服务入口为 `backend/scripts/offline_transfer.py`，通过既有 `--daemon/CREATE_NO_WINDOW` 隐藏启动，实际 `10.255.2.6:8765` 已监听。无 secret 入口 `http://10.255.2.6:8765/` 自动跳转到下载页，页面标签为“下载本次项目更新包（保留主机数据库）”；页面/ZIP 均 HTTP 200，`Content-Length=32551`，从 HTTP 实际下载的 ZIP 与获批 SHA 完全相同。无 secret 发布证据在 v2 目录 `publication.json`；后续安装回执为 `outputs/offline-win10-x64/target-install-status.json` 和 `target-install-events.jsonl`。`transfer.log` 含访问能力路径，不能展开到聊天中。
+
+待用户在主机完整解压后运行 `UpdateProject.cmd`，再做只读生产验收；本代理没有启动主机安装，没有写主机配置/数据库或开展研究。
