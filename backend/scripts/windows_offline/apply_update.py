@@ -22,6 +22,9 @@ PERIODIC_QUERY_PATH = 'backend/app/decision_hourly/service.py'
 PERIODIC_QUERY_BASELINE = 'cbef07c65508d228a1c82487ddb8cd347768ee8c08188d730caf31d746bb6edd'
 PERIODIC_QUERY_PROOF = 'baseline/decision-service.py'
 MAX_QUERY_SOURCE_BYTES = 1024 * 1024
+POINT_HISTORY_COMPATIBILITY = 'point-history-v1'
+POINT_HISTORY_FILES = frozenset('backend/app/telemetry/'+name for name in ('config.py','repository.py','worker.py'))
+POINT_HISTORY_RETAINED = '.point-history-v1-retained'
 MANUAL_FLOAT_ROLLBACK_COMPATIBILITY = 'manual-float-ash-schema-v1'
 SCHEMA_UPGRADE_PATH = 'backend/app/schema_upgrade.py'
 MANUAL_OUTPUT_SCHEMA_PATH = 'backend/app/schemas.py'
@@ -248,6 +251,7 @@ def verify(package,root,manifest):
     if compatibility is not None and (profile is not None or not {SCHEMA_UPGRADE_PATH,MANUAL_OUTPUT_SCHEMA_PATH}.issubset(manifest['files'])):
         raise ValueError('Schema-compatible rollback requires a full update with its schema upgrade module')
     snapshot_check_policy(manifest)
+    point_history_compatibility(manifest)
     history_configuration_patch(root,manifest)
     periodic_query_patch = verify_periodic_query_patch(package,root,manifest)
     if profile == 'query-only-hotfix' and not periodic_query_patch and not set(manifest['files']).issubset({
@@ -276,6 +280,143 @@ def verify(package,root,manifest):
             manual_float_output_compatibility(target.read_bytes())
     if collector_changed(manifest) and not (package/'StopOwnedCollector.ps1').is_file():
         raise ValueError('Collector update requires StopOwnedCollector.ps1; nothing was changed')
+
+
+def point_history_compatibility(manifest):
+    value = manifest.get('collector_spool_compatibility')
+    if value is None:
+        return False
+    if (value != POINT_HISTORY_COMPATIBILITY or manifest.get('profile') is not None
+            or set(manifest['files']) != POINT_HISTORY_FILES):
+        raise ValueError('Point history spool compatibility requires the reviewed three-file collector update')
+    return True
+
+
+def _point_spool_directory(root,source_id):
+    if not isinstance(source_id,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}',source_id):
+        raise ValueError('Invalid retained spool source')
+    # Start.ps1 explicitly sets this path. Resolve the existing data junction
+    # first; quarantine stays on the same physical volume, including D: storage.
+    spool = (root/'backend/data/telemetry-spool').resolve()
+    folder = spool/source_id
+    if folder.resolve() != folder or (folder.exists() and not folder.is_dir()):
+        raise ValueError('Collector spool source escapes its installation spool')
+    return folder
+
+
+def _point_spool_file(path):
+    if path.resolve() != path or not path.is_file():
+        raise ValueError('Retained spool file is missing or redirects outside its directory')
+    return path.read_bytes()
+
+
+def _point_spool_record(source_id,name,data):
+    match = re.fullmatch(r'batch-\d+-([a-f0-9]{32})\.json',name)
+    batch = json.loads(data)
+    if (not match or batch.get('source_id') != source_id or batch.get('batch_id') != match[1]
+            or batch.get('storage_policy') != POINT_HISTORY_COMPATIBILITY):
+        raise ValueError('Invalid point history spool identity')
+    return dict(format=1,relative_path=source_id+'/'+name,sha256=hashlib.sha256(data).hexdigest(),
+                source_id=source_id,batch_id=match[1],released=False)
+
+
+def _write_point_spool_record(path,record):
+    temporary = path.with_name(path.name+'.'+str(time.time_ns())+'.tmp')
+    with temporary.open('xb') as output:
+        output.write(json.dumps(record,sort_keys=True).encode('utf-8'))
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(temporary,path)
+
+
+def _point_spool_transfer(source,target,*,copy=False):
+    data = _point_spool_file(source)
+    if source.stat().st_dev != target.parent.stat().st_dev:
+        raise ValueError('Retained spool transfer must stay on the same volume')
+    if target.exists():
+        if _point_spool_file(target) != data:
+            raise ValueError('Retained spool destination has conflicting content')
+        if not copy:
+            source.unlink()
+        return
+    if copy:
+        temporary = target.with_name(target.name+'.'+str(time.time_ns())+'.tmp')
+        with temporary.open('xb') as output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        # On Windows rename refuses an existing destination; never overwrite a
+        # conflicting batch. The original retained bytes also remain intact.
+        temporary.rename(target)
+    else:
+        source.rename(target)
+
+
+def point_history_spool(root,configuration,*,restore=False):
+    """Retain new envelopes before rollback; release them only to the new reader.
+
+    A per-batch intent is flushed before moving active data. Restore keeps the
+    retained original, publishes an fsynced active copy, then marks it released.
+    Interrupted steps can retry without guessing whether a batch was committed.
+    Call only after the owned collector has stopped, before any service restart.
+    """
+    source_id = configuration['source_id']
+    folder = _point_spool_directory(root,source_id)
+    if not folder.exists():
+        return 0
+    retained = folder/POINT_HISTORY_RETAINED
+    entries = {}
+    if not restore:
+        for path in sorted(folder.glob('batch-*.json')):
+            data = _point_spool_file(path)
+            if json.loads(data).get('storage_policy') == POINT_HISTORY_COMPATIBILITY:
+                entries[path.name] = _point_spool_record(source_id,path.name,data)
+    if not retained.exists() and not entries:
+        return 0
+    for directory in (retained,retained/'batches',retained/'records'):
+        if directory.resolve() != directory:
+            raise ValueError('Retained spool directory redirects outside its source')
+        directory.mkdir(exist_ok=True)
+        if directory.stat().st_dev != folder.stat().st_dev:
+            raise ValueError('Retained spool directory is on a different volume')
+    records,batches = retained/'records',retained/'batches'
+    for path in records.glob('*.json'):
+        record = json.loads(_point_spool_file(path))
+        name = path.name
+        immutable = {k:v for k,v in record.items() if k != 'released'}
+        candidate = entries.get(name)
+        if (not isinstance(record.get('released'),bool) or record.get('relative_path') != source_id+'/'+name
+                or not isinstance(record.get('sha256'),str) or not re.fullmatch(r'[a-f0-9]{64}',record['sha256'])
+                or (candidate and immutable != {k:v for k,v in candidate.items() if k != 'released'})):
+            raise ValueError('Invalid or conflicting retained spool record')
+        active,held = folder/name,batches/name
+        present = [p for p in (held,active) if p.exists()]
+        if not present:
+            raise ValueError('Retained spool intent has no original bytes')
+        for original in present:
+            expected = _point_spool_record(source_id,name,_point_spool_file(original))
+            if immutable != {k:v for k,v in expected.items() if k != 'released'}:
+                raise ValueError('Retained spool bytes do not match their record')
+        entries[name] = record
+    if any(path.name not in entries for path in batches.glob('*.json')):
+        raise ValueError('Retained spool bytes have no recovery record')
+    count = 0
+    for name,record in entries.items():
+        active,held,entry = folder/name,batches/name,records/name
+        if restore:
+            if not held.exists():
+                _point_spool_transfer(active,held,copy=True)
+            if record['released']:
+                continue
+            _point_spool_transfer(held,active,copy=True)
+            _write_point_spool_record(entry,dict(record,released=True))
+            count += 1
+        elif active.exists():
+            # Durable intent must precede removal from the old reader's queue.
+            _write_point_spool_record(entry,dict(record,released=False))
+            _point_spool_transfer(active,held)
+            count += 1
+    return count
 
 
 def collector_configuration(root):
@@ -607,10 +748,14 @@ def rollback_schema_sources(root,manifest):
 
 def apply(package,root,manifest,report=lambda stage,message:None):
     verify(package,root,manifest)
+    protect_point_history = point_history_compatibility(manifest)
     snapshot_policy = snapshot_check_policy(manifest)
     history_patch = history_configuration_patch(root,manifest)
     cycle_collector = collector_changed(manifest)
     configuration = collector_configuration(root) if cycle_collector else None
+    if protect_point_history:
+        # Unsupported source-folder redirects fail while old services still run.
+        _point_spool_directory(root,configuration['source_id'])
     backup = root/'backups'/('source-update-'+datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
     backup_created_at = datetime.now(timezone.utc)
     backup.mkdir(parents=True)
@@ -636,6 +781,9 @@ def apply(package,root,manifest,report=lambda stage,message:None):
             saved.parent.mkdir(parents=True,exist_ok=True)
             shutil.copy2(source,saved)
     (backup/'files.json').write_text(json.dumps(original,indent=2),encoding='utf-8')
+    if protect_point_history:
+        # Recheck after the long snapshot, before stopping or replacing sources.
+        verify(package,root,manifest)
     report('copying','Backup complete; preparing the project service update.')
     before = collector_status(root,configuration['source_id']) if cycle_collector and configuration['enabled'] else {}
     services_stopped = False
@@ -664,6 +812,11 @@ def apply(package,root,manifest,report=lambda stage,message:None):
             shutil.copy2(safe_path(package/'payload',name),temporary)
             temporary.replace(target)
             clear_bytecode(target)
+        if protect_point_history:
+            if any(digest(safe_path(root,name)) != manifest['files'][name]['sha256'] for name in POINT_HISTORY_FILES):
+                raise ValueError('New collector sources must all be installed before replay release')
+            restored = point_history_spool(root,configuration,restore=True)
+            report('copying',f'Released {restored} retained point-history envelopes for the verified new collector.')
         report('starting','Starting updated services and checking health.')
         restart(root)
         if cycle_collector: collector_ready(root,configuration,before,report)
@@ -695,14 +848,26 @@ def apply(package,root,manifest,report=lambda stage,message:None):
         report('copying','Update failed; restoring previous source and restarting services. Production database will be retained.')
         recovery_before = {}
         recovery_error = None
+        recovery_collector_stopped = False
         if services_stopped:
             try:
                 powershell(package/'StopOwnedWeb.ps1','-InstallDir',str(root),cwd=root)
                 if cycle_collector:
                     if configuration['enabled']: recovery_before = collector_status(root,configuration['source_id'])
                     powershell(package/'StopOwnedCollector.ps1','-InstallDir',str(root),cwd=root)
+                    recovery_collector_stopped = True
             except Exception as exc:
                 recovery_error = exc
+        if protect_point_history:
+            # Old code silently treats history-only envelopes as ordinary
+            # throttled batches. Never expose those originals to that reader.
+            if not recovery_collector_stopped:
+                raise RuntimeError('Update failed; collector stop could not be confirmed. Old-source rollback and restart blocked to preserve point-history spool.') from failure
+            try:
+                retained = point_history_spool(root,configuration)
+                report('copying',f'Retained {retained} point-history envelopes before old-source rollback; ordinary spool is unchanged.')
+            except BaseException as exc:
+                raise RuntimeError('Update failed; point-history retention could not be verified. Old-source rollback and restart blocked; original spool is retained.') from exc
         if configuration_changed:
             replace_configuration(history_patch['path'],history_patch['original'])
         compatible_sources = set()
@@ -745,6 +910,7 @@ def apply(package,root,manifest,report=lambda stage,message:None):
         snapshot_content_check=deferred_check,
         **({'snapshot_content_check_policy':snapshot_policy} if snapshot_policy is not None else {}),
         collector_restarted=cycle_collector and configuration['enabled'],
+        **({'collector_spool_compatibility':POINT_HISTORY_COMPATIBILITY} if protect_point_history else {}),
         **({'collector_history_interval_seconds':history_patch['interval_seconds']} if history_patch is not None else {})),indent=2),encoding='utf-8')
     register_retention_snapshot(root,backup,snapshot,deferred_check,backup_created_at,report)
     return backup
