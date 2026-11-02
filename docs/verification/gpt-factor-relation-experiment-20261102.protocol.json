@@ -1,0 +1,93 @@
+{
+  "schema": "gpt-factor-relation-protocol-v1",
+  "locked_on": "2026-11-02",
+  "status": "locked before fitting; offline exploratory historical relations and replay only",
+  "phase1_manifest": "output/gpt-factor-phase1-20261102/manifest.json",
+  "phase1_manifest_sha256": "71923096f48b1ba86bbcea66eb945cc456ab7e1884742fc1bb5b988587939bfb",
+  "phase1_input_policy": "verify manifest bytes, all eight listed artifacts and both listed source-file hashes before fitting and after export; never modify phase1",
+  "primary_combination_order": ["sysA", "sysB", "sys401", "sys402", "desliming473", "desliming474"],
+  "primary_combination": [0, 1, 1, 1, 0, 0],
+  "primary_eligibility": "original eligibility strict, fixed seven factors strict and three good level candidates; common_valid in frozen phase1",
+  "primary_assay_ids": [11, 15, 35, 43, 47, 54, 56, 58, 60, 63, 64, 66, 67, 79, 81, 86, 90, 91, 94, 96, 99, 101, 104, 109, 111, 114, 116, 120, 135, 141, 139, 169, 172, 174],
+  "lags_seconds": [60, 90, 120],
+  "lag_comparison": "same assay IDs, labels and seven nonlevel inputs for every lag; compare recorded matching candidates, not physical delay",
+  "predictor_units": {"level": "percentage point of level", "coal_amount": "t/h of raw coal feed already used by the eight-factor model"},
+  "models": {
+    "M0": {"method": "median", "predictors": [], "formula": "median(normal available training ash)"},
+    "M1": {"method": "OLS", "predictors": ["level"], "formula": "intercept + level_coefficient * level"},
+    "M2": {"method": "OLS", "predictors": ["coal_amount"], "formula": "intercept + coal_coefficient * coal_amount"},
+    "M3": {"method": "OLS", "predictors": ["level", "coal_amount"], "formula": "intercept + level_coefficient * level + coal_coefficient * coal_amount"}
+  },
+  "learned_fit_policy": "for each declared training set compute its one-pass label fence, then fit the four models on its common normal training IDs; retain every excluded raw label and ID; no residual filtering and no additional raw-fit candidates",
+  "normal_fence": {
+    "quantile_method": "linear",
+    "q1": 0.25,
+    "q3": 0.75,
+    "iqr_floor_pp": 1.0,
+    "iqr_multiplier": 1.5,
+    "inclusive": true,
+    "formula": "[Q1 - 1.5*max(Q3-Q1,1pp), Q3 + 1.5*max(Q3-Q1,1pp)]",
+    "shared": "once per training set, identical across all lags and models; test normal membership uses only that training-derived fence"
+  },
+  "numerical_policy": {
+    "solver": "numpy.linalg.lstsq on intercept plus training-mean-centered, population-standard-deviation-scaled predictors",
+    "svd_rcond": 1e-10,
+    "minimum_predictor_span": 1e-9,
+    "minimum_residual_degrees_of_freedom": 1,
+    "rank_requirement": "rank equals number of coefficients and clean_n >= coefficient_count+1; otherwise unidentifiable with no usable coefficients or prediction",
+    "constant_minimum_normal_labels": 1,
+    "extrapolation": "flag any predictor outside this fit's normal-training min/max; retain and score finite predictions, never reject an error-prone input to improve accuracy",
+    "coefficient_reporting": "raw-unit intercept and slopes, centered intercept, training center/scale and predictor min/max; slope per 1 and per 10 level pp, per 1 and per 100 t/h"
+  },
+  "full_history": {
+    "cohort": "all 34 frozen primary rows",
+    "fence_training": "all 34 primary labels only; do not reuse a previously published whole-history fence",
+    "scoring": "predict all 34 rows after fitting normal training IDs; report normal/all and single out excluded labels",
+    "interpretation": "descriptive historical fit, not validation or a production model"
+  },
+  "historical_replay": {
+    "training_start": "2026-10-16",
+    "evaluation_start": "2026-10-20",
+    "selection_end_exclusive": "2026-10-26",
+    "replay_end_exclusive": "2026-11-01",
+    "availability": "observed_at and created_at must both be strictly earlier than that prediction date's Asia/Shanghai 00:00; no same-day earlier sample labels",
+    "minimum_available_labels": 5,
+    "minimum_gate_note": "existing operational gate, not evidence that n=5 is adequate to establish an 80 percent success claim",
+    "target_quality": "primary frozen common strict cohort only; approximate and label-review rows never upgraded",
+    "date_partition_names": {"before_2026_10_26": "development_historical_replay", "from_2026_10_26": "later_historical_replay_already_viewed"},
+    "fence_policy": "each date's fence is computed once from its prior available raw training labels; never use the full-history fence for test membership",
+    "availability_limitation": "created_at is initial entry time; precise report and revision availability not reconstructed, so this is not an exact online replay"
+  },
+  "baselines": {
+    "empirical_raw": "30.5 - 0.3*level without new clipping, matching the existing empirical_raw research reference",
+    "frozen_expert8": "existing app.gpt_coarse.expert8.predict, including its original clamps and corrections; no refitting",
+    "artifact": "backend/models/gpt_expert8/20261012/model.json",
+    "artifact_sha256": "c720efc10952802f42e3ec4261ab3b13966aefd89b34f7a21f7906c13f4362a0",
+    "implementation_sha256": "fbb9a31196721f98af6bd961f329cb5abc9f26ae1a77a9af828c0e24b038f17d",
+    "policy": "score both references on each lag's same target inputs; references are not assigned the clean-training coefficients"
+  },
+  "metrics": {
+    "primary_tolerance_pp": 1.0,
+    "secondary_tolerance_pp": 2.0,
+    "numerical_hit_epsilon_pp": 1e-9,
+    "normal_and_all": true,
+    "counts": "hit1/n and hit2/n, not a percentage without denominator",
+    "errors": ["MAE", "bias prediction-minus-actual", "median absolute error", "p90 absolute error", "max absolute error"],
+    "uncertainty": "Wilson 95 percent interval for hit1 rate, z=1.96; conditional normal score is not a known-at-prediction subgroup",
+    "coverage": "eligible, predicted, rejected or skipped with reasons and IDs; score every finite extrapolation",
+    "comparability": "report native coverage first, then scores on the intersection of target IDs predicted by all six fixed methods and all three lags in that phase",
+    "dates": "include per-date normal/all scores and counts, not only aggregate"
+  },
+  "forced_invariants": [
+    "M0 and M2 parameters, per-row predictions, coverage and scores must be exactly equal across lags, not merely approximately equal",
+    "all lags and models share the same raw training IDs, normal training IDs, excluded training IDs and fence for each fold",
+    "same target labels and same nonlevel factor values across lags",
+    "every replay training observed_at and created_at is strictly before its date cutoff",
+    "frozen phase1 manifest and its files remain byte-for-byte unchanged"
+  ],
+  "two_system_scope": "only describe each frozen strict common combination separately (5/4/3 rows): dates, three level ranges, coal and ash ranges and missing coverage; no fitting, borrowing three-system predictions or extrapolating a narrow range to all two-system conditions",
+  "selection_and_stopping": "no winner-selection rule, no automatic deployment, no hyperparameter search, no polynomial or rescue candidates; report the fixed experiment once even if accuracy is below target",
+  "prior_data_use": "all current labels and historical tail have already been viewed; lag/feature/model comparisons are development and historical replay, never new independent validation",
+  "sampling_time_limitation": "phase1 actual sampling precision and clock source remain unconfirmed; no retrospective 39-second or source-clock shift",
+  "outputs": "locked protocol, input hashes, training fences and IDs, numerical diagnostics/coefficients/ranges, all predictions/rejections, scores/coverage/per-date results, two-system descriptive coverage, invariant checks and report; no production or baseline writes"
+}
