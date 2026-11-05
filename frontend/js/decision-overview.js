@@ -461,9 +461,6 @@ const DecisionOverviewPage = {
             });
             this.refresh();
         }));
-        document.getElementById('decision-fit').addEventListener('click', () => { this.zoom = null; this.fit(); });
-        document.getElementById('decision-zoom-in').addEventListener('click', () => this.changeZoom(.15));
-        document.getElementById('decision-zoom-out').addEventListener('click', () => this.changeZoom(-.15));
         document.getElementById('decision-workspace').addEventListener('click', event => {
             if (event.target.closest('[data-ash-history]') && this.view === 'gpt') { DecisionAshHistory.open(this); return; }
         });
@@ -646,8 +643,7 @@ const DecisionOverviewPage = {
         toolbar.style.setProperty('--dm-total-height',`${total.offsetHeight}px`);
         const ash=total.getBoundingClientRect();
         const actions=document.getElementById('decision-actions').getBoundingClientRect();
-        const zoom=toolbar.querySelector('.decision-zoom').getBoundingClientRect();
-        toolbar.classList.toggle('has-total-row',ash.left<actions.right+16 || ash.right>zoom.left-16);
+        toolbar.classList.toggle('has-total-row',ash.left<actions.right+16 || ash.right>bar.right-16);
     },
     alignNavigation() {
         if (!this.active()) return;
@@ -683,7 +679,6 @@ const DecisionOverviewPage = {
         this.alignToolbarTotal();
         if(typeof DecisionRecentAsh!=='undefined') DecisionRecentAsh.position(this);
         this.background?.resize();
-        document.getElementById('decision-fit').textContent = `适应画布 · ${Math.round(scale * 100)}%`;
         this.queueInspectorPosition(true);
         this.queueReveal();
     },
@@ -812,9 +807,6 @@ const DecisionOverviewPage = {
 
     renderContext() {
         if(this.hourMode()) { DecisionHourly.context(this); return; }
-        const modeLabel=document.getElementById('decision-mode-label'),modeNote=document.getElementById('decision-mode-note');
-        if(modeLabel) modeLabel.textContent=this.liveMode()?'实时计算 · 人工执行':'只读决策视图';
-        if(modeNote) modeNote.textContent=this.liveMode()?'GPT 链路：当前输入 → 粗精煤泥灰分预测 → 三组分总灰分 → 建议密度。数据来源与后续小时简报共享；输入变化后重新计算，缺失时显示原因。建议由人工确认执行。虚线表示尚未进入模型的工况参考。':'点击节点选择采集点，卡片随读数更新；点击画布空白处收起。采集显示不改变建议计算，相关连线作为虚线对照。建议密度保留计算值，点位显示为采集对照。';
         if (this.liveMode()) {
             const result=DecisionRealtime.presentation();
             this.renderHTML('decision-context',`<span>模型：<strong>${this.escape(result?.model?.method?.toUpperCase() || '—')}</strong></span><span>${this.escape(result?this.time(result.generated_at):'—')}</span>`);

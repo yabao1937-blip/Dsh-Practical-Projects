@@ -114,29 +114,15 @@ const DecisionCoarseCharts = {
             button.classList.toggle('is-active',selected); button.setAttribute('aria-pressed',String(selected));
         });
         const s = this.snapshot,daily=this.mode==='day',mode=daily?'天':'采样点';
-        const meta = document.getElementById('decision-coarse-meta');
-        meta.textContent = !s.model ? (s.reason==='daily-data-insufficient'?'GPT 日级数据不足：训练范围内至少需要 12 个有效日。请切换按采样查看。':'尚未保存可用的 GPT 模型，请在粗精煤泥灰分预测页训练 GPT 版本。') :
-            `GPT · ${s.which.toUpperCase()} · ${daily?'日级分析模型（仅图表缓存） · '+s.group.n+' 个训练日':'采样保存模型 · 训练时间 '+(s.group.trainedAt || '未记录')} · ${s.count} 条历史采样 → ${s.rows.length} 个${mode}`+
-            (s.rows.length ? ` · ${s.rows[0].label} 至 ${s.rows.at(-1).label}` : '')+
-            (s.missing ? ` · ${s.missing} 个${mode}的缺失因子按对应模型均值补齐` : '')+
-            (s.excluded ? ` · ${s.excluded} 条无法计算，已排除` : '');
         document.getElementById('decision-coarse-table').innerHTML = s.rows.map(r=>
             `<tr><td>${r.label}</td><td>${r.n}</td><td>${this.number(r.actual)}</td><td>${this.number(r.pred)}</td><td>${this.number(r.level)}</td><td>${r.paired}</td><td>${this.number(r.scatterActual)}</td><td>${this.number(r.scatterPred)}</td></tr>`).join('');
         document.getElementById('decision-coarse-factor-list').textContent = s.factors.map(f=>`${f.name}：${this.number(f.value,3)}`).join('；') || '暂无 GPT 标准化系数';
         document.getElementById(this.rootId).querySelectorAll('[data-decision-series="actual"]').forEach(el=>el.textContent=daily?'实测日均值':'实测灰分');
         document.getElementById(this.rootId).querySelectorAll('[data-decision-series="predicted"]').forEach(el=>el.textContent=daily?'GPT 日级预测':'GPT 采样预测');
-        document.getElementById('decision-coarse-factor-caption').textContent=daily?'日级分析模型的标准化系数，仅用于历史分析。':'采样保存模型的标准化系数，保留原生产模型。';
-        const note=document.getElementById(this.rootId).querySelector('.decision-analysis-note');
-        if(note && !note.dataset.legacyText) note.dataset.legacyText=note.textContent;
-        const expertName=s.model?.feature_names?.length===8?'八因子':'九因子';
-        if(note) note.textContent=s.expert?`按采样：使用当前保存的专家${expertName}模型，对原表正常生产记录逐条回算；按日：先逐条预测，再将同日实测与预测分别求均值，不重新训练日级模型。日均误差可能因正负误差抵消而减小，不代表单次预测更准确。历史回算不是新的独立验证，化验报告时间尚未记录。上方决策链使用当前采集数据；液位25–75%以外按边界估算参与决策，仍给出建议密度。`:note.dataset.legacyText;
         if(s.expert) {
-            meta.textContent=`GPT · 专家基准${expertName} · ${s.count} 条历史记录 → ${s.rows.length} 个${mode} · 历史回算，非独立验收；按日为逐样本预测后求均值`;
-            document.getElementById('decision-coarse-factor-caption').textContent='参考工况单因素影响：连续量增加1个历史标准差（受范围限制），开关停止→运行；液位为专家设定，A系统样本不足取0。';
             document.getElementById(this.rootId).querySelectorAll('[data-decision-series="predicted"]').forEach(el=>el.textContent=daily?'GPT 回算日均值':'GPT 逐样本回算');
         }
         this.canvas('factors').setAttribute('aria-label',s.expert?'GPT专家模型在参考工况下的单因素预测影响，不代表因果或准确率。方向键查看。':'GPT 当前统计口径模型的标准化系数关联强度，不代表因果或准确率。方向键查看系数。');
-        if(s.reason==='expert-loading') meta.textContent=GptExpert9.error || '正在同步专家模型版本，历史图表稍后显示';
         this.draw();
     },
     syncEngagement(id) {

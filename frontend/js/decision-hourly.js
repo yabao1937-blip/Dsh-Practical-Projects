@@ -263,18 +263,13 @@ const DecisionHourly = {
         const r=this.presentation(),coverage=r?.coverage;
         if(this.qualityPolicy(r)) {
             const {ash,density}=r.advice_inputs;
-            document.getElementById('decision-mode-label').textContent='小时累加 · 人工执行';
             if(this.anchored(r)) {
-                document.getElementById('decision-mode-note').textContent=`最新发布的小时总灰分与当前目标范围、本小时首次有效设定密度用于计算小时建议。补录或修改目标仍按同一基准重算；灰分生产有效覆盖须超过 ${(coverage.required_ratio*100).toFixed(0)}%。当前采集状态只影响执行建议，每路单次执行相对当前设定最多 ±0.03。`;
                 page.renderHTML('decision-context',`<span>建议灰分 <strong>${page.escape(ash.label)}${ash.provisional?'（暂估）':''} · ${page.number(ash.value,2,'%')}</strong></span><span>本小时设定基准 <strong>${page.number(density.value,3)}</strong></span><span>基准采集 <strong>${page.escape(page.time(density.captured_at))}</strong></span><span>灰分有效覆盖 <strong>${(coverage.ash_ratio*100).toFixed(1)}%</strong></span><span>建议用于 <strong>${page.escape(r.period.apply_label)}</strong></span>`);
                 return;
             }
-            document.getElementById('decision-mode-note').textContent=`卡片展示上一完整小时工况；最新发布的小时灰分与上一小时平均密度用于估计工况参考目标，两个时段的生产覆盖均须超过 ${(coverage.required_ratio*100).toFixed(0)}%。当前采集状态只影响执行建议；每路单次执行相对当前设定密度最多调整 ±0.03。采用最新可用灰分持续计算，专家经验参考，等待实验验证。`;
             page.renderHTML('decision-context',`<span>统计时段 <strong>${page.escape(r.period.label)}</strong></span><span>建议灰分 <strong>${page.escape(ash.label)}${ash.provisional?'（暂估）':''} · ${page.number(ash.value,2,'%')}</strong></span><span>平均密度 <strong>${page.escape(density.label)} · ${page.number(density.value,3)}</strong></span><span>有效覆盖 <strong>灰分 ${(coverage.ash_ratio*100).toFixed(1)}% · 密度 ${(coverage.density_ratio*100).toFixed(1)}%</strong></span><span>建议用于 <strong>${page.escape(r.period.apply_label)}</strong></span>`);
             return;
         }
-        document.getElementById('decision-mode-label').textContent='小时累加 · 人工执行';
-        document.getElementById('decision-mode-note').textContent=(r?.policy==='decision-hourly-v2'?'总灰分按 501+502 实际产煤量加权；工况按系统组合、开停机和明显变化分段。':'该小时为旧口径样本均值。')+' 手工无新增沿用并注明时间。过渡期仍取平均建议偏移加到小时末密度上；专家经验建议 · 非实验验证的达标区间，单次执行限 ±0.03。';
         page.renderHTML('decision-context',r ? `<span>统计时段 <strong>${page.escape(r.period.label)}（北京时间）</strong></span><span>建议用于 <strong>${page.escape(r.period.apply_label)}</strong></span><span>密度来源 <strong>${page.escape(r.density_label)}</strong></span><span>有效建议覆盖 <strong>${(coverage.ratio*100).toFixed(1)}% · ${coverage.valid_count}/${coverage.expected_count}</strong></span><span class="decision-hour-status" role="status">${Number.isFinite(r.suggested_density.value)?`上调 ${coverage.up} · 下调 ${coverage.down} · 保持 ${coverage.stable}`:'数据不足或保护生效 · 暂缓调密'}</span>` : `<span role="status">${page.escape(this.error || '正在读取上一完整小时…')}</span>`);
     },
     inspector(page,node) {

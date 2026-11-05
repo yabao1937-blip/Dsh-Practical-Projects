@@ -51,12 +51,7 @@ const DecisionFloatAnalysis = Object.assign(Object.create(DecisionCoarseCharts),
         const snapshot=this.build(),signature=JSON.stringify(snapshot);
         if(signature===this.signature) return;
         this.snapshot=snapshot;this.signature=signature;
-        const s=this.snapshot,l=s.latest;
-        document.getElementById('decision-float-meta').textContent=`历史分析起点 ${s.start} · ${s.rows.length} 条有效采样 · ${s.defaults} 条采用默认重介灰分 8.50%`+
-            (l?` · 最近记录 ${l.timestamp}`:' · 暂无历史数据')+
-            (s.duplicates?` · ${s.duplicates} 条重复时间保留首条`:'')+
-            (s.early?` · ${s.early} 条早期工况未纳入`:'')+
-            (s.invalid?` · ${s.invalid} 条无效数据未纳入`:'');
+        const s=this.snapshot;
         document.getElementById('decision-float-table').innerHTML=s.rows.slice().reverse().map(r=>
             `<tr><td>${this.escape(r.timestamp)}</td><td>${this.number(r.ash)}</td><td>${this.number(r.amount)}</td><td>${this.number(r.heavyAsh)}</td><td>${r.defaultHeavy?'默认基准':'5分钟近邻'}</td><td>${this.number(r.total,3)}</td><td>${this.number(r.influence,3)}</td><td>${this.escape(r.press)}</td><td>${this.escape(r.annotation)}</td></tr>`).join('');
         this.draw();
