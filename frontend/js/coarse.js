@@ -10,6 +10,13 @@ const CoarsePage = {
     scatterChart: null,
     viewModel: 'production',   // 'production' | 'mlr' | 'pls'
     rollTimer: null,
+
+    // store 字段可经整库镜像写入任意字符串；拼进 innerHTML 前必须转义
+    // （2026-11-05 安全审计：存储型 XSS；与各页已有 esc 纪律对齐）。
+    esc(value) {
+        return String(value ?? '').replace(/[&<>"']/g, c => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    },
     _dailyModel: null,          // 日级模型缓存(懒加载,切换到按日视图时训练)
 
     init() {
@@ -561,16 +568,16 @@ const CoarsePage = {
         }
         tbody.innerHTML = recs.map(d => {
             const pred = this._pred(d);
-            if (!Number.isFinite(pred)) return `<tr><td>${d.timestamp}</td><td>${d.ash_content.toFixed(2)}</td><td>—</td><td>—</td><td>模型不可用</td><td>${d.system || '-'}</td></tr>`;
+            if (!Number.isFinite(pred)) return `<tr><td>${this.esc(d.timestamp)}</td><td>${d.ash_content.toFixed(2)}</td><td>—</td><td>—</td><td>模型不可用</td><td>${this.esc(d.system || '-')}</td></tr>`;
             const dev = pred - d.ash_content;
             const ok = Math.abs(dev) <= tol;
             return `<tr>
-                <td style="font-size:12px">${d.timestamp}</td>
+                <td style="font-size:12px">${this.esc(d.timestamp)}</td>
                 <td>${d.ash_content.toFixed(2)}</td>
                 <td>${pred.toFixed(2)}</td>
                 <td class="${ok ? '' : 'text-warn'}">${dev > 0 ? '+' : ''}${dev.toFixed(2)}</td>
                 <td><span class="annotate-tag ${ok ? 'normal' : 'press-filter'}">${ok ? '合格 ✓' : '超差 ✗'}</span></td>
-                <td style="font-size:12px">${d.system || '-'}</td>
+                <td style="font-size:12px">${this.esc(d.system || '-')}</td>
             </tr>`;
         }).join('');
     },
@@ -657,7 +664,7 @@ const CoarsePage = {
         if (!history) return;
         const rows = (App.store.coarseModelHistory || []).filter(h => h.engine === 'gpt').slice(-8).reverse();
         history.innerHTML = rows.length ? rows.map(h => `<tr>
-            <td>GPT<br>${h.trainedAt}</td><td>${h.n}</td><td>${rangeLabel(h.range)}</td>
+            <td>GPT<br>${this.esc(h.trainedAt)}</td><td>${h.n}</td><td>${rangeLabel(h.range)}</td>
             <td>MLR: R²${h.mlr.r2.toFixed(3)} 合格${h.mlr.passRate.toFixed(0)}% Q²${h.mlr.q2.toFixed(3)}</td>
             <td>PLS(A${h.pls.A}): R²${h.pls.r2.toFixed(3)} 合格${h.pls.passRate.toFixed(0)}% Q²${h.pls.q2.toFixed(3)}</td>
             <td>${h.production.toUpperCase()}</td></tr>`).join('') : '<tr><td colspan="6">暂无 GPT 重训练记录</td></tr>';
@@ -777,7 +784,7 @@ const CoarsePage = {
                     <tr><td>煤量</td><td>${latest ? (latest.coal_amount||0).toFixed(1) + ' t/h' : '-'}</td></tr>
                     <tr><td>精磁尾液位</td><td>${latest ? this._getLevel(latest).toFixed(2) + '%' : '-'}</td></tr>
                     <tr><td>原煤灰分</td><td>${latest && latest.raw_ash != null ? latest.raw_ash.toFixed(2) + '%' : '-'}</td></tr>
-                    <tr><td>采样时间</td><td>${latest ? latest.timestamp : '-'}</td></tr>
+                    <tr><td>采样时间</td><td>${latest ? this.esc(latest.timestamp) : '-'}</td></tr>
                 </table></div>`;
         } else if (type === 'predict') {
             const pred = latest ? (dm ? this._dailyPred(latest, dm) : this._pred(latest)) : null;
@@ -794,7 +801,7 @@ const CoarsePage = {
             shiftData.forEach((d, i) => { const p = this._pred(d);
                 const amt = (i === shiftData.length - 1 && inputAmt > 0) ? inputAmt : (d.coal_amount || 0);
                 if (Number.isFinite(p) && amt > 0) { sumW += p * amt; sumAmt += amt; valid++; }
-                rows += `<tr><td>${d.timestamp}</td><td>${Number.isFinite(p) ? p.toFixed(2) + '%' : '—'}</td><td>${amt.toFixed(1)}</td></tr>`; });
+                rows += `<tr><td>${this.esc(d.timestamp)}</td><td>${Number.isFinite(p) ? p.toFixed(2) + '%' : '—'}</td><td>${amt.toFixed(1)}</td></tr>`; });
             const cum = sumAmt > 0 ? sumW / sumAmt : null;
             html = `<div style="line-height:2;font-size:14px">
                 <h4 style="margin:0 0 12px;color:var(--accent-blue)">累计灰分（本班次按煤量加权）</h4>

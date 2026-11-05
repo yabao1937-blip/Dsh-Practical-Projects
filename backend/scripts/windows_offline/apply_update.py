@@ -976,14 +976,38 @@ def apply(package,root,manifest,report=lambda stage,message:None):
     return backup
 
 
+def check_expected_sha256(package_zip, expected):
+    """带外整包摘要校验（2026-11-05 安全审计）：update.json/manifest 随包走、属自证；
+    操作员应通过第二渠道（电话/微信）拿到 zip 的 sha256，再带 --expected-sha256 执行更新，
+    使替换掉整包+自洽清单的中间人攻击无法通过。"""
+    import hashlib
+    digest = hashlib.sha256()
+    with open(package_zip, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b''):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual.lower() != str(expected).strip().lower():
+        raise ValueError(f'package sha256 mismatch: expected {expected}, got {actual} '
+                         f'({package_zip}) — the zip differs from the out-of-band confirmed value; refusing to update.')
+    return actual
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--install-dir',type=Path,required=True)
     parser.add_argument('--preflight',action='store_true',help='Verify package and exact installed source hashes without changing files or services')
     parser.add_argument('--component',action='store_true',help='Leave overall installed reporting to the serial update coordinator')
+    parser.add_argument('--package-zip',type=Path,help='Path to the downloaded ProjectUpdate zip for out-of-band digest checking')
+    parser.add_argument('--expected-sha256',help='sha256 confirmed via a second channel (phone/chat); refuses to update on mismatch')
     args = parser.parse_args()
     package = Path(__file__).resolve().parent
     manifest = json.loads((package/'update.json').read_text(encoding='utf-8'))
+    if args.expected_sha256:
+        zip_path = args.package_zip if args.package_zip else None
+        if zip_path is None:
+            parser.error('--expected-sha256 requires --package-zip (the downloaded zip file)')
+        check_expected_sha256(zip_path, args.expected_sha256)
+        print('package-digest: out-of-band sha256 verified: '+str(zip_path),flush=True)
     if args.component and manifest.get('frontend_asset_verification') != FRONTEND_ASSET_VERIFICATION:
         parser.error('Component reporting is restricted to the reviewed frontend-asset hotfix')
     if args.preflight:

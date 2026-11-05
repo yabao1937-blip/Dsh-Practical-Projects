@@ -193,9 +193,15 @@ def build(output, wheelhouse, packages):
     if config.exists():
         (stage/'configuration').mkdir()
         shutil.copy2(config, stage/'configuration/kepserver.local.json')
+        # 2026-11-05 安全审计：certs/ 含 OPC 客户端私钥，绝不进分发包。
+        # 主机侧安全模式（Basic256Sha256）启用时，证书应通过单独的受控渠道放置，
+        # 而不是随安装包广播。此处显式跳过并大声提示。
         certs = config.parent/'certs'
         if certs.exists():
-            shutil.copytree(certs, stage/'configuration/certs')
+            skipped = [p for p in certs.rglob('*') if p.is_file()]
+            print(f'WARNING: OPC certs directory ({len(skipped)} files) EXCLUDED from the '
+                  f'bundle — client private keys must be distributed via a separate controlled '
+                  f'channel, never inside the install zip.', flush=True)
     for name in ('Install.cmd', 'Install.ps1', 'Start.ps1'):
         shutil.copy2(TEMPLATES/name, stage/name)
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
@@ -208,6 +214,7 @@ def build(output, wheelhouse, packages):
         python=sys.version.split()[0], architecture='win_amd64',
         report_url=f'http://{transfer["bind"]}:{transfer["port"]}/{transfer["token"]}/status',
         dependency_origin='Repacked from RECORD-verified installed distributions; not original vendor wheel downloads',
+        certs_excluded=True,  # 2026-11-05: OPC certs/ (含私钥) 永不打包，走独立受控渠道
         packages=packages, files={})
     for path in sorted(stage.rglob('*')):
         if path.is_file():

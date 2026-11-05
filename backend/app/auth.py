@@ -21,6 +21,7 @@ token 从哪来
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 import secrets
 from pathlib import Path
@@ -31,6 +32,17 @@ from .config import DATA_DIR, REMOTE_READONLY
 
 TOKEN_FILE = DATA_DIR / "write_token.txt"
 TOKEN_HEADER = "X-DMCS-Token"
+_AUTH_LOG = logging.getLogger("dmcs.auth")
+
+
+def warn_if_auth_disabled() -> bool:
+    """非只读模式下写鉴权被关闭时，启动即大声告警（docstring 承诺过的警告，2026-11-05 落实）。"""
+    if REMOTE_READONLY or auth_enabled():
+        return False
+    _AUTH_LOG.warning(
+        "DMCS 写鉴权已关闭（DMCS_WRITE_TOKEN/DMCS_WRITE_AUTH=off）："
+        "所有写接口对网络完全开放！仅建议在受信任的隔离环境使用。")
+    return True
 
 # 本机回环写入默认放行：现场脚本、pytest、E2E 都从本机发起，
 # 而真实的暴露面是同网段的其它主机。设 DMCS_ALLOW_LOCALHOST_WRITES=0 可关掉。
@@ -84,8 +96,10 @@ def _presented_token(request: Request) -> str | None:
     tok = request.headers.get(TOKEN_HEADER) or request.headers.get(TOKEN_HEADER.lower())
     if tok:
         return tok.strip()
-    # 兜底：允许 ?token=（便于 curl 手工调试；浏览器走 header）
-    return request.query_params.get("token")
+    # 2026-11-05 安全审计后移除 ?token= query 回退：令牌进 URL 会落入 uvicorn 访问日志
+    # （%TEMP%/dmcs_server.log，90 天保留）等中间产物。浏览器/前端一向只走 header；
+    # curl 调试请用 -H "X-DMCS-Token: ..."。
+    return None
 
 
 async def require_write(request: Request) -> None:

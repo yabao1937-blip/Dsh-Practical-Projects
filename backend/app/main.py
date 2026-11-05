@@ -22,7 +22,7 @@ from .decision_hourly.router import router as evidence_router
 from .config import APP_VERSION, FRONTEND_DIR, REMOTE_READONLY
 from .database import Base, engine
 from .observability import install_observability
-from .routers import (assistant, health, manual_measurements,
+from .routers import (health, manual_measurements,
                       samples, settings, state, telemetry, training)
 
 from .schema_upgrade import upgrade_schema
@@ -57,6 +57,7 @@ app = FastAPI(
     lifespan=application_lifespan,
 )
 install_observability(app)
+auth.warn_if_auth_disabled()
 
 # 2026-09 删除 CORSMiddleware(allow_origins=["*"])：
 # 前端由本服务**同源**托管（见文件末尾 mount "/"），api.js 的 base 是相对路径 '/api/v1'，
@@ -73,7 +74,6 @@ app.include_router(retention_router, prefix="/api/v1")
 app.include_router(gpt_coarse_router, prefix="/api/v1")
 app.include_router(decision_router, prefix="/api/v1")
 app.include_router(evidence_router, prefix="/api/v1")
-app.include_router(assistant.router, prefix="/api/v1")   # AI解读助手(只读)
 app.include_router(settings.router, prefix="/api/v1")
 app.include_router(samples.router, prefix="/api/v1")
 app.include_router(manual_measurements.router, prefix="/api/v1")

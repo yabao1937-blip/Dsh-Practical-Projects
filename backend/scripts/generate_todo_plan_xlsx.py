@@ -1230,16 +1230,27 @@ sheet(
          "同时也验证了「两行即可恢复」这个承诺。",
          "另核对：去掉 HTML 注释后，服务端首页的 12 个 `<script src>` 里已无 assistant.js，"
          "注释块闭合正常（注释内保留的两行不会被浏览器执行）。"],
+        ["永久移除（2026-11-05，现场确认）",
+         "按现场确认执行上一行预留的删除清单：`frontend/js/assistant.js`、`style.css` 的 `.ai-*`/`#ai-assistant-*` 样式块、"
+         "`backend/app/routers/assistant.py` 与 main.py 的路由注册、`backend/tests/test_assistant.py`、"
+         "`backend/scripts/verify_assistant.js` 全部删除；index.html 尾部注释更新为「已永久移除」。",
+         "2026-11-05 安全审计（Cloudflare security-audit 技能全流程）将未鉴权的 "
+         "`POST /api/v1/assistant/ask` 列为线索：完整模式下任何同网段主机可触发全库快照外发到 "
+         "外部 LLM 并消耗运维 API 凭证；现场选择直接删除该功能而非加鉴权。",
+         "验证：backend pytest 全绿（test_assistant.py 已随功能删除，test_guidance_regression 中 "
+         "依赖 assistant 的对拍用例已同步移除）；首页脚本清单已无 assistant.js；"
+         "恢复需从 git 历史找回上述文件（不再提供两行恢复路径）。"],
         ["影响面",
-         "只改 frontend/index.html；后端接口保留但页面已无调用方（接口本身只读、零写入）。",
+         "前端：index.html 摘除注释块；style.css 删除 AI 样式（页面无其他引用）。"
+         "后端：仅摘除路由与测试，无其他模块 import assistant。",
          "其余页面功能不受影响（PAGE_STILL_OK 断言覆盖总览卡片与浮精页脚本加载）。",
-         "本页暂无自动化守卫（CI 的 6 个 E2E 用例都不涉及该入口）——"
-         "若希望「永远不要再出现」，可把 NO_AI_BUTTON 加进某个 E2E 脚本；"
-         "但那样会让另一个 agent 正常恢复该功能时 CI 变红，故本轮未加。"],
+         "backend/.llm_keys.json 与环境变量 ZAI_API_KEY/DEEPSEEK_API_KEY 不再被任何代码读取，"
+         "可自行删除或保留（文件本就在 .gitignore 中）。"],
     ],
     fill_col=1,
     fill_map={"现场要求（2026-09-18）": HIGH_FILL, "做法": OK_FILL,
               "为什么这次不删文件与后端接口": MID_FILL,
+              "永久移除（2026-11-05，现场确认）": HIGH_FILL,
               "验证（一次性无头浏览器检查，不入库）": HIGH_FILL, "影响面": LOW_FILL},
 )
 

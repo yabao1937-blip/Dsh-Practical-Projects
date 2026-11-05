@@ -1119,7 +1119,10 @@ const App = {
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
-        toast.innerHTML = `<span>${msg}</span><button class="toast-close" onclick="this.parentElement.remove()">&times;</button>`;
+        // msg 常含服务端/镜像返回的文本（未被 HTML 白名单校验），进 innerHTML 前必须转义。
+        const esc = String(msg).replace(/[&<>"']/g, c => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        toast.innerHTML = `<span>${esc}</span><button class="toast-close" onclick="this.parentElement.remove()">&times;</button>`;
         container.appendChild(toast);
         setTimeout(() => toast.remove(), 4000);
     },

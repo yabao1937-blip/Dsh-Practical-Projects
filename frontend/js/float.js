@@ -7,6 +7,13 @@ const FloatPage = {
     linkageChart: null,
     distChart: null,
 
+    // store 字段入库前未经 HTML 白名单校验（PUT /state 整库镜像可写任意字符串），
+    // 所有拼进 innerHTML 的字符串必须先过 esc（2026-11-05 安全审计：存储型 XSS）。
+    esc(value) {
+        return String(value ?? '').replace(/[&<>"']/g, c => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    },
+
     // 本页数据起点（现场要求 2026-09-17：去掉图表里 5 月的数据）。
     // 为什么是 6-01 而不是"删掉 5 月那 5 条"：
     //   5 月那 5 条（05-21~05-25，煤量 26~27 t/h、灰分 8.2~10.4）与 8 月以后
@@ -402,11 +409,11 @@ const FloatPage = {
                 '<span class="annotate-tag press-filter">压滤机运行</span>' :
                 '<span class="annotate-tag normal">正常</span>';
             const annTag = d.annotation && d.annotation !== '正常' ?
-                `<span class="annotate-tag abnormal">${d.annotation}</span>` : '';
+                `<span class="annotate-tag abnormal">${this.esc(d.annotation)}</span>` : '';
             const inf = this._influenceOf(d);   // 与图表同源（不再用导入时存下的旧口径值）
             const infClass = inf > 0.1 ? 'text-up' : inf < -0.1 ? 'text-down' : '';
             return `<tr>
-                <td style="font-size:12px">${d.timestamp}</td>
+                <td style="font-size:12px">${this.esc(d.timestamp)}</td>
                 <td>${d.ash_content.toFixed(2)}</td>
                 <td>${d.coal_amount.toFixed(1)}</td>
                 <td>${pressTag}</td>
@@ -425,12 +432,12 @@ const FloatPage = {
         if (!d) return;
         const html = `
             <div style="line-height:2">
-                <p><strong>时间：</strong>${d.timestamp}</p>
+                <p><strong>时间：</strong>${this.esc(d.timestamp)}</p>
                 <p><strong>浮精灰分：</strong>${d.ash_content.toFixed(2)}%</p>
                 <p><strong>浮精煤量：</strong>${d.coal_amount.toFixed(1)} t/h</p>
                 <p><strong>压滤机状态：</strong>${d.filter_press_running ? '运行中' : '停止'}</p>
                 <p><strong>影响值：</strong>${this._influenceOf(d).toFixed(3)}%</p>
-                <p><strong>工况标注：</strong>${d.annotation || '无'}</p>
+                <p><strong>工况标注：</strong>${this.esc(d.annotation || '无')}</p>
                 <hr style="border-color:var(--border-color);margin:12px 0">
                 <p><strong>计算方式：</strong></p>
                 <p>总灰分 = (重介灰分×重介量 + 浮精灰分×浮精量) / (重介量 + 浮精量)</p>
@@ -445,7 +452,7 @@ const FloatPage = {
     showAnnotateModal() {
         const data = this._uniqueByTime(App.store.floatCoal);
         const opts = data.slice().reverse().slice(0, 10).map(d =>
-            `<option value="${d.id}">${d.timestamp} - 灰分:${d.ash_content.toFixed(2)}%</option>`
+            `<option value="${d.id}">${this.esc(d.timestamp)} - 灰分:${d.ash_content.toFixed(2)}%</option>`
         ).join('');
         const html = `
             <div class="annotate-form">

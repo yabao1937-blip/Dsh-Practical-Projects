@@ -10,7 +10,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app import models
-from app.routers import assistant
 from app.services import resolvers
 from app.services.guidance import build_density_guidance, density_guard_state
 from app.services.migrate import _apply_in_session, _plan
@@ -131,24 +130,6 @@ def test_density_change_does_not_fabricate_ash_response():
         assert resolvers.resolve_instrument(store, "ash_501") == 9.1
         assert resolvers.get_heavy_ash(store) == 8.0
         assert resolvers.resolve_total_ash(store) == 9.1
-
-
-@pytest.mark.parametrize("case", ["constant", "heavy", "dwell"])
-def test_assistant_uses_shared_guidance(monkeypatch, case):
-    store = case_store(case)
-    # 避免依赖真实时钟：驻留场景用同一数据闩锁。
-    if case == "dwell":
-        store = case_store("latch")
-    monkeypatch.setattr(assistant, "load_store", lambda db: store)
-    engine = create_engine("sqlite://")
-    models.Base.metadata.create_all(engine)
-    with Session(engine) as db:
-        dashboard, _ = build_density_guidance(store)
-        snapshot = assistant.build_snapshot(db)["guidance"]
-    for key in ("valid", "hold", "direction", "reason", "scheme", "deltaA"):
-        assert snapshot[key] == dashboard[key]
-    assert snapshot["suggested_density"] == dashboard["rhoNew"]
-    engine.dispose()
 
 
 def test_action_protection_and_source_switch_survive_database_roundtrip():

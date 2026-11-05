@@ -9,11 +9,58 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# 2026-11-05 安全审计：未鉴权连接此前可无限占用线程（线程在 IP 白名单 check() 之前
+# 就已生成，且无 socket 超时）。读超时 + 并发线程封顶共同封住资源占用。
+HANDLER_TIMEOUT = 30
+MAX_HANDLER_THREADS = 8
+
+
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """每连接一线程，但线程总数封顶：未鉴权连接也占不满门户。"""
+    daemon_threads = True
+    max_handler_threads = MAX_HANDLER_THREADS
+
+    def __init__(self, address, handler):
+        self._slots = threading.BoundedSemaphore(self.max_handler_threads)
+        super().__init__(address, handler)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            self._reject_busy(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+    @staticmethod
+    def _reject_busy(request):
+        try:
+            request.sendall(b'HTTP/1.1 503 Service Unavailable\r\n'
+                            b'Content-Length: 0\r\nConnection: close\r\n\r\n')
+        except OSError:
+            pass
+        finally:
+            try:
+                request.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            request.close()
 
 
 def serve(output):
@@ -47,6 +94,9 @@ def serve(output):
     allowed = {settings['client'], settings['bind'], '127.0.0.1'}
 
     class Handler(BaseHTTPRequestHandler):
+        # 见模块顶 HANDLER_TIMEOUT 说明。
+        timeout = HANDLER_TIMEOUT
+
         def check(self):
             if self.client_address[0] not in allowed:
                 self.send_error(403)
@@ -197,7 +247,7 @@ def serve(output):
             self.end_headers()
 
     print(f'http://{settings["bind"]}:{settings["port"]}{prefix}/', flush=True)
-    ThreadingHTTPServer((settings['bind'], settings['port']), Handler).serve_forever()
+    BoundedThreadingHTTPServer((settings['bind'], settings['port']), Handler).serve_forever()
 
 
 def main():

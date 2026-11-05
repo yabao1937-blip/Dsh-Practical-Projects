@@ -8,6 +8,7 @@
   ④ 首页把 token 以 <meta> 下发（浏览器零配置）。
 """
 import importlib
+import logging
 
 import pytest
 from fastapi.testclient import TestClient
@@ -133,3 +134,34 @@ def test_token_file_is_used_when_env_absent(tmp_path, monkeypatch):
     assert auth._load_or_create_token() is None
     monkeypatch.undo()
     importlib.reload(auth)      # 还原模块状态，避免污染其它用例
+
+
+def test_query_string_token_no_longer_accepted(token_on, remote_client):
+    """2026-11-05 安全审计后移除 ?token= 回退：query 里带正确 token 也必须 401。
+
+    令牌进 URL 会落入 uvicorn 访问日志（%TEMP%/dmcs_server.log，90 天保留）
+    与代理/历史等中间产物；header 是唯一提交方式。
+    """
+    r = remote_client.put("/api/v1/state?token=test-token-123",
+                          json={**SEED, "_revision": remote_client.get("/api/v1/state").json()["_revision"]})
+    assert r.status_code == 401, r.text
+
+
+def test_warn_if_auth_disabled_only_when_relevant(monkeypatch, caplog):
+    """鉴权关闭时 warn_if_auth_disabled 必须大声告警；开启或只读模式则静默。"""
+    with caplog.at_level(logging.WARNING, logger="dmcs.auth"):
+        # 场景 1：非只读 + 鉴权关闭 → 告警
+        monkeypatch.setattr(auth, "WRITE_TOKEN", None, raising=False)
+        monkeypatch.setattr(auth, "REMOTE_READONLY", None, raising=False)
+        assert auth.warn_if_auth_disabled() is True
+        assert any("写鉴权已关闭" in rec.message for rec in caplog.records)
+        caplog.clear()
+        # 场景 2：非只读 + 鉴权开启 → 静默
+        monkeypatch.setattr(auth, "WRITE_TOKEN", "t", raising=False)
+        assert auth.warn_if_auth_disabled() is False
+        assert not caplog.records
+        # 场景 3：只读测试服 → 静默（写本来就被 403，无告警意义）
+        monkeypatch.setattr(auth, "REMOTE_READONLY", {"server_url": "http://x/"}, raising=False)
+        monkeypatch.setattr(auth, "WRITE_TOKEN", None, raising=False)
+        assert auth.warn_if_auth_disabled() is False
+        assert not caplog.records
