@@ -64,3 +64,22 @@ backend/data/baseline-evidence-*/
 /outputs/
 /render/
 backend/data/client-mode.json
+
+# Agent tool caches (machine-local, not project code)
+.impeccable/
+.serena/
+
+# Local KEPServer config backups (may contain credentials, never commit)
+backend/config/kepserver.local.json.backup-*
+
+# Runtime server error logs
+backend/data/server-logs/
+
+# Local evidence/artifact outputs (never tracked historically)
+output/
+
+# Unrelated goose animation toy
+goose-bicycle.html
+goose-bicycle-ik.html
+goose-legs.txt
+tools/

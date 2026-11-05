@@ -9,9 +9,17 @@ FOUR_SYSTEM_MEMBERS = (
     ("B", "TIA_4_2.TIA_4_2.A346/if_prod"),
 )
 DESLIMING_MEMBERS = (
+    ("473", "TIA_3_3.TIA_3_3.473/RUNS"),
+    ("474", "TIA_3_3.TIA_3_3.474/RUNS"),
+)
+# Archived evidence keeps its original identities. These are never live aliases.
+LEGACY_DESLIMING_MEMBERS = (
     ("473", "TIA_3_3.TIA_3_3.473/if_prod"),
     ("474", "TIA_3_3.TIA_3_3.474/if_prod"),
 )
+LEGACY_DESLIMING_KEYS = ("tag_3a82e49b2a019451078b", "tag_caf82182c2980109b2de")
+DESLIMING_CUTOVER_SETTING = "desliming_runs_cutover"
+DESLIMING_RUNS_VERSION = "desliming-runs-v1"
 FLOAT_PRESS_MEMBERS = tuple(
     (label, f"TIA_4_2.TIA_4_2.{label}/YL_STATE") for label in ("A415", "A416", "A417", "A418")
 )

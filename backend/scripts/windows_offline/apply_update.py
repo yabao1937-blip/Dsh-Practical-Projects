@@ -22,6 +22,13 @@ PERIODIC_QUERY_PATH = 'backend/app/decision_hourly/service.py'
 PERIODIC_QUERY_BASELINE = 'cbef07c65508d228a1c82487ddb8cd347768ee8c08188d730caf31d746bb6edd'
 PERIODIC_QUERY_PROOF = 'baseline/decision-service.py'
 MAX_QUERY_SOURCE_BYTES = 1024 * 1024
+FRONTEND_ASSET_VERIFICATION = 'density-trend-three-panels-v1'
+FRONTEND_ASSET_FILES = frozenset({
+    'frontend/index.html',
+    'frontend/js/decision-density-trend.js',
+    'frontend/css/decision-density-trend.css',
+})
+MAX_FRONTEND_ASSET_BYTES = 1024 * 1024
 POINT_HISTORY_COMPATIBILITY = 'point-history-v1'
 POINT_HISTORY_FILES = frozenset('backend/app/telemetry/'+name for name in ('config.py','repository.py','worker.py'))
 POINT_HISTORY_RETAINED = '.point-history-v1-retained'
@@ -239,12 +246,59 @@ def replace_configuration(path,data):
         temporary.unlink(missing_ok=True)
 
 
+def verify_frontend_assets(package,root,manifest):
+    """A narrowly declared static update cannot opt other hotfixes out of checks."""
+    if 'frontend_asset_verification' not in manifest:
+        return False
+    if (manifest['frontend_asset_verification'] != FRONTEND_ASSET_VERIFICATION
+            or manifest.get('profile') != 'query-only-hotfix'
+            or set(manifest.get('files',{})) != FRONTEND_ASSET_FILES
+            or any(key in manifest for key in (
+                'collector_history_interval_seconds','snapshot_content_check_policy',
+                'collector_spool_compatibility','function_patch','rollback_compatibility'))):
+        raise ValueError('Frontend verification requires the exact configuration-free three-asset hotfix')
+    expected_tree = {
+        'payload': {'frontend'},
+        'payload/frontend': {'index.html','js','css'},
+        'payload/frontend/js': {'decision-density-trend.js'},
+        'payload/frontend/css': {'decision-density-trend.css'},
+    }
+    for name,children in expected_tree.items():
+        directory = package/name
+        if directory.is_symlink() or not directory.is_dir() or {p.name for p in directory.iterdir()} != children:
+            raise ValueError('Frontend hotfix payload must contain only the three reviewed static assets')
+    for name in FRONTEND_ASSET_FILES:
+        info = manifest['files'][name]
+        if (not isinstance(info,dict) or set(info) != {'sha256','previous_sha256'}
+                or any(not isinstance(info[key],str) or not re.fullmatch(r'[0-9a-f]{64}',info[key])
+                       for key in ('sha256','previous_sha256'))):
+            raise ValueError('Frontend hotfix requires exact old and new source hashes: '+name)
+        payload,target = safe_path(package/'payload',name),safe_path(root,name)
+        if payload.is_symlink() or not payload.is_file() or digest(payload) != info['sha256']:
+            raise ValueError('Incomplete or damaged frontend asset: '+name)
+        if not target.is_file() or digest(target) not in {info['previous_sha256'],info['sha256']}:
+            raise ValueError('Installed frontend asset differs from the exact baseline: '+name)
+    return True
+
+
+def verify_frontend_http(manifest):
+    """Check served source bytes; /index.html avoids the runtime HTML injection."""
+    for name in sorted(FRONTEND_ASSET_FILES):
+        url = 'http://127.0.0.1:8000/'+name.removeprefix('frontend/')
+        request = Request(url,headers={'Cache-Control':'no-cache'})
+        with urlopen(request,timeout=15) as response:
+            data = response.read(MAX_FRONTEND_ASSET_BYTES+1)
+        if len(data) > MAX_FRONTEND_ASSET_BYTES or hashlib.sha256(data).hexdigest() != manifest['files'][name]['sha256']:
+            raise RuntimeError('Updated frontend asset was not loaded: '+name)
+
+
 def verify(package,root,manifest):
     if not (root/'offline-install.json').is_file() or not (root/'Start.ps1').is_file():
         raise ValueError('Unrecognized installation; nothing was changed')
     profile = manifest.get('profile')
     if profile not in (None,'query-only-hotfix'):
         raise ValueError('Unknown update profile')
+    verify_frontend_assets(package,root,manifest)
     compatibility = manifest.get('rollback_compatibility')
     if compatibility not in (None, MANUAL_FLOAT_ROLLBACK_COMPATIBILITY):
         raise ValueError('Unknown rollback compatibility policy')
@@ -680,11 +734,12 @@ def clear_bytecode(path):
         Path(importlib.util.cache_from_source(str(path))).unlink(missing_ok=True)
 
 
-def restart(root):
+def restart(root,*,frontend_assets=False):
     powershell(root/'Start.ps1','-NoBrowser',cwd=root)
+    health_url = 'http://127.0.0.1:8000/api/v1/health'+('/live' if frontend_assets else '')
     for _ in range(30):
         try:
-            with urlopen('http://127.0.0.1:8000/api/v1/health',timeout=3) as response:
+            with urlopen(health_url,timeout=3) as response:
                 if json.load(response)['status'] == 'ok': return
         except (OSError,ValueError): pass
         time.sleep(1)
@@ -748,6 +803,7 @@ def rollback_schema_sources(root,manifest):
 
 def apply(package,root,manifest,report=lambda stage,message:None):
     verify(package,root,manifest)
+    frontend_assets = manifest.get('frontend_asset_verification') == FRONTEND_ASSET_VERIFICATION
     protect_point_history = point_history_compatibility(manifest)
     snapshot_policy = snapshot_check_policy(manifest)
     history_patch = history_configuration_patch(root,manifest)
@@ -818,15 +874,18 @@ def apply(package,root,manifest,report=lambda stage,message:None):
             restored = point_history_spool(root,configuration,restore=True)
             report('copying',f'Released {restored} retained point-history envelopes for the verified new collector.')
         report('starting','Starting updated services and checking health.')
-        restart(root)
+        restart(root,frontend_assets=True) if frontend_assets else restart(root)
         if cycle_collector: collector_ready(root,configuration,before,report)
-        with urlopen('http://127.0.0.1:8000/api/v1/decision/hourly',timeout=45) as response:
-            data = json.load(response)
-            if data.get('advice_policy') != 'gpt-hourly-reference-v4' and data.get('status') != 'pending':
-                raise RuntimeError('Updated hourly policy was not loaded')
-        with urlopen('http://127.0.0.1:8000/',timeout=15) as response:
-                if '实时总精煤灰分' not in response.read().decode('utf-8'):
-                    raise RuntimeError('Updated frontend was not loaded')
+        if frontend_assets:
+            verify_frontend_http(manifest)
+        else:
+            with urlopen('http://127.0.0.1:8000/api/v1/decision/hourly',timeout=45) as response:
+                data = json.load(response)
+                if data.get('advice_policy') != 'gpt-hourly-reference-v4' and data.get('status') != 'pending':
+                    raise RuntimeError('Updated hourly policy was not loaded')
+            with urlopen('http://127.0.0.1:8000/',timeout=15) as response:
+                    if '实时总精煤灰分' not in response.read().decode('utf-8'):
+                        raise RuntimeError('Updated frontend was not loaded')
         deferred_check = None
         if snapshot and snapshot.get('content_check') == 'deferred':
             # Run the full content check only now: the updated collector (spool
@@ -894,7 +953,7 @@ def apply(package,root,manifest,report=lambda stage,message:None):
         # Even a lease which exceeds the bounded wait must not leave Web down.
         # Start.ps1 respects an existing lease; no owner is forcibly reclaimed.
         try:
-            restart(root)
+            restart(root,frontend_assets=True) if frontend_assets else restart(root)
             if cycle_collector and recovery_error is None:
                 collector_ready(root,configuration,recovery_before,report)
         except Exception as exc:
@@ -910,6 +969,7 @@ def apply(package,root,manifest,report=lambda stage,message:None):
         snapshot_content_check=deferred_check,
         **({'snapshot_content_check_policy':snapshot_policy} if snapshot_policy is not None else {}),
         collector_restarted=cycle_collector and configuration['enabled'],
+        **({'frontend_asset_verification':FRONTEND_ASSET_VERIFICATION} if frontend_assets else {}),
         **({'collector_spool_compatibility':POINT_HISTORY_COMPATIBILITY} if protect_point_history else {}),
         **({'collector_history_interval_seconds':history_patch['interval_seconds']} if history_patch is not None else {})),indent=2),encoding='utf-8')
     register_retention_snapshot(root,backup,snapshot,deferred_check,backup_created_at,report)
@@ -919,14 +979,28 @@ def apply(package,root,manifest,report=lambda stage,message:None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--install-dir',type=Path,required=True)
+    parser.add_argument('--preflight',action='store_true',help='Verify package and exact installed source hashes without changing files or services')
+    parser.add_argument('--component',action='store_true',help='Leave overall installed reporting to the serial update coordinator')
     args = parser.parse_args()
     package = Path(__file__).resolve().parent
     manifest = json.loads((package/'update.json').read_text(encoding='utf-8'))
-    def report(stage,message):
-        print(stage+': '+message,flush=True)
+    if args.component and manifest.get('frontend_asset_verification') != FRONTEND_ASSET_VERIFICATION:
+        parser.error('Component reporting is restricted to the reviewed frontend-asset hotfix')
+    if args.preflight:
         try:
-            data = json.dumps(dict(stage=stage,message=message[:1000],revision=manifest['revision'],
-                healthy=stage=='installed',at=datetime.now().astimezone().isoformat())).encode()
+            verify(package,args.install_dir.resolve(),manifest)
+            print('preflight: Source update package and installed baseline verified; nothing changed.',flush=True)
+            return 0
+        except Exception as exc:
+            print('preflight-failed: '+str(exc),flush=True)
+            return 1
+    def report(stage,message):
+        print(('frontend-' if args.component else '')+stage+': '+message,flush=True)
+        try:
+            wire_stage = 'copying' if args.component and stage == 'installed' else stage
+            wire_message = '[frontend component] '+message if args.component else message
+            data = json.dumps(dict(stage=wire_stage,message=wire_message[:1000],revision=manifest['revision'],
+                healthy=stage=='installed' and not args.component,at=datetime.now().astimezone().isoformat())).encode()
             with urlopen(Request(manifest['report_url'],data=data,headers={'Content-Type':'application/json'}),timeout=4): pass
         except OSError: pass
     report('verifying',

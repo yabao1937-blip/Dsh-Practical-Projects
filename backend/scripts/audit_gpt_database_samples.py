@@ -19,14 +19,15 @@ from urllib.request import Request, build_opener, ProxyHandler
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 from app.gpt_coarse.expert8 import FEATURES
-from app.telemetry.derived import FOUR_SYSTEM_MEMBERS, DESLIMING_MEMBERS
+from app.telemetry.derived import FOUR_SYSTEM_MEMBERS, LEGACY_DESLIMING_MEMBERS
 from point_metadata import Catalog
 from remote_mode import settings
 from remote_sqlite import connect
 
 LOCAL = timezone(timedelta(hours=8))
 ITEMS = dict(zip(('sys401', 'sys402', 'sysA', 'sysB'), (p[1] for p in FOUR_SYSTEM_MEMBERS)))
-ITEMS.update(dict(zip(('desliming473', 'desliming474'), (p[1] for p in DESLIMING_MEMBERS))))
+# This historical inventory is frozen to the original if_prod evidence.
+ITEMS.update(dict(zip(('desliming473', 'desliming474'), (p[1] for p in LEGACY_DESLIMING_MEMBERS))))
 
 
 def stamp(value):

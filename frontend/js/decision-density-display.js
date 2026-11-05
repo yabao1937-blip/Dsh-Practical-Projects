@@ -1,6 +1,47 @@
 /* Display memory only. Held numbers never become calculation inputs or valid advice. */
 const DecisionDensityDisplay = {
     storageKey:'dmcs.decision-density-display.v1', entries:{}, loaded:false,
+    newPolicy:'density-candidate-v1',
+    newVersionOnly() { return !!window.Api?.isReadOnlyTest?.(); },
+    newStatus(status) { return ({adjust:'一步调整',hold:'保持当前设定',wait:'等待观察',unavailable:'无法给出'})[status] || '等待读取新版建议'; },
+    newResult(kind) {
+        return kind==='hourly' ? (typeof DecisionHourly!=='undefined' ? DecisionHourly.presentation() : null) :
+            (typeof DecisionRealtime!=='undefined' ? DecisionRealtime.presentation() : null);
+    },
+    explicitNew(result) {
+        if (result?.density_policy!==this.newPolicy) return null;
+        const candidate=result.density_suggestion?.candidate || result.suggested_density || {};
+        const status=candidate.status;
+        const value=['adjust','hold','wait'].includes(status) && this.valid(candidate.value) ? candidate.value : null;
+        const reason=window.DensityCandidatePanel?.reasonText(candidate,result.density_suggestion?.parameters) || result.suggested_density?.reason || candidate.reasons?.join('；') || this.newStatus(status);
+        return {value,status,reason,at:result.checked_at || result.generated_at,retained:false};
+    },
+    newDisplay(page,kind) {
+        const result=this.newResult(kind), shown=this.explicitNew(result);
+        const reason=shown?.reason || '新版建议尚未取得有效响应；不沿用旧版建议';
+        const available=Number.isFinite(shown?.value);
+        return {live:true,shared:true,calculated:true,newVersion:true,pending:!result,held:false,available,
+            numericValue:available?shown.value:null,value:available?page.number(shown.value,3):'暂无有效值',
+            unit:'g/cm³',source:'新版规则 · '+this.newStatus(shown?.status),badge:this.newStatus(shown?.status),
+            reason,title:reason,inputs:[],sampleAt:shown?.at,
+            formula:'按当前设定与当时可用灰分依据运行新版单步规则；等待不等于调整，缺失不沿用旧建议。'};
+    },
+    newInspector(page,kind) {
+        const result=this.newResult(kind),shown=this.explicitNew(result),data=result?.density_suggestion;
+        const ash=data?.basis?.ash || {},reading=data?.observation?.actual_reading || {};
+        const rows=[['新版建议',Number.isFinite(shown?.value)?page.number(shown.value,3)+' g/cm³':'暂无有效值'],
+            ['规则状态',this.newStatus(shown?.status)],['原因',shown?.reason || '新版响应未就绪，不沿用旧建议'],
+            ['当前设定',page.number(data?.setting?.value,3)+' g/cm³'],['当前实测',reading.usable?page.number(reading.value,3)+' g/cm³':'不可用于判断'],
+            ['灰分依据',page.number(ash.value,2)+' %'+(ash.provisional?' · 暂估':'')],
+            ['灰分生产时段',page.time(ash.start)+' — '+page.time(ash.end)],['规则版本',result?.density_policy || '未取得新版标记']];
+        return `<div class="decision-inspector-header"><span>新版建议与依据</span><button type="button" class="decision-inspector-close" data-decision-close>收起 ×</button></div><div class="decision-detail"><h3>建议密度（新版）</h3><dl class="decision-facts">${rows.map(([key,value])=>`<dt>${page.escape(key)}</dt><dd>${page.escape(value)}</dd>`).join('')}</dl><p>由人工确认执行。等待不等于调整，历史重算不代表已发布或执行后的效果。</p></div>`;
+    },
+    newSummary(page,root) {
+        if (!root || page.hourMode()) return '';
+        const shown=this.explicitNew(this.newResult('hourly')),value=shown?.value;
+        const height=root.summaryHeight??201,spacing=root.summaryGap??24;
+        return `<section class="decision-node decision-hourly-summary" data-decision-key="hourly-summary" aria-label="建议密度（新版·小时）" title="${page.escape(shown?.reason || '新版小时建议尚未读取，不沿用旧值')}" style="left:${root.x}px;top:${root.y-height-spacing}px;width:${root.w}px;height:${height}px"><span class="decision-node-heading">建议密度（新版·小时）</span><span class="decision-node-value">${Number.isFinite(value)?page.number(value,3):'暂无有效值'} <span class="decision-root-unit">g/cm³</span></span><span class="decision-node-source">${page.escape(this.newStatus(shown?.status))}</span></section>`;
+    },
     load() {
         if(this.loaded) return;
         this.loaded=true;
@@ -24,6 +65,7 @@ const DecisionDensityDisplay = {
     },
     remember(kind,page,result,acceptValue=true) {
         this.load();
+        if(this.newVersionOnly()) return;
         if(!result) return;
         const config=typeof DecisionSources==='undefined'?null:DecisionSources.config;
         const sources=result.advice_sources || result.sources;
@@ -50,6 +92,7 @@ const DecisionDensityDisplay = {
         this.persist();
     },
     present(kind,page,result,fresh,reason) {
+        if(this.newVersionOnly()) return this.explicitNew(result) || {value:null,retained:false,reason:'新版建议未取得有效响应，不沿用旧值'};
         this.load();
         this.remember(kind,page,result,fresh);
         const saved=this.entries[JSON.stringify([kind,this.scope(page,result)])];

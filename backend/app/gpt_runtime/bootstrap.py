@@ -22,6 +22,10 @@ class SourceChoices:
     point = Inputs.point
     manual = Inputs.manual
 
+    def status_members(self, members, source_id=None):
+        # Startup lists the current enabled catalog, not historical cutover aliases.
+        return members
+
     def __init__(self, db, when):
         self.db, self.hour, self.cutoff = db, when, iso_time(when)
         self.points = defaultdict(list)

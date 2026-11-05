@@ -1,6 +1,5 @@
 """Small indexed evidence queries; no minute-history scans or invented advice."""
 import json
-from bisect import bisect_right
 from datetime import timedelta
 
 from fastapi import HTTPException
@@ -10,6 +9,8 @@ from ..hourly_brief.inputs import business_time, numeric
 from ..telemetry.domain import iso_time
 from .models import (DecisionAshSettlement, DensityAction, GptHourlyDensityAnchor,
                      GptHourlyDensityAdvice)
+from .advice_provenance import (POLICY as COMPARISON_POLICY, origin_class,
+                                public_advice, select_recorded)
 
 MAX_RECORDS = 8000
 
@@ -37,26 +38,48 @@ def bounded(db, statement):
 
 
 def compare_actions(actions, suggestions):
-    """Compare with advice that existed at the post-adjustment observation."""
-    by_hour = {}
-    for point in suggestions:
-        hour = iso_time(business_time(point['apply_start']))
-        times, points = by_hour.setdefault(hour, ([], []))
-        times.append(iso_time(business_time(point['at'])))
-        points.append(point)
+    """Compare online-default revisions, with explicit observation uncertainty."""
     for action in actions:
         observed = business_time(action['after_at'] or action['at'])
         action['comparison_at'] = iso_time(observed)
         hour = iso_time(observed.replace(minute=0, second=0, microsecond=0))
-        times, points = by_hour.get(hour, ([], []))
-        index = bisect_right(times, iso_time(observed))-1
-        point = points[index] if index >= 0 else None
-        action['hourly_advice'] = None if point is None else dict(
-            value=point['value'] if numeric(point.get('value')) else None,
-            generated_at=point['at'], apply_start=point['apply_start'],
-            status=point.get('status'), reason=point.get('reason'))
+        point, ignored = select_recorded(suggestions, hour, observed)
+        action['hourly_advice'] = public_advice(point)
+        before = None
+        try:
+            before = business_time(action['before_at'])
+        except (KeyError, TypeError, ValueError):
+            pass
+        interval_valid = before is not None and before < observed
+        crosses_hour = bool(interval_valid and before.replace(minute=0, second=0, microsecond=0)
+                            != observed.replace(minute=0, second=0, microsecond=0))
+        prior, _ = select_recorded(suggestions, hour, before) if interval_valid else (None, 0)
+        action['prior_hourly_advice'] = public_advice(prior) if not crosses_hour else None
+        available = action['hourly_advice']
+        availability = ('invalid-observation-interval' if not interval_valid else
+            'cross-hour-uncertain' if crosses_hour else
+            'no-online-advice' if available is None else
+            'before-observation' if business_time(available['generated_at']) <= before else
+            'within-observation-interval')
+        action['comparison'] = dict(policy=COMPARISON_POLICY, availability=availability,
+            prior_availability=('cross-hour-uncertain' if crosses_hour else
+                'invalid-observation-interval' if not interval_valid else
+                'available' if action['prior_hourly_advice'] is not None and
+                    numeric(action['prior_hourly_advice'].get('value')) else
+                'missing-value' if action['prior_hourly_advice'] is not None else 'no-online-advice'),
+            origin_class=origin_class(point) if point else None, ignored_replay_count=ignored,
+            operation_interval=dict(start=action.get('before_at'), end=action.get('after_at'),
+                valid=interval_valid, crosses_hour=crosses_hour,
+                continuous=bool(action.get('continuous'))),
+            physical_availability='not-recorded',
+            note='仅匹配在线默认归档的计算时刻；实际写入、页面送达与真实操作时刻未记录，历史回算不作现场先验')
         action['difference'] = (round(action['after']-point['value'], 6)
-            if point and numeric(point.get('value')) and numeric(action['after']) else None)
+            if available and numeric(point.get('value')) and numeric(action['after']) else None)
+        # Keep the old post-observation difference for compatibility. The UI's
+        # before-observation advice must always be paired with prior_difference.
+        prior_advice = action['prior_hourly_advice']
+        action['prior_difference'] = (round(action['after']-prior_advice['value'], 6)
+            if prior_advice and numeric(prior_advice.get('value')) and numeric(action['after']) else None)
 
 
 def read(db, now, hours=168, start=None, end=None):

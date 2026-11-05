@@ -134,6 +134,9 @@ def patch_sources(body: SourcesPatch, db: Session = Depends(get_db)):
 
 @router.get('/current')
 def current_decision(db: Session = Depends(get_db)):
+    from ..decision_hourly.density_policy_view import enabled,view
+    if enabled():
+        return view(db,'current')
     if REMOTE_READONLY:
         from ..remote_readonly.runtime import decision_view
         return decision_view('current')
@@ -144,6 +147,9 @@ def current_decision(db: Session = Depends(get_db)):
 
 @router.get('/hourly')
 def hourly_decision(db: Session = Depends(get_db)):
+    from ..decision_hourly.density_policy_view import enabled,view
+    if enabled():
+        return view(db,'hourly')
     if REMOTE_READONLY:
         from ..remote_readonly.runtime import decision_view
         return decision_view('hourly')
@@ -151,6 +157,13 @@ def hourly_decision(db: Session = Depends(get_db)):
     if db.bind.dialect.name == 'sqlite':
         db.execute(text('BEGIN'))
     return read_hour(db,defer_missing=True)
+
+
+@router.get('/experimental-density')
+def experimental_density(db: Session = Depends(get_db)):
+    from ..decision_hourly.density_candidates import current, require_enabled
+    require_enabled()
+    return current(db)
 
 
 @router.get('/total-ash-hours')

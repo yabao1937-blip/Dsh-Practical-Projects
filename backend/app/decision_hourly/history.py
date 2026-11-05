@@ -64,7 +64,7 @@ def historical_cells(db, start, end, rows, *, weights=None):
                     created_at=r.created_at,record_id=r.id,metric=r.metric,source_id=source,point_key=point_key,
                     source='手工补录',_event=f'manual:{r.id}'))
         elif point_key in GROUPS:
-            for label,item in GROUPS[point_key]['members']:
+            for label,item in inputs.status_members(GROUPS[point_key]['members'], source):
                 series[f'{key}:{label}'].extend(point_series(inputs.point(item,source)))
         elif point_key == 'a303_a304_density_average':
             parts = [point_series(inputs.point(item,source)) for _,item in DENSITY_AVERAGE_MEMBERS]
@@ -154,6 +154,22 @@ def historical_cells(db, start, end, rows, *, weights=None):
             parts = {label:mean_cell(f'{key}:{label}',series[f'{key}:{label}'],{},start,end) for label in labels}
             result[key] = dict(c,value={label:p['value'] for label,p in parts.items()},components=parts,
                 status='average',reason='有效状态样本中的运行占比（1 为运行，0 为停止）')
+            if key == 'desliming':
+                marker = inputs.desliming_cutover
+                choice = sources['resolved_choices'].get('desliming')
+                selected_source = json.loads(choice)[0] if choice else None
+                try:
+                    crosses_cutover = (selected_source == marker.get('source_id')
+                        and start < business_time(marker['effective_at']) < end)
+                except (KeyError, TypeError, ValueError):
+                    crosses_cutover = False
+                mixed = any(len({p['definition_id'] for p in series[f'{key}:{label}']
+                    if p.get('definition_id')}) > 1 for label in labels)
+                if crosses_cutover or mixed:
+                    reason = '小时内脱粉状态采集来源变化，暂不混合 if_prod 与 RUNS 的运行占比'
+                    result[key].update(value={label:None for label in labels}, status='missing', reason=reason,
+                        components={label:dict(part, value=None, status='missing', reason=reason)
+                                    for label,part in parts.items()})
         elif key != 'suggested_density':
             result[key] = mean_cell(key,series[key],c,start,end)
             definitions = {p['definition_id'] for p in series[key] if p.get('definition_id')}

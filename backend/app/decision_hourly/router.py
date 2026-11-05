@@ -119,6 +119,27 @@ def density_trend(limit:int=Query(168,ge=6,le=720),start:datetime|None=Query(Non
     return read(db, now, limit, start, end)
 
 
+@router.get('/density-candidates')
+def density_candidates(limit:int=Query(168,ge=6,le=720), start:datetime|None=Query(None),
+        end:datetime|None=Query(None), db:Session=Depends(get_db)):
+    from .density_candidates import replay_actions, require_enabled
+    from ..config import REMOTE_READONLY
+    require_enabled()
+    if REMOTE_READONLY:
+        from ..remote_readonly.runtime import host_now
+        now = host_now(db)
+    else:
+        now = utc_now()
+    return replay_actions(db, now, hours=limit, start=start, end=end)
+
+
+@router.get('/density-series')
+def density_series(limit:int=Query(168,ge=6,le=168),start:datetime|None=Query(None),
+        end:datetime|None=Query(None)):
+    from .density_series import read_frozen
+    return read_frozen(limit,start,end)
+
+
 def find_action(db,identifier):
     action=db.get(DensityAction,identifier)
     if not action:

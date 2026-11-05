@@ -1,0 +1,161 @@
+{
+  "schema": "expert81-expanded-protocol-v1",
+  "status": "locked before expanded fitting",
+  "model_family": "EXPERT8.1 expanded-source offline candidates",
+  "purpose": "use legitimate historical training information to reduce future absolute ash prediction error while preserving source, condition and label-availability differences",
+  "authorization": "user authorized expanded training; laptop only; no activation, deployment, production model/config changes, or changes to first-round C7/core/shadow/frozen outputs",
+  "input_manifests": {
+    "source_inventory_path": "output/gpt-expert81-expanded-20261102/source_inventory/inventory_manifest.json",
+    "source_inventory_sha256": "d5a3eb4a2857cb7f2ccde6d1613111b2f28a8fbc7d0a72fd7cf474eb51ce0a4f",
+    "production_addendum_manifest_path": "output/gpt-expert81-expanded-20261102/production_addendum/db-production-addendum-manifest.json",
+    "production_addendum_manifest_sha256": "6bbf75076dd816c3da34243c67ba5b5c40545a543597a3e4f4b81fea5a7ff92c",
+    "phase1_manifest_path": "output/gpt-factor-phase1-20261102/manifest.json",
+    "phase1_manifest_sha256": "71923096f48b1ba86bbcea66eb945cc456ab7e1884742fc1bb5b988587939bfb",
+    "first_round_manifest_path": "output/gpt-expert81-20261102/manifest.json",
+    "first_round_manifest_sha256": "000c7c011348cf45771cb599ec4509ba3159a89e653248f65271f769f9730d5f",
+    "first_round_selection_core_sha256": "2a92112eef2cf2460c9d4923c6a18e2905b2dc838a9c396eebfd6d8ce3b44a98",
+    "first_round_candidate_file_sha256": "ee03b8ea7a701a498715cc9b413ac03136fe1412a0207229ad7d39415a208e64",
+    "prior_holdout_prediction_sha256": "bce7ff3e12010ecc27a0494829c6c9955aa1dc123d1868525528a844b7681e68",
+    "prior_holdout_score_sha256": "39771485c7de87b75163fd8ee95da59369d42b020871949be14b9a98115fb2ed"
+  },
+  "source_roles": {
+    "inventory": "185 full-workbook + 21 recent-workbook + 77 database metadata rows = 283 raw source rows before deduplication/eligibility; counts are not a claim of 283 complete independent training cases",
+    "full_workbook": {
+      "rows":185,
+      "workbook_sha256":"a5b6f34bf8e884f38875d9466a026bb45da97a644bcfd49f671469a89217d6ec",
+      "role":"past training prior; never new independent test data for the frozen EXPERT8 baseline",
+      "known_archive_commit":"617491576e23533761cff5d2506aaa41c92b6f3e",
+      "known_archive_at":"2026-10-12T11:17:45+08:00",
+      "git_model_blob_sha256":"00422c6fc73ecd55743659101bb66c887e725b4598671299fe742e6dbfea582d",
+      "git_model_blob_bytes":63750,
+      "working_tree_model_sha256":"c720efc10952802f42e3ec4261ab3b13966aefd89b34f7a21f7906c13f4362a0",
+      "archive_evidence":"git blob JSON equals current frozen model JSON, including 177 training rows plus all 8 stored low-coal rows and the source-workbook hash; byte hashes differ because of serialization, not values",
+      "date_limitation":"16 individual dates were sequence-repaired; use the archived availability of the whole past pool, not repaired day values as verified sampling dates; all source months precede October",
+      "condition_limitation":"184/185 A-on, one A-off row with 473-on; exact current group 0,1,1,1,0,0 has zero rows; explicit domain adjustment does not prove transferable causal switch effects",
+      "low_coal":"8 rows omitted by the old importer are retained in E3/E5/E6/E7; E4 is the declared old-177 sensitivity only; do not turn a historical importer flag into confirmed physical stoppage or delete raw rows"
+    },
+    "recent_workbook": {
+      "rows":21,
+      "complete_approximate_rows":5,
+      "strict_rows":0,
+      "missing_factor_rows":16,
+      "complete_source_rows":[4,8,12,16,20],
+      "complete_group":"0,1,1,1,0,0",
+      "archive_commit":"c0b83a157c0b13cc6cfa00af605f0b2970e1707f",
+      "archive_at":"2026-10-13T14:50:06+08:00",
+      "git_joined_blob_sha256":"689a6e041602e84d953dc8ab31023f63da28bf356ba703115cca2e002be4ba5a",
+      "git_joined_blob_bytes":344635,
+      "working_tree_joined_sha256":"9861bb8f35c55f087fd5061bb0d0784216956bf1011819c4ff82861bcfe0cbf2",
+      "archive_evidence":"tracked joined JSON contains the 21 values, five complete approximate feature vectors and all missing flags; git blob and working-tree JSON are semantically identical; the archive precedes all declared October replay targets",
+      "role":"only E7 may use complete, deduplicated, same-group approximate rows at the declared total weight; 16 missing-feature rows remain in inventory with no imputation",
+      "availability":"require an archived value-plus-feature availability record before a historical target; if only first captured now, eligible only for formal training after that capture; sample date, inferred date and filesystem mtime do not establish availability",
+      "not_replay21":"these source rows are distinct from the 21 October database replay targets"
+    },
+    "database": {
+      "metadata_rows":77,
+      "current_value_capture_authorized_ids":"metric coarse_slime_ash, id<=202, id<>197; bounded one-time current 76-value snapshot",
+      "197":"user-confirmed erroneous sample time; keep metadata, never read its value, exclude training/validation, no correction/deletion",
+      "191":"value may be captured into raw inventory, but audited coal<=10/stopped remains ineligible for training or scoring",
+      "future_ids":"ids>202 are not read and remain available for genuinely later evidence",
+      "historical_development":"use the original frozen 68 values/features and initial-created-at proxy, never replace them with a subsequently edited current value",
+      "formal_training":"use the latest actually captured eligible version at/after its own capture availability; preserve the frozen and new versions when a value changed; never backdate changes to original created_at",
+      "strict_vs_approximate":"retain audited 90-second/30-second strict input criteria; non-level minute approximation remains a separate quality stratum and can enter only E7 at the fixed low total weight; no widening windows to improve coverage"
+      ,"current_capture_at":"2026-11-02T06:42:18.593+00:00"
+      ,"current_eligibility_counts":{"strict":49,"minute_approximation":17,"label_review":7,"incomplete":3,"user_excluded":1}
+      ,"current_version_comparison":"at the captured snapshots all old68, prior6 and first182 values/metadata match; this does not prove an absence of intervening edits; preserve old snapshot roles regardless"
+      ,"label_review_reasons":"4 nearby-same-label records form pairs40/37 (12s, both11.88) and38/39 (5.537s, both11.88); 52/51 are28s apart with9.38/9.93;156 sample timestamp follows creation by22h27m. These are unresolved identity/time flags, not proven assay errors. All7 remain outside E7 and all training, not residual-based exclusions."
+    },
+    "deduplication":"use canonical IDs and proven source/sample identity from the inventory; exact duplicated physical cases count once with all source references retained; near-time/value similarity alone does not justify merging; export raw/canonical/eligible/used counts separately"
+  },
+  "features": {
+    "eight_factor_order":["level","coal_amount","sysA","sysB","sys401","sys402","desliming473","desliming474"],
+    "centers":{"level":50.0,"coal_amount":600.0,"sysA":0.0,"sysB":0.0,"sys401":0.0,"sys402":0.0,"desliming473":0.0,"desliming474":0.0},
+    "scales":{"level":10.0,"coal_amount":100.0,"sysA":1.0,"sysB":1.0,"sys401":1.0,"sys402":1.0,"desliming473":1.0,"desliming474":1.0},
+    "switches":"normalize only declared 开=1,停/关=0 or exact numeric binary values; no silent defaults",
+    "level":"fixed recorded sample-minus-90s input; workbook single values are already aligned per supplied provenance and are not shifted again; no physical-lag claim",
+    "no_extra_features":"no trend/windows/polynomial/latent classes/raw-coal-ash feature, lag selection, interactions grid or learned feature search in this round",
+    "missing":"do not fill missing factors with zero, averages, forward/future values or interpolation"
+  },
+  "training_and_fences": {
+    "availability":"select latest actually available version per assay before checking its group/time/quality; observed sample and availability must both be strictly before the target cutoff; exclude the target identity in every role; same-time label versions are unavailable",
+    "primary_group":"0,1,1,1,0,0",
+    "primary_system_scope":"shared legacy response may use legacy three/four-system data with all switch features explicit; current calibration requires the target's own >=3-system exact-group current labels; never lend those coefficients to a two-system branch",
+    "current_minimum_normal_labels":5,
+    "current_minimum_sample_dates":2,
+    "fence_rule":"linear Q1/Q3; [Q1-1.5*max(IQR,1pp),Q3+1.5*max(IQR,1pp)], inclusive; no residual-dependent deletions",
+    "current_fence":"once per target from all eligible available strict current labels in that exact group; shared by E0..E7 and all target normal-membership; approximate rows never redefine it",
+    "legacy_fence":"once from the pre-October full 185 pool separately by source and system count 3/4; identical legacy fence for E3 and E4 so the 177-row sensitivity changes membership only, not the fence; never apply a current-group ash bound to old sources",
+    "approximate_fence":"E7 accepts only complete same-target-group approximate cases whose label is within the shared current strict-derived fence; this does not change the target normal denominator; unresolved label-review/stopped rows remain excluded",
+    "all_scores":"retain and score all eligible target labels including training-fence outsiders; normal is a conditional report, not a known-at-prediction success filter",
+    "gate_note":"fitting minima are operational gates, not evidence that an 80 percent accuracy claim is statistically established"
+  },
+  "weight_policy": {
+    "current_strict_per_row":1.0,
+    "legacy_total":"0.25 * n_current_strict_normal; equal per eligible normal legacy row; E3 and E4 have exactly the same total legacy mass even though their counts differ",
+    "approximate_total":"when eligible approximate rows exist, total is 0.25*n_current_strict_normal, divided equally across them; otherwise zero; never more than one quarter of current strict mass",
+    "source_domains":"reference-coded current intercept plus only present nonreference legacy/recent-excel domain indicators; domain intercepts unpenalized; never full dummies plus an overall intercept",
+    "interpretation":"weights and domain indicators are fixed modeling choices; A and source are nearly confounded, so regularized prediction coefficients are not independently identified causal A effects"
+  },
+  "candidates": {
+    "E0":{"name":"current-only median","fit":"same available normal current strict labels as the first-round C0","complexity":0},
+    "E1":{"name":"current-only C5","fit":"Huber-ridge liquid-level linear response on same current strict normal labels","complexity":1},
+    "E2":{"name":"current-only C7 control","fit":"replay the first-round C7 algorithm and legitimately issued C5 receipt residuals; never use a full-34 fitted artifact to predict its historical development rows","formal_cold_start":"no retrospective receipt construction; zero correction until sufficient actual legal receipts","complexity":2},
+    "E3":{"name":"weighted legacy185+current shared eight-factor response","fit":"weighted Huber-ridge on all normal eligible legacy185 and current strict rows, with fixed source-domain intercepts","legacy_pool":"full185","complexity":3},
+    "E4":{"name":"legacy177 sensitivity","fit":"identical to E3 but old177 membership; same legacy total mass and same full185-derived legacy fences","legacy_pool":"frozen_old177","complexity":4},
+    "E5":{"name":"legacy response plus current intercept calibration","legacy_fit":"fixed Huber-ridge eight-factor response using only normal pre-October legacy185, each legacy row weight1, never current/tail/new labels","current_calibration":"median(current_y-unclipped_legacy_response(current_x)) on own-group strict normal available labels; add this offset to the same unclipped response then final clip","complexity":5},
+    "E6":{"name":"legacy response plus current level/coal correction","legacy_fit":"exactly the same fixed legacy185 response as E5","current_calibration":"Huber fit of current_y-unclipped_legacy_response(current_x) to unpenalized intercept plus scaled level/coal correction; correction slopes receive ridge lambda1; only own-group available strict normal current labels","complexity":6},
+    "E7":{"name":"weighted shared model plus bounded approximate augmentation","fit":"E3 plus eligible deduplicated complete same-group approximate DB/recent-workbook cases under the capped approximate total mass; source intercepts remain explicit","complexity":7}
+  },
+  "numerics": {
+    "objective":"sum_i w_i*rho_delta(y_i-X_i*beta) + lambda/2*sum(penalized response/correction slope_j squared); source/intercept columns unpenalized",
+    "huber_delta_pp":1.0,
+    "ridge_lambda":1.0,
+    "huber":"0.5*r^2 for abs(r)<=delta; delta*(abs(r)-0.5*delta) otherwise",
+    "solver":"deterministic IRLS, Huber weights only on real data residuals; pure quadratic ridge not robust pseudo-observations; fixed iteration/convergence limits and gradient checks before fitting is accepted",
+    "maximum_iterations":3000,
+    "coefficient_tolerance":1e-10,
+    "gradient_max":1e-6,
+    "failure":"explicit unavailable state/reason; no undeclared rescue, hidden candidate-specific bounds or after-result parameter changes",
+    "output":"reject nonfinite raw before clipping; report raw and final uniform [0,100] predictions and errors; selection uses final only; E2 preserves its declared C5-final-before-C7-bias semantics",
+    "support":"report source weights/counts, raw/normal/excluded identities, feature ranges, extrapolation, design rank/conditioning and data variation; regularization does not prove factor identifiability"
+  },
+  "evaluation": {
+    "main_development_dates":"2026-10-20 inclusive through 2026-10-26 exclusive, Asia/Shanghai",
+    "main_development_ids":[79,81,86,90,91,94,96,99,101,104,109,111,114,116,120],
+    "main_availability":"original frozen68 sample-time initial-created-at development proxy; not certified historical final-version availability",
+    "selection":"all E0..E7 on identical declared primary development IDs and shared current normal fence; full E0 coverage required; normal sample MAE, all sample MAE, normal date-balanced MAE, declared complexity, epsilon1e-9",
+    "early_development_ids":[54,56,58,60,63,64,66,67],
+    "early_development_role":"fixed additional already-viewed early forward-development description, not included in primary winner selection; report cold-start rejected cases and no future-label LOO/random split",
+    "later_diagnostic_ids":[135,141,139,169,172,174],
+    "later_diagnostic_role":"already-viewed October tail; no selection or tuning",
+    "revealed_new_diagnostic_strict_ids":[190,200],
+    "revealed_new_diagnostic_approximate_ids":[185,187,195,202],
+    "revealed_new_diagnostic_role":"all six values are now exposed; use old68 at the original10/31 complete-snapshot availability plus legacy/recent source archive availability and current76 only at this round's actual capture. Thus none of the new6 values updates these earlier target predictions. E2 may use the original seed-only locked predictions under this same information budget. Strict and approximate scores remain separate; no new independent holdout or prospective claim; no extra created-at proxy replay of the new6 is added",
+    "descriptive_fit":"full-source/current refit scores explicitly in-sample, separated from every chronological replay and unavailable case",
+    "causal_invariant_scope":"target exclusion and non-influence invariants apply to chronological replay and future prediction; descriptive in-sample refit intentionally includes its training targets and is never presented as validation",
+    "metrics":"normal/all counts, MAE, raw MAE, date-balanced MAE, +/-1 and +/-2 counts, bias, median/p90/max absolute error, Wilson95, per-date/per-group/source coverage and paired differences; no percentage without denominator",
+    "uncertainty":"fixed-seed20261102 date-block paired bootstrap10000 draws for selected-minus-E0/E1/E2/frozen-E8/last-assay, with explicit normal/all scope; historical/exposed intervals descriptive only",
+    "stopping":"run the fixed eight candidates once; do not choose using tail/new-six/full-fit results; if old-data expansion does not beat current-only controls report that result rather than force expansion to win"
+  },
+  "two_system_branch": {
+    "independence":"each exact six-switch combination uses only that group's current available labels; no three/four-system parameters or fallback disguised as a two-system trained model",
+    "groups":{"0,1,1,0,0,0":5,"0,0,1,1,0,0":4,"0,1,0,1,0,0":3},
+    "T0":"group-specific normal median; minimum3 normal labels; one-date support flagged as low support",
+    "T1":"group-specific Huber-ridge level response; minimum3 normal labels and2 sample dates, with level range/unique values/coefficient diagnostics",
+    "selection":"no winner selected from tiny historical groups; T0 retained only as provisional group reference, T1 diagnostic only; no80 percent claim",
+    "chronology":"true forward availability may yield zero eligible predictions; report zero coverage and reasons without lowering gates, random splits or LOO using future labels"
+  },
+  "required_invariants": [
+    "first-round C7/core/shadow/protocol/artifacts and predictions remain unchanged",
+    "current target value or future current revision cannot influence its own earlier state/prediction",
+    "all candidates share current strict training/fence and the target normal denominator",
+    "E3/E4 total legacy mass is identical and equals0.25 current strict mass; E7 approximate mass never exceeds0.25 current strict mass",
+    "legacy8 response includes only pre-October pool and is identical for E5/E6 across target cutoffs",
+    "E2 historical control is chronological replay, never full-data artifact leakage",
+    "no missing factors filled; no approximate target promoted to strict; no stopped/unreviewed label silently admitted",
+    "all duplicate/source/label versions retain provenance and are counted once only when identity is proven",
+    "two-system branch never consumes a >=3-system model's parameters",
+    "nonfinite predictions cannot be rescued by clipping; raw/final metrics are distinct when clipping occurs"
+  ],
+  "outputs":"locked protocol/hash and immutable input/source manifests; source-role/dedup/eligibility/used counts; all model states/weights/fences/coefficients/IDs/versions; every prediction/rejection; separate early/main-development/tail/new-six diagnostic/in-sample/two-system results; selected reusable expanded candidate and all fixed candidate states; scientific limitations; meaningful causal/numerical tests; report; no activation/deployment"
+}

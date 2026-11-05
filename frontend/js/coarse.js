@@ -157,6 +157,7 @@ const CoarsePage = {
     },
 
     refresh() {
+        window.CoarseComparison?.load();
         if (typeof GptExpert9 !== 'undefined' && GptExpert9.panel()) { GptExpert9.load(); return; }
         this.syncControls();
         this.updateCards();

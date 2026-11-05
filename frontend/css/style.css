@@ -202,7 +202,6 @@ a:hover { color: var(--accent-blue); }
 
 .status-dot.online {
     background: var(--accent-green);
-    box-shadow: 0 0 6px var(--accent-green);
 }
 
 .status-dot.offline { background: var(--accent-red); }
@@ -270,8 +269,8 @@ a:hover { color: var(--accent-blue); }
     padding: 10px 16px;
     margin-bottom: 4px;
     background: rgba(239,68,68,0.08);
-    border-left: 3px solid var(--accent-red);
-    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: var(--radius-sm);
     font-size: 13px;
     animation: alertPulse 2s infinite;
 }
@@ -453,17 +452,6 @@ a:hover { color: var(--accent-blue); }
     overflow: hidden;
 }
 
-.density-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: var(--accent-blue);
-    opacity: 0.6;
-}
-
 .density-card:hover {
     border-color: var(--accent-blue);
     background: var(--bg-card-hover);
@@ -474,11 +462,6 @@ a:hover { color: var(--accent-blue); }
 .density-card.alert-active {
     border-color: var(--accent-red);
     animation: cardAlert 1.5s infinite;
-}
-
-.density-card.alert-active::before {
-    background: var(--accent-red);
-    opacity: 1;
 }
 
 @keyframes cardAlert {
@@ -701,15 +684,10 @@ a:hover { color: var(--accent-blue); }
     margin-top: 6px;
 }
 
-.stat-card.accent-blue { border-left: 3px solid var(--accent-blue); }
 .stat-card.accent-blue .stat-card-value { color: var(--accent-blue-light); }
-.stat-card.accent-orange { border-left: 3px solid var(--accent-orange); }
 .stat-card.accent-orange .stat-card-value { color: var(--accent-orange); }
-.stat-card.accent-green { border-left: 3px solid var(--accent-green); }
 .stat-card.accent-green .stat-card-value { color: var(--accent-green); }
-.stat-card.accent-red { border-left: 3px solid var(--accent-red); }
 .stat-card.accent-red .stat-card-value { color: var(--accent-red); }
-.stat-card.accent-purple { border-left: 3px solid var(--accent-purple); }
 .stat-card.accent-purple .stat-card-value { color: var(--accent-purple); }
 
 .stat-card-input {
@@ -999,14 +977,7 @@ select {
     height: 6px;
     border-radius: 50%;
     background: var(--accent-green);
-    box-shadow: 0 0 6px var(--accent-green);
-    animation: livePulse 2s infinite;
     margin-right: 4px;
-}
-
-@keyframes livePulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
 }
 
 /* ---------- 预览摘要 ---------- */

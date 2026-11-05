@@ -1,0 +1,127 @@
+{
+  "schema": "gpt-expert81-protocol-v1",
+  "model_version": "EXPERT8.1",
+  "locked_on": "2026-11-02",
+  "status": "predeclared first offline optimization round; no production activation",
+  "purpose": "reduce the absolute difference between an earlier sampling-time prediction and its subsequently available assay",
+  "source": {
+    "phase1_manifest": "output/gpt-factor-phase1-20261102/manifest.json",
+    "phase1_manifest_sha256": "71923096f48b1ba86bbcea66eb945cc456ab7e1884742fc1bb5b988587939bfb",
+    "frozen_expert8_model": "backend/models/gpt_expert8/20261012/model.json",
+    "frozen_expert8_model_sha256": "c720efc10952802f42e3ec4261ab3b13966aefd89b34f7a21f7906c13f4362a0",
+    "frozen_expert8_implementation_sha256": "fbb9a31196721f98af6bd961f329cb5abc9f26ae1a77a9af828c0e24b038f17d",
+    "seed_snapshot_available_at": "2026-10-31T03:03:29.887+00:00",
+    "policy": "verify phase1 manifest and all its data/source hashes before fitting and after export; never modify source artifacts; never access production from this experiment"
+  },
+  "cohort": {
+    "group_order": ["sysA", "sysB", "sys401", "sys402", "desliming473", "desliming474"],
+    "primary_group_key": "0,1,1,1,0,0",
+    "primary_assay_ids": [11,15,35,43,47,54,56,58,60,63,64,66,67,79,81,86,90,91,94,96,99,101,104,109,111,114,116,120,135,141,139,169,172,174],
+    "eligibility": "frozen phase1 common_valid, original strict, fixed seven factors strict, same primary six-switch group",
+    "lag_seconds": 90,
+    "no_lag_selection": true,
+    "two_system": "report 5/4/3 rows separately as coverage gaps; no fitting or borrowing three-system coefficients; core returns unsupported_group for every other group"
+  },
+  "availability": {
+    "strict_comparison": "sample_at < prediction_at and version_available_at < prediction_at; same-time versions are excluded; explicitly exclude the current target assay_id irrespective of supplied times",
+    "versioning": "require version_id and availability evidence; choose latest available version per assay_id; never choose a later version because its initial created_at was earlier",
+    "historical_entry_proxy": "ONLY for development/exploratory replay: version_available_at is initial created_at; final values may have been revised, so this is not certified as-of information",
+    "historical_midnight_proxy": "fixed sensitivity replay with prediction cutoff at Asia/Shanghai 00:00 of target date, using observed_at and initial created_at strictly before cutoff; same revision limitation",
+    "formal_seed": "old frozen final labels become demonstrably available only at seed_snapshot_available_at; their original created_at is not used to backdate final values",
+    "new_values": "use immutable measured-version availability or an actual captured snapshot time; without revision evidence final database values are available no earlier than that snapshot capture",
+    "target_rule": "12:00 sample with 13:00 result is scored against the frozen 12:00 prediction; the result can update predictions strictly after 13:00; it cannot change its own prediction",
+    "feature_as_of": "all target input evidence must have received_at <= sample_at; lagged level is selected at sample_at-90s by received_at, latest-at-or-before, max lookback 30s; no future interpolation",
+    "timestamps": "timezone-aware ISO8601 only, UTC normalized internally; keep source and received clock fields as provenance"
+    ,"clock_domain_rule":"core numeric comparisons require caller-supplied timestamps in one verified clock domain; old audit capture is notebook clock whereas sampling/feature timestamps are host clock; never back-correct old times using today's offset; formal runtime must conservatively re-seal seed availability in its host clock; reconstructed holdout discloses this clock limitation"
+  },
+  "common_training": {
+    "scope": "all available primary-group raw labels, with no seven-day truncation, used ONCE per target to calculate the shared fence; all candidates and target normal-membership share it",
+    "fence": {"quantile_method":"linear","q1":0.25,"q3":0.75,"iqr_floor_pp":1.0,"iqr_multiplier":1.5,"inclusive":true},
+    "fence_formula": "Q1-1.5*max(IQR,1pp) through Q3+1.5*max(IQR,1pp), inclusive",
+    "no_residual_filtering": true,
+    "minimum_normal_labels": 5,
+    "minimum_normal_sample_dates": 2,
+    "gate_interpretation": "operational fitting gate, not a statistical accuracy sample-size requirement; below gate returns no usable fitted prediction with a reason",
+    "recent_selection": "after the common fence, select normal labels sampled within the preceding 168h, sort by sample_at then assay_id then version_id, then take the last declared count; C7 first validates the available receipts in this seven-day normal pool, then takes the last 5 valid residuals, rather than taking 5 labels before filtering receipts; do not sort recency by late entry time",
+    "recent_minimum": 3,
+    "all_labels_retained": "every raw/excluded label and reason is exported; test normal membership comes only from its prior-training fence"
+  },
+  "candidates": {
+    "C0": {"method":"median","training":"all common normal available history","complexity_rank":0},
+    "C1": {"method":"recent_median","count":5,"max_age_hours":168,"minimum_recent":3,"fallback":"C0","complexity_rank":1},
+    "C2": {"method":"recent_median","count":10,"max_age_hours":168,"minimum_recent":3,"fallback":"C0","complexity_rank":2},
+    "C3": {"method":"weighted_median","training":"all common normal available history; no seven-day truncation","sample_age_half_life_hours":72,"weight":"2^(-sample_age_hours/72)","weighted_median_tie":"average adjacent values if cumulative weight equals half within 1e-12 relative weight","complexity_rank":3},
+    "C4": {"method":"frozen_expert8_recent_bias","count":10,"max_age_hours":168,"minimum_recent":3,"bias":"median(y_i-frozen_expert8(x_i))*n/(n+5)","fallback":"zero bias, preserving frozen expert8","complexity_rank":4},
+    "C5": {"method":"huber_ridge","predictors":["level"],"training":"all common normal available history; no seven-day truncation","complexity_rank":5},
+    "C6": {"method":"huber_ridge","predictors":["level","coal_amount"],"training":"all common normal available history; no seven-day truncation","complexity_rank":6},
+    "C7": {"method":"C5_prequential_recent_bias","count":5,"max_age_hours":168,"minimum_recent":3,"bias":"median(y_i-saved_prequential_C5_final_clipped_prediction_i)*n/(n+5)","current_baseline":"first reject a nonfinite current C5 raw value, clip that C5 value to [0,100], add the declared bias to this clipped baseline, record this sum as C7 raw_prediction, then clip C7 uniformly to [0,100]","residual_evidence":"C5 prediction and complete fitted state frozen without label_i; receipt embeds final clipped prediction, original issue/sample time, immutable state, issued features and feature hash, training IDs/version IDs, latest label availability and receipt hash; validator replays the prediction and checks state/input/version/group identity; no changing a receipt time or its frozen inputs when a label arrives","formal_sample_association":"formal shadow may append a separately hashed, registry-verified association binding the unchanged issued receipt, prediction event, post-persistence host seal and specific label version/event hash; input_asof<=postseal<actual_sample<=input_asof+30s, same group/host clock domain/epoch, association availability strictly before fit cutoff; association itself must be persisted before its availability host seal; no registry verification means reject; a later label revision needs its own valid association; separately retain issued-input and training-input hashes/times and never pretend nominal 90s relative to issue time is exactly 90s relative to later sample","historical_sample_association":"historical proxy replay uses exact sample/features binding only and never fabricates a formal association","fallback":"zero bias if fewer than 3 eligible receipts; never reconstruct a missing receipt from a later fit","complexity_rank":7}
+  },
+  "huber_ridge": {
+    "objective": "sum_i rho_delta(y_i-intercept-X_i*beta) + (lambda/2)*sum_j beta_j^2; intercept unpenalized",
+    "rho_delta": "0.5*r^2 if abs(r)<=delta, otherwise delta*(abs(r)-0.5*delta)",
+    "delta_pp": 1.0,
+    "ridge_lambda": 1.0,
+    "feature_centers": {"level":50.0,"coal_amount":600.0},
+    "feature_scales": {"level":10.0,"coal_amount":100.0},
+    "slope_constraints": "none; slope may have either sign; no candidate-specific feature clipping",
+    "solver": "deterministic IRLS; Huber weights apply only to real data residuals, ridge always remains pure quadratic",
+    "initialization": "intercept=training median; slopes=0",
+    "maximum_iterations": 2000,
+    "coefficient_tolerance": 1e-10,
+    "failure_policy": "return no prediction on solver failure/nonfinite output; report coverage, never silently select a rescue model"
+  },
+  "output_values": {"new_candidate_bounds":[0.0,100.0],"action":"first reject nonfinite raw values, never rescue them by clipping; all finite C0..C7 predictions are uniformly clipped to [0,100] after fitting and calibration; raw_prediction records the unclipped composite value; prediction/value record the clipped value; selection uses final prediction only; report both raw and final errors/MAE","report_raw_prediction":true,"frozen_reference":"preserve its original clamps and corrections unchanged","extrapolation":"flag outside fitted normal-training predictor range; retain and score finite predictions"},
+  "references": {
+    "frozen_expert8":"unchanged frozen formula evaluated on same raw target inputs; offline recomputation, not an archived production decision",
+    "empirical_raw":"30.5-0.3*level, without new clipping",
+    "last_observed":"most recently sampled raw eligible available assay version, without normal-fence filtering or a seven-day age limit; if no legal value use C0; descriptive reference only, not a selectable ninth candidate"
+  },
+  "historical_experiment": {
+    "training_start_local_date":"2026-10-16",
+    "evaluation_start_local_date":"2026-10-20",
+    "selection_end_exclusive_local_date":"2026-10-26",
+    "replay_end_exclusive_local_date":"2026-11-01",
+    "selection_availability":"historical_entry_proxy at each target sample_at",
+    "sensitivity_availability":"historical_midnight_proxy at target date 00:00 Asia/Shanghai; same matrix, no reselection",
+    "selection":"rank C0..C7 on identical predicted development IDs by normal sample MAE, then all-sample MAE, normal date-balanced MAE, then declared complexity_rank; numeric tie epsilon=1e-9",
+    "coverage_gate":"a selectable candidate must predict every common eligible development target with no less coverage than C0; report native and common coverage before scores",
+    "later_data":"10/26-10/31 already-viewed historical diagnostic only; no selecting candidates using this later segment",
+    "full_fit":"refit the single selected method on all 34 frozen primary labels at a cutoff strictly after seed_snapshot_available_at; this is an artifact, not an accuracy estimate",
+    "C7_historical_receipts":"generate C5 once at each sample_at using only that historical proxy's earlier available labels; save full states and receipts before using subsequently available residuals; midnight sensitivity uses its own earlier-midnight C5 states but receipt preserves the actual sample_at_i; evidence_mode is the matching exploratory historical proxy mode and these receipts are forbidden in formal candidate/holdout/runtime state",
+    "C7_formal_cold_start":"the 34 frozen seed labels carry no formal C5 receipt; the initial formal residual pool is empty and offset is zero; only at least 3 truly saved legal pre-assay C5 receipts plus subsequently available labels can activate a formal bias; do not import exploratory receipts or retrospectively reconstruct missing formal receipts"
+  },
+  "new_holdout": {
+    "confirmed_metadata_excluded_assay_ids":[197],
+    "confirmed_metadata_exclusion":"user confirmed ID197 has an erroneous sampling time before any new assay values were revealed; exclude it from fitting/validation, retain raw record and exclusion reason, do not correct time or delete production data; do not generalize this confirmation into an automatic rule that every observed_at>created_at is erroneous",
+    "lock_before_reveal": "freeze this protocol, candidate identity/configuration and code before revealing any post-audit assay values; input/target metadata may be audited without values",
+    "no_selection": "post-audit labels do not participate in this first-round candidate selection or rescue tuning",
+    "reconstructed_holdout":"previously unseen label period can be historical holdout after reconstruction; reconstructed input and prediction now are not prospective online evidence",
+    "formal_causality":"old labels use seed snapshot availability; later labels update only from proven version/snapshot availability; if no label version existed before a holdout target it cannot calibrate it",
+    "rolling":"a holdout label may affect strictly later targets only after its proven availability; freeze and hash each prediction before opening that target's label for scoring",
+    "prospective_online":"only a running shadow that actually saves a prediction before receiving the assay can produce prospective online evidence",
+    "evidence_threshold":"report paired differences and sample/date coverage; no fixed small n proves 80 percent; if coverage or independent dates are inadequate mark the conclusion provisional"
+  },
+  "metrics": {
+    "primary":"MAE in ash percentage points; normal and all samples, per-sample and date-balanced",
+    "secondary":["hit1_count/n","hit2_count/n","median absolute error","p90 absolute error","maximum absolute error","prediction-minus-actual bias"],
+    "tolerance_pp":[1.0,2.0],
+    "hit_epsilon_pp":1e-9,
+    "uncertainty":"Wilson95 for hit1; paired date-block bootstrap of candidate-minus-reference MAE with fixed seed=20261102 and 10000 draws; exploratory historical intervals are descriptive",
+    "coverage":"all/strict/ineligible, predicted/rejected/fallback, assay IDs, dates, input ranges, per-group and all excluded targets retained",
+    "comparison":"paired identical target IDs against frozen expert8, C0 and last_observed; report each date and all failure points",
+    "acceptance":"historical improvement supports a candidate only, not proof of future accuracy; an unseen holdout improvement requires lower paired MAE than frozen expert8 and no worse than C0 with coverage and uncertainty disclosed; 80 percent within +/-1 remains a separate unproven stage target unless adequate new evidence supports it"
+  },
+  "required_invariants": [
+    "Changing the current target label never changes its own prediction or fitted state",
+    "Adding/changing future label values never changes an earlier fitted state or prediction",
+    "13:00 entry for a 12:00 sample is unavailable at 12:00 and at exactly13:00, eligible strictly after13:00",
+    "Later label revisions never replace earlier versions before their own availability",
+    "C7 never creates historical residuals with a later or in-sample C5 fit",
+    "All candidates share raw training IDs, label-version IDs and the one common target fence",
+    "Two-system groups never receive primary three-system trained coefficients",
+    "Serialized state and receipts replay deterministically with hashes and training provenance",
+    "Frozen phase1, EXPERT8 model/implementation, production timing and production configuration remain unchanged"
+  ],
+  "stopping":"run this fixed round once; no extra feature windows, lag selection, polynomial, parameter grid, hidden ensemble or extra candidate; a later experiment requires a newly declared protocol before new fitting and no reuse of revealed holdout as unseen evidence",
+  "outputs":"locked protocol+hash; source/input hashes; versioned seed/events; every fold state/fence/training and receipt IDs; prequential receipts; all predictions and exclusions; selection; native/common normal/all/per-date metrics and uncertainty; reusable offline EXPERT8.1 candidate artifact; report; synthetic causal tests; no activation/deployment/automatic density control"
+}

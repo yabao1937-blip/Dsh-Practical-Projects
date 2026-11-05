@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "database": "D:\\dense-medium-density-control-system\\docs\\verification\\manual-measurements-20261007\\browser-test-1792225162343.db",
+  "rows": 7,
+  "metrics": 3,
+  "defaultServerTime": true,
+  "beijingTimeRoundtrip": true,
+  "sharedAcrossBrowsersAndReload": true,
+  "concurrentMetadataSingleRequest": true,
+  "lanRequestIdFallback": true,
+  "lostResponseRetryNoDuplicate": true,
+  "malformedResponsePreservesInputs": true,
+  "zeroValuePreserved": true,
+  "independentDialogSave": true,
+  "actualProductionTime": true,
+  "modelStoreUnchanged": true,
+  "mobileOverflow": false,
+  "pageErrors": [],
+  "blockedOtherWritePaths": [
+    "/api/v1/state",
+    "/api/v1/decision/sources"
+  ]
+}

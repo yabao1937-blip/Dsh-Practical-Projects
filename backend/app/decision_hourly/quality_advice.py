@@ -28,6 +28,32 @@ from ..hourly_brief.inputs import Inputs
 
 POLICY = 'gpt-hourly-reference-v4'
 
+# Legacy normal-branch contexts omitted this conditional rule entirely. Map
+# that known representation to its original fixed contract, not to today's
+# possibly edited parameters. Branch activation and level readings are facts,
+# while every other key remains part of configuration compatibility.
+LEGACY_TWO_SYSTEM_ASH = dict(version='two-system-level-ash-v1', input='level',
+    running_systems=2, level_threshold=30, above=14, below=15,
+    factors='仅精磁尾液位；其余因子暂不参与')
+
+
+def comparison_definition(definition):
+    """Non-mutating view of fixed configuration, including legacy contexts."""
+    if not isinstance(definition, dict) or not definition:
+        return None
+    derivations = definition.get('input_derivations')
+    if not isinstance(derivations, dict) or not derivations:
+        return None
+    result = {k:deepcopy(v) for k,v in definition.items() if k not in {'point_definitions', 'target'}}
+    fixed = result['input_derivations']
+    if 'coarse_ash' not in fixed:
+        fixed['coarse_ash'] = deepcopy(LEGACY_TWO_SYSTEM_ASH)
+    elif not isinstance(fixed['coarse_ash'], dict) or not fixed['coarse_ash']:
+        return None
+    else:
+        fixed['coarse_ash'].pop('level_observed', None)
+    return result
+
 
 def period(start, end):
     return dict(start=iso_time(start), end=iso_time(end),
@@ -123,11 +149,15 @@ def compatible_contexts(db, groups, current, extra=()):
             definitions.append(row.definition)
     # Targets are objectives, not measurement/model definitions. Reuse the
     # historical facts across target edits and recompute advice with today's goal.
-    ignored = {'point_definitions', 'target'}
-    expected = {k:v for k,v in current.items() if k not in ignored}
+    expected = comparison_definition(current)
+    if expected is None:
+        return False, '小时数据缺少来源与模型口径记录'
     known = {}
     for definition in definitions:
-        if {k:v for k,v in definition.items() if k not in ignored} != expected:
+        actual = comparison_definition(definition)
+        if actual is None:
+            return False, '小时数据缺少来源与模型口径记录'
+        if actual != expected:
             return False, '灰分小时、小时设定基准或当前的来源、模型或调密参数发生变化'
         # A temporarily missing input can omit its definition. Only conflicting
         # known definitions prove a real configuration change.

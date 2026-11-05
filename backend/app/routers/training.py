@@ -22,6 +22,13 @@ router = APIRouter(prefix="/training", tags=["模型训练"])
 _train_lock = threading.Lock()
 
 
+@router.get("/coarse-model-comparison")
+def coarse_model_comparison():
+    """Packaged offline evidence only; no DB access, training or model activation."""
+    from ..services.coarse_model_comparison import load_comparison
+    return load_comparison()
+
+
 def _record_to_dict(r: CoalRecord) -> dict:
     return {
         "timestamp": r.ts,

@@ -8,7 +8,8 @@ from sqlalchemy import select
 from ..models import AutoState, CalcLog, CoalRecord, Setting
 from ..services.resolvers import INSTRUMENT_DEFAULT, measurement_number, manual_valid
 from ..telemetry.derived import (FOUR_SYSTEM_MEMBERS, DESLIMING_MEMBERS, FLOAT_PRESS_MEMBERS, DENSITY_AVERAGE_MEMBERS,
-    PRESS_STATE_ITEM_ALIASES)
+    PRESS_STATE_ITEM_ALIASES, LEGACY_DESLIMING_MEMBERS, LEGACY_DESLIMING_KEYS,
+    DESLIMING_CUTOVER_SETTING, DESLIMING_RUNS_VERSION)
 from ..telemetry.domain import availability, definition_id, iso_time, parse_time
 from ..telemetry.models import TelemetryPoint, TelemetryReading, TelemetrySource
 from ..telemetry.retained import MEMORY, density_history, raw_sample, usable_at_receipt
@@ -44,6 +45,18 @@ class Inputs:
         from ..telemetry.realtime import read_runtime
         self.runtime = read_runtime(db, hour) if realtime else {}
         self.cutoff = iso_time(hour)
+        # The immutable installation marker is read directly, including for an
+        # hour before its updated_at. It selects old evidence by time, never by
+        # whether a current RUNS sample happens to be available.
+        marker = db.get(Setting, DESLIMING_CUTOVER_SETTING)
+        marker = marker.value if marker and isinstance(marker.value, dict) else {}
+        self.desliming_cutover = marker
+        self.legacy_desliming = False
+        if not live and not realtime and marker.get('version') == DESLIMING_RUNS_VERSION and marker.get('source_id') == 'kepserver-main':
+            try:
+                self.legacy_desliming = hour < parse_time(marker['effective_at'])
+            except (KeyError, TypeError, ValueError):
+                pass
         self.points = {}
         for p in db.scalars(select(TelemetryPoint).where(TelemetryPoint.enabled.is_(True))):
             item = p.config.get("item_id")
@@ -55,6 +68,15 @@ class Inputs:
                 (new for new, old in PRESS_STATE_ITEM_ALIASES.items() if old == item), None)
             if alias:
                 self.points.setdefault(alias, []).append(p)
+        if self.legacy_desliming:
+            # Only the two exact retired definitions may be reopened for old
+            # reads; no other disabled instrument becomes a current source.
+            for key, (_, item) in zip(LEGACY_DESLIMING_KEYS, LEGACY_DESLIMING_MEMBERS):
+                p = db.get(TelemetryPoint, (marker['source_id'], key))
+                if p and p.config.get('item_id') == item and p.config.get('node_id') == 'ns=2;s=' + item:
+                    existing = self.points.setdefault(item, [])
+                    if p not in existing:
+                        existing.append(p)
         self.sources = {s.source_id: s for s in db.scalars(select(TelemetrySource))}
         auto_rows = list(db.scalars(select(AutoState)))
         self.auto = {r.key: r.value for r in auto_rows
@@ -164,7 +186,14 @@ class Inputs:
             candidates.append(cached_memory(self.runtime, point, 'last_density', self.hour))
         return max((s for s in candidates if s), key=lambda s:parse_time(s['received_at']), default=None)
 
+    def status_members(self, members, source_id=None):
+        if (members == DESLIMING_MEMBERS and self.legacy_desliming
+                and source_id in (None, self.desliming_cutover['source_id'])):
+            return LEGACY_DESLIMING_MEMBERS
+        return members
+
     def group(self, members, source_id=None):
+        members = self.status_members(members, source_id)
         parts = {label: self.telemetry(item, source_id=source_id) for label, item in members}
         values = {label: c["value"] if isinstance(c["value"], bool) else None for label, c in parts.items()}
         missing = [label for label, v in values.items() if v is None]

@@ -1,0 +1,951 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-03T07:48:05.255491+00:00",
+  "valid_until": null,
+  "status": "ready",
+  "reason": "",
+  "scope": {
+    "total_n": 81,
+    "evaluable_n": 76,
+    "audited_n": 70,
+    "review_n": 6,
+    "rejected_n": 5,
+    "reasons": {
+      "公共输入缺失或不可配对": 2,
+      "时间倒置待核": 1,
+      "煤量≤10且输入不合格": 1,
+      "用户确认采样时间错误": 1
+    },
+    "description": "全部81条已曝光DB；回算76含6待核单列，70审计训练资格；5输入/停机/时间原因拒绝",
+    "data_cutoff": "2026-11-03T05:50:58.766+00:00",
+    "by_system": {
+      "2": {
+        "total_n": 18,
+        "evaluable_n": 18,
+        "audited_n": 16,
+        "review_n": 2,
+        "rejected_n": 0,
+        "reasons": {}
+      },
+      "3": {
+        "total_n": 60,
+        "evaluable_n": 58,
+        "audited_n": 54,
+        "review_n": 4,
+        "rejected_n": 2,
+        "reasons": {
+          "时间倒置待核": 1,
+          "煤量≤10且输入不合格": 1
+        }
+      },
+      "unknown": {
+        "total_n": 3,
+        "evaluable_n": 0,
+        "audited_n": 0,
+        "review_n": 0,
+        "rejected_n": 3,
+        "reasons": {
+          "公共输入缺失或不可配对": 2,
+          "用户确认采样时间错误": 1
+        }
+      }
+    }
+  },
+  "freeze": {
+    "status": "accepted",
+    "model_version": "EX81-PRODUCTION-SELECT-20261103-v1",
+    "model_sha256": "b768cb2a8b2b8c37b67f76030ad0aeb535afb69d5b71230c4fe2d3facac5a2e0",
+    "freeze_manifest_sha256": "d99181a097bd5e8d88674a65f2c3be15be3edcc710ce3912db1bd7bb24e8877a",
+    "sealed_runtime_manifest_sha256": "602dd123b7bc274cebfdea8d9923b06287e7d875a8875670f0296b955e7d3975",
+    "final_seal_sha256": "879ec180143034e6f0128a62969aa3160c0da8bce975f9d173b7fd4c13d032d2",
+    "sealed_at": "2026-11-03T07:44:40.311965+00:00",
+    "due_at": "2026-11-10T07:44:40.311965+00:00"
+  },
+  "models": {
+    "current": {
+      "id": "EX8",
+      "name": "现用EX8",
+      "version": "20261012",
+      "status": "frozen",
+      "method": {
+        "summary": "三系统使用冻结EX8原生八因素公式；二系统为实际旧14/15规则",
+        "details": [
+          "三系统只接受真实legacy if_prod输入，不将RUNS代填",
+          "二系统灰分规则：液位>=30取14，否则15；EX8原始参数算法仅额外列示"
+        ],
+        "by_system": {
+          "2": {
+            "summary": "实际旧生产14/15液位查表规则",
+            "details": [
+              "液位≥30取14，否则15；不是将EX8三系统参数当二系统生产模型"
+            ]
+          },
+          "3": {
+            "summary": "177条旧样本：液位经验基线＋其余7因素有限修正，参数冻结",
+            "details": [
+              "冻结EX8版本20261012，177条原训练样本；不是近期DB重新训练",
+              "液位基线30.5−0.3×液位，经验液位裁剪25–75；其余7因素修正幅度限定±2灰分百分点",
+              "历史①②保留真实legacy；未来③独立EX8_PRODUCTION_RUNS使用真实RUNS、同一冻结参数，不回填旧历史",
+              "原旧表日期含歧义，不虚构完整训练日期范围；未来严格归档重建不冒称当场已发出的生产预测"
+            ]
+          }
+        }
+      },
+      "training_date_range": null,
+      "metrics": {
+        "history_all": {
+          "mae": 3.4544737722439876,
+          "rmse": 4.9171650511810014,
+          "bias": 1.490231221219508,
+          "r2": -1.1757572918173311,
+          "hit1": 16,
+          "n": 76,
+          "hit1_rate": 0.21052631578947367,
+          "eligible_n": 81,
+          "coverage": 0.9382716049382716,
+          "date_range": {
+            "start": "2026-10-16",
+            "end": "2026-11-03"
+          },
+          "normal": {
+            "mae": 3.2295958040913475,
+            "rmse": 4.301035773405495,
+            "bias": 1.8487498648711616,
+            "r2": -2.1369544233160997,
+            "hit1": 16,
+            "n": 74,
+            "hit1_rate": 0.21621621621621623,
+            "eligible_n": null,
+            "coverage": null,
+            "date_range": {
+              "start": "2026-10-16",
+              "end": "2026-11-03"
+            }
+          },
+          "audited": {
+            "mae": 3.07309795403377,
+            "rmse": 4.5111401454368565,
+            "bias": 0.9404917557786204,
+            "r2": -0.7257141752313652,
+            "hit1": 16,
+            "n": 70,
+            "hit1_rate": 0.22857142857142856,
+            "eligible_n": 70,
+            "coverage": 1.0,
+            "date_range": {
+              "start": "2026-10-16",
+              "end": "2026-11-03"
+            }
+          },
+          "review": {
+            "mae": 7.903858318029861,
+            "rmse": 8.29698684119925,
+            "bias": 7.903858318029861,
+            "r2": -60.172222478227816,
+            "hit1": 0,
+            "n": 6,
+            "hit1_rate": 0.0,
+            "eligible_n": 6,
+            "coverage": 1.0,
+            "date_range": {
+              "start": "2026-10-17",
+              "end": "2026-10-17"
+            }
+          },
+          "train_date_range": null,
+          "fold_count": 0,
+          "fold_description": "保存的full模型纯predict，无fit",
+          "training_note": "冻结现用模型/规则，同池回算，不在各fold重新训练。",
+          "status": "available",
+          "reason_counts": {},
+          "baseline_id": null,
+          "baseline_label": null,
+          "note": "生产导向候选对81已曝光DB回算，76输入合法含6待核单列；拟合仅诊断，默认全MAE。",
+          "by_system": {
+            "2": {
+              "mae": 2.695,
+              "rmse": 3.2534246913402223,
+              "bias": 0.885,
+              "r2": 0.007045888829794511,
+              "hit1": 6,
+              "n": 18,
+              "hit1_rate": 0.3333333333333333,
+              "eligible_n": 18,
+              "coverage": 1.0,
+              "date_range": {
+                "start": "2026-10-16",
+                "end": "2026-11-02"
+              },
+              "normal": {
+                "mae": 2.695,
+                "rmse": 3.2534246913402223,
+                "bias": 0.885,
+                "r2": 0.007045888829794511,
+                "hit1": 6,
+                "n": 18,
+                "hit1_rate": 0.3333333333333333,
+                "eligible_n": 18,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-16",
+                  "end": "2026-11-02"
+                }
+              },
+              "audited": {
+                "mae": 2.48875,
+                "rmse": 3.0884522822928635,
+                "bias": 0.4525,
+                "r2": 0.05869502198812093,
+                "hit1": 6,
+                "n": 16,
+                "hit1_rate": 0.375,
+                "eligible_n": 16,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-16",
+                  "end": "2026-11-02"
+                }
+              },
+              "review": {
+                "mae": 4.345,
+                "rmse": 4.353693833975926,
+                "bias": 4.345,
+                "r2": -249.64000000000092,
+                "hit1": 0,
+                "n": 2,
+                "hit1_rate": 0.0,
+                "eligible_n": 2,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-17",
+                  "end": "2026-10-17"
+                }
+              },
+              "train_date_range": null,
+              "fold_count": 0,
+              "fold_description": "保存的full模型纯predict，无fit",
+              "training_note": "二系统固定14/15生产规则；零训练，无训练日期；属于规则历史回算。",
+              "status": "available",
+              "reason_counts": {},
+              "baseline_id": null,
+              "baseline_label": null
+            },
+            "3": {
+              "mae": 3.6901725291472944,
+              "rmse": 5.328907862945544,
+              "bias": 1.6780616002186652,
+              "r2": -1.5782815805729142,
+              "hit1": 10,
+              "n": 58,
+              "hit1_rate": 0.1724137931034483,
+              "eligible_n": 60,
+              "coverage": 0.9666666666666667,
+              "date_range": {
+                "start": "2026-10-16",
+                "end": "2026-11-03"
+              },
+              "normal": {
+                "mae": 3.4014301696921376,
+                "rmse": 4.587236457171958,
+                "bias": 2.1585266071511775,
+                "r2": -4.4758513563901925,
+                "hit1": 10,
+                "n": 56,
+                "hit1_rate": 0.17857142857142858,
+                "eligible_n": 57,
+                "coverage": 0.9824561403508771,
+                "date_range": {
+                  "start": "2026-10-16",
+                  "end": "2026-11-03"
+                }
+              },
+              "audited": {
+                "mae": 3.2462380885622943,
+                "rmse": 4.853235611852053,
+                "bias": 1.0850819056389525,
+                "r2": -0.9931610517727072,
+                "hit1": 10,
+                "n": 54,
+                "hit1_rate": 0.18518518518518517,
+                "eligible_n": 54,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-16",
+                  "end": "2026-11-03"
+                }
+              },
+              "review": {
+                "mae": 9.68328747704479,
+                "rmse": 9.684144823604727,
+                "bias": 9.68328747704479,
+                "r2": null,
+                "hit1": 0,
+                "n": 4,
+                "hit1_rate": 0.0,
+                "eligible_n": 4,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-17",
+                  "end": "2026-10-17"
+                }
+              },
+              "train_date_range": null,
+              "fold_count": 0,
+              "fold_description": "保存的full模型纯predict，无fit",
+              "training_note": "冻结现用模型/规则，同池回算，不在各fold重新训练。",
+              "status": "available",
+              "reason_counts": {},
+              "baseline_id": null,
+              "baseline_label": null
+            }
+          },
+          "labelled_n": null,
+          "pending_label_n": 0,
+          "attempted_n": null,
+          "prediction_n": null,
+          "prediction_coverage": null
+        },
+        "history_forward": {
+          "mae": 2.8984635934286507,
+          "rmse": 4.269025984626004,
+          "bias": 0.7626324197631317,
+          "r2": -0.45498431995140165,
+          "hit1": 16,
+          "n": 64,
+          "hit1_rate": 0.25,
+          "eligible_n": 70,
+          "coverage": 0.9142857142857143,
+          "date_range": {
+            "start": "2026-10-16",
+            "end": "2026-11-03"
+          },
+          "normal": {
+            "mae": 2.6511776153200626,
+            "rmse": 3.381901597611562,
+            "bias": 1.1899723001598401,
+            "r2": -0.8268149790719916,
+            "hit1": 15,
+            "n": 61,
+            "hit1_rate": 0.2459016393442623,
+            "eligible_n": null,
+            "coverage": null,
+            "date_range": {
+              "start": "2026-10-16",
+              "end": "2026-11-03"
+            }
+          },
+          "audited": null,
+          "review": null,
+          "train_date_range": null,
+          "fold_count": 16,
+          "fold_description": "3sys expanding sample dates with train-only strict fence/scaler;2sys zero-training retained policy",
+          "training_note": "冻结现用模型/规则，同池回算，不在各fold重新训练。",
+          "status": "available",
+          "reason_counts": {},
+          "baseline_id": null,
+          "baseline_label": null,
+          "note": "三系统仅更早日期训练→较新日期48/54；二系统无需训练的现用固定规则16/16，合计64/70；非独立盲测。",
+          "by_system": {
+            "2": {
+              "mae": 2.48875,
+              "rmse": 3.0884522822928635,
+              "bias": 0.4525,
+              "r2": 0.05869502198812093,
+              "hit1": 6,
+              "n": 16,
+              "hit1_rate": 0.375,
+              "eligible_n": 16,
+              "coverage": 1.0,
+              "date_range": {
+                "start": "2026-10-16",
+                "end": "2026-11-02"
+              },
+              "normal": {
+                "mae": 2.48875,
+                "rmse": 3.0884522822928635,
+                "bias": 0.4525,
+                "r2": 0.05869502198812093,
+                "hit1": 6,
+                "n": 16,
+                "hit1_rate": 0.375,
+                "eligible_n": 16,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-16",
+                  "end": "2026-11-02"
+                }
+              },
+              "audited": null,
+              "review": null,
+              "train_date_range": null,
+              "fold_count": 0,
+              "fold_description": "3sys expanding sample dates with train-only strict fence/scaler;2sys zero-training retained policy",
+              "training_note": "二系统固定14/15生产规则；零训练，无训练日期；属于规则历史回算。",
+              "status": "available",
+              "reason_counts": {},
+              "baseline_id": null,
+              "baseline_label": null
+            },
+            "3": {
+              "mae": 3.035034791238201,
+              "rmse": 4.5956426438402165,
+              "bias": 0.8660098930175089,
+              "r2": -0.6418512048196221,
+              "hit1": 10,
+              "n": 48,
+              "hit1_rate": 0.20833333333333334,
+              "eligible_n": 54,
+              "coverage": 0.8888888888888888,
+              "date_range": {
+                "start": "2026-10-18",
+                "end": "2026-11-03"
+              },
+              "normal": {
+                "mae": 2.7089296563227516,
+                "rmse": 3.4802814808626095,
+                "bias": 1.4521846735500055,
+                "r2": -2.179937463618764,
+                "hit1": 9,
+                "n": 45,
+                "hit1_rate": 0.2,
+                "eligible_n": null,
+                "coverage": null,
+                "date_range": {
+                  "start": "2026-10-18",
+                  "end": "2026-11-03"
+                }
+              },
+              "audited": null,
+              "review": null,
+              "train_date_range": null,
+              "fold_count": 16,
+              "fold_description": "3sys expanding sample dates with train-only strict fence/scaler;2sys zero-training retained policy",
+              "training_note": "冻结现用模型/规则，同池回算，不在各fold重新训练。",
+              "status": "available",
+              "reason_counts": {},
+              "baseline_id": null,
+              "baseline_label": null
+            }
+          },
+          "labelled_n": null,
+          "pending_label_n": 0,
+          "attempted_n": null,
+          "prediction_n": null,
+          "prediction_coverage": null
+        },
+        "future": {
+          "mae": null,
+          "rmse": null,
+          "bias": null,
+          "r2": null,
+          "hit1": null,
+          "n": 0,
+          "hit1_rate": null,
+          "eligible_n": null,
+          "coverage": null,
+          "date_range": null,
+          "normal": {
+            "mae": null,
+            "rmse": null,
+            "bias": null,
+            "r2": null,
+            "hit1": null,
+            "n": 0,
+            "hit1_rate": null,
+            "eligible_n": null,
+            "coverage": null,
+            "date_range": null
+          },
+          "audited": null,
+          "review": null,
+          "train_date_range": null,
+          "fold_count": 0,
+          "fold_description": "冻结后参数直接推理，无fit、校准或scaler/fence/路由更新；两侧独立覆盖并另列共同交集",
+          "training_note": "冻结现用EX8参数纯推理，实际生产RUNS口径；无重训。",
+          "status": "pending",
+          "reason_counts": {},
+          "baseline_id": "EX8_PRODUCTION_RUNS",
+          "baseline_label": "现用EX8生产RUNS口径（参数冻结）",
+          "note": "独立终审封存后才开始168小时，输入先锁/标签后揭；当前pending。",
+          "by_system": {},
+          "labelled_n": 0,
+          "pending_label_n": 0,
+          "attempted_n": 0,
+          "prediction_n": null,
+          "prediction_coverage": null
+        }
+      }
+    },
+    "candidate": {
+      "id": "EX81",
+      "name": "候选模型",
+      "version": "EX81-PRODUCTION-SELECT-20261103-v1",
+      "status": "accepted",
+      "method": {
+        "summary": "三系统36条strict常规DB的液位/煤量GBR＋已覆盖四反馈门槛；二系统保留14/15",
+        "details": [
+          "三系统从110个已保存候选按forward全MAE选S__BOOST_absolute_error_2，不重训",
+          "前五全MAE差不足0.019pp，不能声称可靠唯一最优",
+          "历史拟合只作诊断；未来时间留出尚待验收"
+        ],
+        "by_system": {
+          "3": {
+            "summary": "36条strict常规DB：液位/煤量动态GBR，四反馈限定已覆盖工况",
+            "details": [
+              "Gradient Boosting Regression：80棵树，max_depth=2，min_samples_leaf=5，learning_rate=0.05，absolute_error",
+              "实际full模型仅36条strict常规DB；本候选不以分钟近似或旧表训练",
+              "四系统反馈在训练中恒为A0/B1/4011/4021，只作支持工况门槛，不宣称学会四开关变化效应",
+              "未见三系统四反馈组合hard guard拒绝；液位/煤量出训练范围保留预测并标记超支持范围",
+              "110候选共同forward48/16日期全MAE最低；前列差距不稳定，须待冻结后新数据验证"
+            ]
+          },
+          "2": {
+            "summary": "保留现用14/15固定液位规则，零训练",
+            "details": [
+              "液位≥30取14，否则15；和current相同",
+              "新2系GB仅保留研究产物，不进入生产候选路由或指标",
+              "16条仅固定规则历史回算，不声称新2系学习模型泛化"
+            ]
+          }
+        }
+      },
+      "training_date_range": {
+        "start": "2026-10-16",
+        "end": "2026-11-03"
+      },
+      "metrics": {
+        "history_all": {
+          "mae": 1.880973303085846,
+          "rmse": 3.2864063687015417,
+          "bias": -0.4074098904629162,
+          "r2": 0.02809592655801252,
+          "hit1": 40,
+          "n": 76,
+          "hit1_rate": 0.5263157894736842,
+          "eligible_n": 81,
+          "coverage": 0.9382716049382716,
+          "date_range": {
+            "start": "2026-10-16",
+            "end": "2026-11-03"
+          },
+          "normal": {
+            "mae": 1.5661495232786362,
+            "rmse": 2.2288310078560505,
+            "bias": -0.052760072476708296,
+            "r2": 0.15760383403942357,
+            "hit1": 40,
+            "n": 74,
+            "hit1_rate": 0.5405405405405406,
+            "eligible_n": null,
+            "coverage": null,
+            "date_range": {
+              "start": "2026-10-16",
+              "end": "2026-11-03"
+            }
+          },
+          "audited": {
+            "mae": 1.9061698867953425,
+            "rmse": 3.343821899920653,
+            "bias": -0.5668136221089701,
+            "r2": 0.05183809269263917,
+            "hit1": 36,
+            "n": 70,
+            "hit1_rate": 0.5142857142857142,
+            "eligible_n": 70,
+            "coverage": 1.0,
+            "date_range": {
+              "start": "2026-10-16",
+              "end": "2026-11-03"
+            }
+          },
+          "review": {
+            "mae": 1.5870131598083876,
+            "rmse": 2.521749903379555,
+            "bias": 1.4523003120743805,
+            "r2": -4.65089818468405,
+            "hit1": 4,
+            "n": 6,
+            "hit1_rate": 0.6666666666666666,
+            "eligible_n": 6,
+            "coverage": 1.0,
+            "date_range": {
+              "start": "2026-10-17",
+              "end": "2026-10-17"
+            }
+          },
+          "train_date_range": {
+            "start": "2026-10-16",
+            "end": "2026-11-03"
+          },
+          "fold_count": 0,
+          "fold_description": "保存的full模型纯predict，无fit",
+          "training_note": "候选训练日期；三系统TSCV各fold仅用更早日期训练。",
+          "status": "available",
+          "reason_counts": {},
+          "baseline_id": null,
+          "baseline_label": null,
+          "note": "生产导向候选对81已曝光DB回算，76输入合法含6待核单列；拟合仅诊断，默认全MAE。",
+          "by_system": {
+            "2": {
+              "mae": 2.695,
+              "rmse": 3.2534246913402223,
+              "bias": 0.885,
+              "r2": 0.007045888829794511,
+              "hit1": 6,
+              "n": 18,
+              "hit1_rate": 0.3333333333333333,
+              "eligible_n": 18,
+              "coverage": 1.0,
+              "date_range": {
+                "start": "2026-10-16",
+                "end": "2026-11-02"
+              },
+              "normal": {
+                "mae": 2.695,
+                "rmse": 3.2534246913402223,
+                "bias": 0.885,
+                "r2": 0.007045888829794511,
+                "hit1": 6,
+                "n": 18,
+                "hit1_rate": 0.3333333333333333,
+                "eligible_n": 18,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-16",
+                  "end": "2026-11-02"
+                }
+              },
+              "audited": {
+                "mae": 2.48875,
+                "rmse": 3.0884522822928635,
+                "bias": 0.4525,
+                "r2": 0.05869502198812093,
+                "hit1": 6,
+                "n": 16,
+                "hit1_rate": 0.375,
+                "eligible_n": 16,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-16",
+                  "end": "2026-11-02"
+                }
+              },
+              "review": {
+                "mae": 4.345,
+                "rmse": 4.353693833975926,
+                "bias": 4.345,
+                "r2": -249.64000000000092,
+                "hit1": 0,
+                "n": 2,
+                "hit1_rate": 0.0,
+                "eligible_n": 2,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-17",
+                  "end": "2026-10-17"
+                }
+              },
+              "train_date_range": null,
+              "fold_count": 0,
+              "fold_description": "保存的full模型纯predict，无fit",
+              "training_note": "二系统固定14/15生产规则；零训练，无训练日期；属于规则历史回算。",
+              "status": "available",
+              "reason_counts": {},
+              "baseline_id": null,
+              "baseline_label": null
+            },
+            "3": {
+              "mae": 1.6283443281814536,
+              "rmse": 3.2965749685204786,
+              "bias": -0.8085026150893384,
+              "r2": 0.01331202228222117,
+              "hit1": 34,
+              "n": 58,
+              "hit1_rate": 0.5862068965517241,
+              "eligible_n": 60,
+              "coverage": 0.9666666666666667,
+              "date_range": {
+                "start": "2026-10-16",
+                "end": "2026-11-03"
+              },
+              "normal": {
+                "mae": 1.2033047271896267,
+                "rmse": 1.7782565044616319,
+                "bias": -0.3541829529156502,
+                "r2": 0.17711677687638638,
+                "hit1": 34,
+                "n": 56,
+                "hit1_rate": 0.6071428571428571,
+                "eligible_n": 57,
+                "coverage": 0.9824561403508771,
+                "date_range": {
+                  "start": "2026-10-16",
+                  "end": "2026-11-03"
+                }
+              },
+              "audited": {
+                "mae": 1.7335535569569256,
+                "rmse": 3.4158225051662896,
+                "bias": -0.8688324731042206,
+                "r2": 0.01265204315274071,
+                "hit1": 30,
+                "n": 54,
+                "hit1_rate": 0.5555555555555556,
+                "eligible_n": 54,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-16",
+                  "end": "2026-11-03"
+                }
+              },
+              "review": {
+                "mae": 0.2080197397125816,
+                "rmse": 0.24800980382274287,
+                "bias": 0.005950468111570739,
+                "r2": null,
+                "hit1": 4,
+                "n": 4,
+                "hit1_rate": 1.0,
+                "eligible_n": 4,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-17",
+                  "end": "2026-10-17"
+                }
+              },
+              "train_date_range": {
+                "start": "2026-10-16",
+                "end": "2026-11-03"
+              },
+              "fold_count": 0,
+              "fold_description": "保存的full模型纯predict，无fit",
+              "training_note": "候选训练日期；三系统TSCV各fold仅用更早日期训练。",
+              "status": "available",
+              "reason_counts": {},
+              "baseline_id": null,
+              "baseline_label": null
+            }
+          },
+          "labelled_n": null,
+          "pending_label_n": 0,
+          "attempted_n": null,
+          "prediction_n": null,
+          "prediction_coverage": null
+        },
+        "history_forward": {
+          "mae": 2.1079358423312713,
+          "rmse": 3.482152678339829,
+          "bias": -0.5578007613279778,
+          "r2": 0.03195324157009094,
+          "hit1": 26,
+          "n": 64,
+          "hit1_rate": 0.40625,
+          "eligible_n": 70,
+          "coverage": 0.9142857142857143,
+          "date_range": {
+            "start": "2026-10-16",
+            "end": "2026-11-03"
+          },
+          "normal": {
+            "mae": 1.6944114444470075,
+            "rmse": 2.265154958220352,
+            "bias": -0.0680402119189616,
+            "r2": 0.1804631904431615,
+            "hit1": 26,
+            "n": 61,
+            "hit1_rate": 0.4262295081967213,
+            "eligible_n": null,
+            "coverage": null,
+            "date_range": {
+              "start": "2026-10-16",
+              "end": "2026-11-03"
+            }
+          },
+          "audited": null,
+          "review": null,
+          "train_date_range": {
+            "start": "2026-10-16",
+            "end": "2026-11-02"
+          },
+          "fold_count": 16,
+          "fold_description": "3sys expanding sample dates with train-only strict fence/scaler;2sys zero-training retained policy",
+          "training_note": "候选训练日期；三系统TSCV各fold仅用更早日期训练。",
+          "status": "available",
+          "reason_counts": {},
+          "baseline_id": null,
+          "baseline_label": null,
+          "note": "三系统仅更早日期训练→较新日期48/54；二系统无需训练的现用固定规则16/16，合计64/70；非独立盲测。",
+          "by_system": {
+            "2": {
+              "mae": 2.48875,
+              "rmse": 3.0884522822928635,
+              "bias": 0.4525,
+              "r2": 0.05869502198812093,
+              "hit1": 6,
+              "n": 16,
+              "hit1_rate": 0.375,
+              "eligible_n": 16,
+              "coverage": 1.0,
+              "date_range": {
+                "start": "2026-10-16",
+                "end": "2026-11-02"
+              },
+              "normal": {
+                "mae": 2.48875,
+                "rmse": 3.0884522822928635,
+                "bias": 0.4525,
+                "r2": 0.05869502198812093,
+                "hit1": 6,
+                "n": 16,
+                "hit1_rate": 0.375,
+                "eligible_n": 16,
+                "coverage": 1.0,
+                "date_range": {
+                  "start": "2026-10-16",
+                  "end": "2026-11-02"
+                }
+              },
+              "audited": null,
+              "review": null,
+              "train_date_range": null,
+              "fold_count": 0,
+              "fold_description": "3sys expanding sample dates with train-only strict fence/scaler;2sys zero-training retained policy",
+              "training_note": "二系统固定14/15生产规则；零训练，无训练日期；属于规则历史回算。",
+              "status": "available",
+              "reason_counts": {},
+              "baseline_id": null,
+              "baseline_label": null
+            },
+            "3": {
+              "mae": 1.9809977897750288,
+              "rmse": 3.6038410805267658,
+              "bias": -0.8945676817706371,
+              "r2": -0.00965397096556564,
+              "hit1": 20,
+              "n": 48,
+              "hit1_rate": 0.4166666666666667,
+              "eligible_n": 54,
+              "coverage": 0.8888888888888888,
+              "date_range": {
+                "start": "2026-10-18",
+                "end": "2026-11-03"
+              },
+              "normal": {
+                "mae": 1.4119799580281658,
+                "rmse": 1.887796752653238,
+                "bias": -0.2531211761568146,
+                "r2": 0.06437825344229231,
+                "hit1": 20,
+                "n": 45,
+                "hit1_rate": 0.4444444444444444,
+                "eligible_n": null,
+                "coverage": null,
+                "date_range": {
+                  "start": "2026-10-18",
+                  "end": "2026-11-03"
+                }
+              },
+              "audited": null,
+              "review": null,
+              "train_date_range": {
+                "start": "2026-10-16",
+                "end": "2026-11-02"
+              },
+              "fold_count": 16,
+              "fold_description": "3sys expanding sample dates with train-only strict fence/scaler;2sys zero-training retained policy",
+              "training_note": "候选训练日期；三系统TSCV各fold仅用更早日期训练。",
+              "status": "available",
+              "reason_counts": {},
+              "baseline_id": null,
+              "baseline_label": null
+            }
+          },
+          "labelled_n": null,
+          "pending_label_n": 0,
+          "attempted_n": null,
+          "prediction_n": null,
+          "prediction_coverage": null
+        },
+        "future": {
+          "mae": null,
+          "rmse": null,
+          "bias": null,
+          "r2": null,
+          "hit1": null,
+          "n": 0,
+          "hit1_rate": null,
+          "eligible_n": null,
+          "coverage": null,
+          "date_range": null,
+          "normal": {
+            "mae": null,
+            "rmse": null,
+            "bias": null,
+            "r2": null,
+            "hit1": null,
+            "n": 0,
+            "hit1_rate": null,
+            "eligible_n": null,
+            "coverage": null,
+            "date_range": null
+          },
+          "audited": null,
+          "review": null,
+          "train_date_range": null,
+          "fold_count": 0,
+          "fold_description": "冻结后参数直接推理，无fit、校准或scaler/fence/路由更新；两侧独立覆盖并另列共同交集",
+          "training_note": "冻结候选参数纯推理；不重新训练、不调参。",
+          "status": "pending",
+          "reason_counts": {},
+          "baseline_id": "EX81_PRODUCTION_CANDIDATE",
+          "baseline_label": "EX8.1候选（冻结参数纯predict）",
+          "note": "独立终审封存后才开始168小时，输入先锁/标签后揭；当前pending。",
+          "by_system": {},
+          "labelled_n": 0,
+          "pending_label_n": 0,
+          "attempted_n": 0,
+          "prediction_n": null,
+          "prediction_coverage": null
+        }
+      }
+    }
+  },
+  "future_comparison": {
+    "status": "pending",
+    "n": 0,
+    "eligible_n": null,
+    "coverage": null,
+    "current": {
+      "mae": null,
+      "rmse": null,
+      "bias": null,
+      "r2": null,
+      "hit1": null,
+      "n": 0,
+      "hit1_rate": null,
+      "eligible_n": null,
+      "coverage": null,
+      "date_range": null
+    },
+    "candidate": {
+      "mae": null,
+      "rmse": null,
+      "bias": null,
+      "r2": null,
+      "hit1": null,
+      "n": 0,
+      "hit1_rate": null,
+      "eligible_n": null,
+      "coverage": null,
+      "date_range": null
+    },
+    "by_system": {},
+    "pending_label_n": 0,
+    "baseline_id": "EX8_PRODUCTION_RUNS",
+    "baseline_label": "现用EX8生产RUNS口径（参数冻结）",
+    "candidate_baseline_id": "EX81_PRODUCTION_CANDIDATE",
+    "candidate_baseline_label": "EX8.1候选（冻结参数纯predict）",
+    "note": "仅双方均有有效预测及真实标签的交集用于配对比较；各自全覆盖成绩见模型各自future。"
+  },
+  "artifact_sha256": "c56e74f819b9ff1f689fbab47463019c49db314168a236bcfd070e92679d8c9e"
+}

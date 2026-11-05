@@ -7,7 +7,7 @@ from sqlalchemy import select
 from ..models import DecisionSourceRevision, CoalRecord, CoarseModel, Setting
 from ..hourly_brief.columns import cell
 from ..hourly_brief.inputs import Inputs, RAW_ASH, COAL_AMOUNT, LEVEL, LOCAL, business_time, numeric
-from ..telemetry.derived import STATUS_GROUPS, DENSITY_AVERAGE_MEMBERS
+from ..telemetry.derived import STATUS_GROUPS, DENSITY_AVERAGE_MEMBERS, DESLIMING_MEMBERS, DESLIMING_RUNS_VERSION
 from ..telemetry.float_output import DERIVATION as PLATE_DERIVATION
 from ..telemetry.density_effective import effective_component, effective_average, DENSITY_ITEMS
 from ..telemetry.domain import definition_id, iso_time, utc_now
@@ -48,7 +48,7 @@ def default_choice(inputs, node):
     if target in POINT_METRICS:
         return identity('manual-measurements', target) if inputs.manual(target) else ''
     if target in GROUPS:
-        sources = {p.source_id for _, item in GROUPS[target]['members'] for p in inputs.points.get(item, [])}
+        sources = {p.source_id for _, item in inputs.status_members(GROUPS[target]['members']) for p in inputs.points.get(item, [])}
         return identity(next(iter(sources)), target) if len(sources) == 1 else ''
     p = inputs.point(target)
     return identity(p.source_id, p.key) if p else ''
@@ -208,6 +208,11 @@ def shared_snapshot(db, when=None, *, live=None, store_loader=None, realtime=Fal
         if key not in inputs.settings:
             store.pop(store_key, None)
     result = calculate(captured, store, config['target_min'], config['target_max'], now=when, shared_sources=True)
+    if not inputs.legacy_desliming:
+        # Version the input contract even when RUNS is missing. A new context
+        # cannot share a pre-switch hash merely because both inputs are absent.
+        result['input_derivations']['desliming'] = dict(version=DESLIMING_RUNS_VERSION,
+            members=dict(DESLIMING_MEMBERS))
     from ..gpt_density.execution import apply_live
     apply_live(db, inputs, result, cells, store)
     unavailable_guard = any(r.key == 'density_guide' and business_time(r.updated_at) > when for r in db.scalars(select(Setting)))

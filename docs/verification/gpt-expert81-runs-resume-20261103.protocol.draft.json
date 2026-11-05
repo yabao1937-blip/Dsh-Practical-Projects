@@ -1,0 +1,135 @@
+{
+  "schema": "expert81-runs-resume-protocol-draft-v1",
+  "status": "draft_for_root_review_not_locked_or_executed",
+  "prepared_at": "2026-11-03T02:00:15+00:00",
+  "updated_at": "2026-11-03T02:43:20+00:00",
+  "purpose": "Prepare a small source-separated P0/P1/P2 comparison after the authorized if_prod-to-RUNS input correction; this draft authorizes no label retrieval, fitting, collection, activation or deployment.",
+  "current_evidence": {
+    "metadata_path": "output/gpt-expert81-resume-20261103/metadata-only/metadata-result.json",
+    "metadata_sha256": "73566639bec8d2f2b48a6687b03a2a351c72ee9908178faa7f9e349178fbaa5a",
+    "metadata_manifest_sha256": "69afabc870d5e5bd81397690ee9a3c2f502ec54c46c731ce826eb67d894803d3",
+    "host_checked_at": "2026-11-03T01:41:06.159+00:00",
+    "client_checked_at": "2026-11-03T01:41:37.844+00:00",
+    "manual_time_basis": "production-time-v1",
+    "clock_limitation": "The manual time_basis is not a verified sample clock domain. Original sampling precision and sample-to-host clock alignment remain unverified; host and notebook clocks are not asserted synchronized.",
+    "labels_read": false,
+    "other_model_features_read": true,
+    "input_only_audit": {
+      "status": "complete_input_only",
+      "result_path": "output/gpt-expert81-resume-20261103/input-only/input-result.json",
+      "result_sha256": "23c21c327927fd88af146053497f1ebdae2229c72e7c555862625ba60a3e5d03",
+      "manifest_sha256": "8438158d6176f80e98b96cf3e61f15c4efcedf9e8954200094015950bbfe1940",
+      "readme_sha256": "4fe744e6dcdeb7c1637ec30e094474739e57e73209aab8e6aa116a24eb1186c4",
+      "client_finished_at": "2026-11-03T02:35:16.797+00:00",
+      "sql_count": 17,
+      "remote_metadata_get_count": 0,
+      "elapsed_seconds": 0.375,
+      "manual_table_queried": false,
+      "target_labels_read": false,
+      "source_id": "kepserver-main",
+      "historical_quality_rule": "Nonlevel age<=30s is good; 30<age<=65s is minute_approximation. Each level target uses only the newest record within [sample-minus-lag-minus-30s, sample-minus-lag]. Fixed seven factors must share source, batch_id and received_at. Validate raw type/quality/status/issue and point/node/definition identity. Never skip a bad newest record or borrow a future observation.",
+      "online_policy_separation": "The existing 10-second nonlag live-cache receipt gate is retained only for its online path. It is not applied to historical qualification; no historical gate was widened for these two samples.",
+      "source_revision_limitation": "Both sample times have revision 9, effective 2026-10-28T02:16:38.959+00:00. Its desliming_status is a composite choice, not proof that production already used RUNS then. This audit explicitly reconstructs a parallel RUNS source domain without replacing frozen if_prod inputs.",
+      "case_count": 2,
+      "lag_input_pair_count": 6,
+      "count_interpretation": "Six strict lag input pairs represent two sample identities in two different exact groups, not six labels or two same-group training samples."
+    },
+    "new_records": [
+      {
+        "assay_id": 204,
+        "sample_at": "2026-11-02T13:26:18+00:00",
+        "source_created_at": "2026-11-02T15:54:56.106+00:00",
+        "local_runs_asof_bits": {"473": true, "474": false},
+        "prior_runs_received_at": "2026-11-02T13:26:00.861+00:00",
+        "prior_runs_age_seconds": 17.139,
+        "six_switch_group": "0,1,1,0,1,0",
+        "four_system_feedback_count": 2,
+        "research_branch": "two-system exact RUNS group; separate from the three-system pool",
+        "fixed_seven_same_source_batch_received_at": true,
+        "input_pairing_by_lag_seconds": {"60": "historical_strict", "90": "historical_strict", "120": "historical_strict"},
+        "level_target_age_seconds_by_lag": {"60": 17.361, "90": 17.408, "120": 17.564},
+        "role": "input-audited two-system bridge/possible future own-group seed candidate; target label remains unread, sampling precision/clock and complete label-version availability remain unverified; never a prospective scored case"
+      },
+      {
+        "assay_id": 206,
+        "sample_at": "2026-11-02T16:03:17+00:00",
+        "source_created_at": "2026-11-02T17:46:09.237+00:00",
+        "local_runs_asof_bits": {"473": true, "474": false},
+        "prior_runs_received_at": "2026-11-02T16:03:04.298+00:00",
+        "prior_runs_age_seconds": 12.702,
+        "six_switch_group": "0,1,1,1,1,0",
+        "four_system_feedback_count": 3,
+        "research_branch": "three-system exact RUNS group; separate from the two-system branch",
+        "fixed_seven_same_source_batch_received_at": true,
+        "input_pairing_by_lag_seconds": {"60": "historical_strict", "90": "historical_strict", "120": "historical_strict"},
+        "level_target_age_seconds_by_lag": {"60": 12.882, "90": 12.936, "120": 12.889},
+        "role": "input-audited three-system bridge/possible future own-group seed candidate; target label remains unread, sampling precision/clock and complete label-version availability remain unverified; never a prospective scored case"
+      }
+    ],
+    "qualification_limitation": "Both records now have verified historical-strict input pairs at 60/90/120s under the existing historical 30-second rule. They are different exact groups: one two-system and one three-system input case, each on one sample date; do not pool them. No target value has been read, so neither normal-label membership nor usable supervised-training status is established. Original sampling precision and sample-to-host clock alignment remain unverified. Historical input strict does not establish an online receipt, prospective accuracy or a physical optimum lag; the online 10-second gate must not disqualify these historical pairs.",
+    "availability_limitation": "created_at is initial entry time, not report/revision availability. Any subsequently read complete label-plus-feature version becomes available only at its documented actual full capture, in an explicit comparable clock domain. It cannot be backfilled into the two historical target times."
+  },
+  "source_contract": {
+    "schema": "expert81-desliming-source-semantics-v1",
+    "members": {
+      "desliming473": {"item_id": "TIA_3_3.TIA_3_3.473/RUNS", "node_id": "ns=2;s=TIA_3_3.TIA_3_3.473/RUNS"},
+      "desliming474": {"item_id": "TIA_3_3.TIA_3_3.474/RUNS", "node_id": "ns=2;s=TIA_3_3.TIA_3_3.474/RUNS"}
+    },
+    "group_policy": "Require the target's own verified six-switch combination and RUNS source domain. The completed input-only audit identifies ID204 as two-system group 0,1,1,0,1,0 and ID206 as three-system group 0,1,1,1,1,0, with one input case per group. Keep the two-system branch separate; do not count two sampling dates across these groups as same-group support. Do not merge domains merely because bits or system counts match.",
+    "legacy_policy": "Frozen if_prod observations are not proof of physical off. Old C7/E5 seed/calibration remains in its original source domain. Only independently evidenced overlap may support a separate parallel bridge audit; never rewrite frozen snapshots, groups, ledgers or reports.",
+    "runtime_requirement": "The current local shadow guard deliberately supports only its audited legacy if_prod artifact. The proposed RUNS pool requires a separately audited RUNS artifact and source contract before execution; adding a domain name to an unknown artifact is insufficient."
+  },
+  "proposed_operating_gates_not_universal_requirements": {
+    "status": "root approval required before locking",
+    "minimum_own_group_normal_labels": 5,
+    "minimum_own_group_sample_dates": 2,
+    "receipt_minimum_for_P2_bias": 3,
+    "interpretation": "Proposed numerical operating gates for this limited experiment only, not a general minimum for trainability and not a sample-size guarantee of 80 percent accuracy. There is one input-audited case in each of two different RUNS groups; unread target labels cannot be counted as eligible normal labels, and the groups must not be pooled to satisfy any gate.",
+    "fence": "Once per target from all then-available strict labels in the same verified RUNS group: linear Q1/Q3, inclusive [Q1-1.5*max(IQR,1pp), Q3+1.5*max(IQR,1pp)]. Shared normal denominator for P0/P1/P2. Never use target prediction error to classify or discard labels.",
+    "failure": "Explicit unavailable prediction and reason with coverage retained; do not borrow old if_prod history to pass a RUNS gate."
+  },
+  "fixed_pool_proposal": {
+    "P0": {"method": "Median of all eligible own-group normal RUNS labels available strictly before the target cutoff", "complexity": 0},
+    "P1": {
+      "method": "Current RUNS-domain own-group unconstrained level-only Huber-ridge using all eligible normal available history",
+      "huber_delta_pp": 1.0,
+      "ridge_lambda": 1.0,
+      "level_center": 50.0,
+      "level_scale": 10.0,
+      "intercept_penalty": 0,
+      "complexity": 1
+    },
+    "P2": {
+      "method": "P1 plus median completed prequential P1 residual * n/(n+5)",
+      "maximum_receipts": 5,
+      "maximum_sample_age_hours": 168,
+      "minimum_valid_receipts": 3,
+      "receipt_rule": "Use only source-matched, registry-verified immutable P1 predictions persisted and post-sealed before the actual later sample, with a complete label version and association available strictly before the next fit cutoff. Sort by sample time, identity and version; validate receipts before taking the last five. Never rebuild a missing receipt from a later fit.",
+      "insufficient_receipts": "P1 with zero residual bias, explicitly reported; this fallback is allowed only after P1's own source and training gates pass",
+      "bounds": "Reject nonfinite raw; clip P1 to [0,100] before adding bias; preserve base/raw/final values; clip final to [0,100]",
+      "complexity": 2
+    },
+    "shared_rules": "Same source-qualified targets within one exact group, strict information cutoffs, shared training fence and explicit coverage. Uniform finite checking and [0,100] output clipping. Fixed recorded 90-second level pairing for this proposal; the 60/90/120 input-only audit does not select a physical lag or multiply sample identities. No second shift of stored values, curve/window/weight grid or added candidate after viewing results. Use the already approved historical strict-versus-approximate rule recorded above for historical pairing; keep the 10-second online receipt rule separate. Supervised eligibility and execution remain subject to source/clock/version audit and root lock."
+  },
+  "chronology_and_roles": {
+    "historical": "Old main15, early8, tail6 and exposed six remain source-specific historical descriptions. They cannot select a RUNS-domain winner or become new independent validation.",
+    "records_204_206": "Keep target values unread now. Their completed input audit separates ID204 into two-system 0,1,1,0,1,0 and ID206 into three-system 0,1,1,1,1,0, one case per group. Pending root approval and label/time/version audit, they may supply future captured own-group seed/calibration versions only; they cannot score predictions retroactively fitted using themselves or later labels. No pre-sample RUNS-pool receipt exists for them. Reconstructed diagnostics, if separately authorized, must be labeled as such and never described as prospective evidence.",
+    "future_validation": "Use a newly locked RUNS artifact/run and persist predictions before actual sampling and before label receipt. Resolve the latest genuinely available version per assay before filtering group/source; an unusable or changed-source latest version suppresses its older version. The target identity and same-time versions are excluded from every training/calibration role.",
+    "two_system": "ID204 belongs to its own two-system RUNS group 0,1,1,0,1,0, with one input case only. Keep it separate from ID206 and the three-system P0/P1/P2 pool. Do not reuse three-system coefficients, old if_prod two-system coefficients or invent load/level thresholds; each domain/group needs its own evidence."
+  },
+  "evaluation_proposal": {
+    "goal": "Reduce legal forward normal-sample MAE while reporting the existing normal +/-1pp 80 percent stage target; no accuracy claim from training fit or metadata counts.",
+    "metrics": "Normal and all counts, MAE, +/-1pp hit counts/denominators, bias, per-date/group results, uncertainty and unavailable coverage. Raw/final and strict/approximate results remain separate.",
+    "comparators": "P0/P1/P2 share their RUNS source budget. Frozen EXPERT8 parameters may be a separately documented reference with its actual input source stated. Legacy C7/E5 source-ineligible cases are reported as unavailable; do not coerce coverage or treat old and RUNS inputs as interchangeable.",
+    "selection": "No model is selected by this draft. Before any labels are revealed for selection, root must lock the exact verified group, reporting cutoff, selection rule and proposed operating gates. No automatic activation or deployment."
+  },
+  "current_execution_status": {
+    "new_target_values_read": false,
+    "research_fit_performed": false,
+    "new_candidate_selected": false,
+    "continuous_collection_started": false,
+    "models_activated_or_deployed": false,
+    "completed_work": "Local-only legacy source-semantic guard, final 66 synthetic tests and passed independent source-identity probes; separately authorized input-only audit completed with 17 SQL/0 catalog GETs in 0.375s. Both samples have historical-strict 60/90/120 input pairs but belong to different groups with one case each. Existing frozen evidence preserved; no target labels read or research fit executed.",
+    "guard_independent_review": {"status": "passed", "reviewer": "runs_switch_review_nov3", "source_sha256": "ecd71193771a87376edf89b676901505077a4ee88ab2a592a6e1662a0f6bc270", "scope": "Read-only final source review and independent synthetic probes; legacy Bool-to-0 accepted, disguised RUNS raw node, raw/cell value conflict, missing raw node and RUNS domain rejected. No target labels or production reads."}
+  }
+}

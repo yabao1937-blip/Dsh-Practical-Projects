@@ -89,9 +89,9 @@ const GptExpert9 = {
             ${this.error?`<p role="alert">${e(this.error)}；当前展示上次读取的模型</p>`:''}
             <div class="gpt-expert-anchor"><div><small>精磁尾液位 25%</small><strong>23.00%</strong></div><div><small>参考工况 · 液位为主</small><strong>30.5 − 0.3 × 液位</strong></div><div><small>精磁尾液位 75%</small><strong>8.00%</strong></div></div>
             <p>其余 ${features.length-1} 个因素合计修正不超过 ±2 个灰分百分点。液位在 25–75% 外按边界估算参与决策，仍给出建议密度。</p>
-            <div class="gpt-expert-metrics">${metrics('历史拟合',r.historical_fit,'最终模型对训练记录回算')}${metrics('调参验证',selected.metrics,'开发窗口内，按完整日期向后验证')}${metrics('历史留后检验',r.forward_time_check.metrics,`${e(r.forward_time_check.start)} 至 ${e(r.forward_time_check.end)}；未用于本次选参`)}</div>
+            <details class="gpt-expert-legacy"><summary>旧训练集参考 · 与上方当前 DB 对比口径不同</summary><p>以下为现用模型原训练集的开发参考，不是当前数据库的全量评价。</p><div class="gpt-expert-metrics">${metrics('历史拟合',r.historical_fit,'最终模型对训练记录回算')}${metrics('调参验证',selected.metrics,'开发窗口内，按完整日期向后验证')}${metrics('历史留后检验',r.forward_time_check.metrics,`${e(r.forward_time_check.start)} 至 ${e(r.forward_time_check.end)}；未用于本次选参`)}</div>
             <p class="gpt-expert-caution">历史记录与专家关系存在明显差异；历史留后结果未超过均值基线（MAE ${fmt(r.forward_time_check.historical_mean.mae)}）。这些数据曾用于开发，不能作为新的独立验收结果。</p>
-            <section class="gpt-expert-chart"><h4>历史化验与新模型回算</h4><p><span class="gpt-series-actual">蓝线：历史化验</span>　<span class="gpt-series-pred">橙线：专家模型回算</span>　${g.n} 条正常生产记录 · ${m.days} 个日期</p>
+            </details><section class="gpt-expert-chart"><h4>原训练集化验与现用模型回算</h4><p><span class="gpt-series-actual">蓝线：历史化验</span>　<span class="gpt-series-pred">橙线：专家模型回算</span>　${g.n} 条正常生产记录 · ${m.days} 个日期</p>
             <svg viewBox="0 0 1040 255" role="img" aria-label="历史化验与专家模型预测对比；数值详见下方数据表">
             ${[0,1,2,3,4].map(i=>{const v=low+(high-low)*i/4;return `<line x1="50" x2="1000" y1="${py(v)}" y2="${py(v)}" stroke="currentColor" opacity=".12"/><text x="8" y="${py(v)+4}" fill="currentColor" font-size="13">${fmt(v,1)}%</text>`;}).join('')}
             <path d="${path('actual')}" fill="none" stroke="#478ce8" stroke-width="2"/><path d="${path('pred')}" fill="none" stroke="#de972e" stroke-width="2"/>

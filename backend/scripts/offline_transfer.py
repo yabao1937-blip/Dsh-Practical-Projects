@@ -34,6 +34,9 @@ def serve(output):
     storage_move = (output/'extras'/'MoveStorageToD.zip').resolve()
     advice_backfill = (output/'extras'/'BackfillHourlyAdvice.zip').resolve()
     yl_points = (output/'extras'/'UpdateYlPoints.zip').resolve()
+    runs_points = (output/'extras'/'AddRunsPoints.zip').resolve()
+    if not runs_points.is_relative_to(output.resolve()):
+        raise ValueError('RUNS point tool must stay inside the configured output directory')
     if not storage_move.is_relative_to(output.resolve()):
         raise ValueError('Storage migration must stay inside the configured output directory')
     if not advice_backfill.is_relative_to(output.resolve()):
@@ -57,6 +60,10 @@ def serve(output):
             if path == '/':
                 self.send_response(302)
                 self.send_header('Location', prefix+'/')
+                self.end_headers()
+            elif path == '/runs-points.zip' and runs_points.is_file():
+                self.send_response(302)
+                self.send_header('Location', prefix+'/runs-points.zip')
                 self.end_headers()
             elif path in (prefix, prefix+'/'):
                 storage = (f'<h2>C 盘空间：迁移数据到 D 盘</h2>'
@@ -86,7 +93,8 @@ def serve(output):
                 project = (f'<h2>已有主机：本次项目更新</h2>'
                     f'<p><a href="{prefix}/project-update.zip">下载本次项目更新包（保留主机数据库）</a></p>'
                     f'<p>右键 ZIP → 全部解压，进入文件夹，双击 <b>UpdateProject.cmd</b>。成功后按 Ctrl＋F5。</p>'
-                    f'<p>自动备份数据库和原程序，保留模型、历史数据和点位设置，应用本次更新配置。</p><hr>'
+                    f'<p>本次更新密度趋势三图，并将脱粉 473/474 切到 RUNS。按包内 README 先预检再分组件安装；'
+                    f'只备份本次受影响的源码、配置与迁移元数据，保留原始化验、历史数据和模型。</p><hr>'
                     if project_update.is_file() else '')
                 update = (f'<hr><h2>浏览器兼容更新</h2>'
                     f'<p><a href="{prefix}/browser-compat.zip">下载浏览器兼容更新包（无需重装系统）</a></p>'
@@ -97,9 +105,14 @@ def serve(output):
                     f'<p>下载完成后双击 MSI 文件安装，无需解压。安装时如出现 Windows 确认窗口，选择“是”。</p>'
                     f'<p>安装后用 Chrome 打开 <a href="http://127.0.0.1:8000/">http://127.0.0.1:8000/</a>。</p>'
                     if chrome.is_file() else '')
+                runs = (f'<h2>本次新增：脱粉 RUNS 诊断点</h2>'
+                    f'<p><a href="{prefix}/runs-points.zip">下载新增脱粉 RUNS 点位包（AddRunsPoints.zip）</a></p>'
+                    f'<p>全部解压后双击 <b>AddRunsPoints.cmd</b>。只追加 473、474 两路 RUNS，保留旧 if_prod 和模型绑定；'
+                    f'仅采集器短暂重启，网页保持运行。设备含义待明日现场对照。</p><hr>'
+                    if runs_points.is_file() else '')
                 content = (f'<!doctype html><meta charset="utf-8"><title>离线安装</title>'
                     f'<body style="font:22px sans-serif;padding:32px;line-height:1.7">'
-                    f'{storage}{project}{readonly}{backfill}{points}'+(f'<h2>主机故障诊断</h2><p><a href="{prefix}/diagnostics.zip">下载一键诊断包</a>：全部解压后运行 DiagnoseProject.cmd，不停止服务、不修改数据库。</p><hr>' if diagnostics.is_file() else '')+
+                    f'{runs}{storage}{project}{readonly}{backfill}{points}'+(f'<h2>主机故障诊断</h2><p><a href="{prefix}/diagnostics.zip">下载一键诊断包</a>：全部解压后运行 DiagnoseProject.cmd，不停止服务、不修改数据库。</p><hr>' if diagnostics.is_file() else '')+
                     f'<h2>首次安装 · Windows 10 64位 · 重介密控系统</h2>'
                     f'<p><a href="{prefix}/download.zip">下载离线安装包（{bundle.stat().st_size/1048576:.0f} MB）</a></p>'
                     f'<ol><li>下载完成后，右键 ZIP → 全部解压。</li>'
@@ -129,6 +142,8 @@ def serve(output):
                 self.download(advice_backfill, 'application/zip')
             elif path == prefix+'/yl-points.zip' and yl_points.is_file():
                 self.download(yl_points, 'application/zip')
+            elif path == prefix+'/runs-points.zip' and runs_points.is_file():
+                self.download(runs_points, 'application/zip')
             elif path == prefix+'/storage-move.zip' and storage_move.is_file():
                 self.download(storage_move, 'application/zip')
             else:

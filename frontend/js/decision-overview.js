@@ -154,6 +154,7 @@ const DecisionOverviewPage = {
             title:detail || reason || '暂无有效密度'};
     },
     pointDisplay(node) {
+        if(node.id==='density' && DecisionDensityDisplay.newVersionOnly()) return DecisionDensityDisplay.newDisplay(this,this.hourMode()?'hourly':'instant');
         if(this.hourMode()) return DecisionHourly.display(this,node);
         if (this.liveMode()) {
             if (['coarse','density'].includes(node.id)) return DecisionRealtime.display(this,node);
@@ -931,7 +932,8 @@ const DecisionOverviewPage = {
         const hourly=this.hourMode(),hourResult=hourly?DecisionHourly.presentation():null;
         const hourlyGaps=hourly?DecisionHourly.dataGaps(hourResult):new Map();
         const densityRoot=this.nodes.find(n=>n.id==='density');
-        const hourSummary=typeof DecisionHourly!=='undefined'?DecisionHourly.summary(this,densityRoot):'';
+        const newDensityOnly=DecisionDensityDisplay.newVersionOnly();
+        const hourSummary=newDensityOnly?DecisionDensityDisplay.newSummary(this,densityRoot):typeof DecisionHourly!=='undefined'?DecisionHourly.summary(this,densityRoot):'';
         const sharedTarget=this.sharedSources()?{min:DecisionSources.config?.target_min,max:DecisionSources.config?.target_max}:null;
         const target = hourly ? (hourResult?.target || sharedTarget) : sharedTarget || targetAsh;
         const formatTarget=value=>this.liveMode()?Number(value.toFixed(2)):this.number(value,1);
@@ -962,10 +964,10 @@ const DecisionOverviewPage = {
             const active = node.id === this.selected;
             const display = displays.get(node.id), root = node.id === 'density';
             const compact=this.view==='gpt' && !root;
-            const gap=hourlyGaps.get(node.id);
+            const gap=newDensityOnly && node.id==='density'?null:hourlyGaps.get(node.id);
             const preview = node.id === 'coarse' && !this.liveMode() ? `<span>查看${this.view === 'gpt' ? ' GPT' : '生产'}预测 ${this.number(s.prediction,2,'%')}${!s.model ? ' · 未训练' : s.previewOnly ? ' · 对照' : ' · 未平滑'}</span>` : '';
             const unit = node.id === 'density' ? '<span class="decision-root-unit">g/cm³</span>' : '';
-            const sub = node.id === 'density' ? `<span>${hourly?(DecisionHourly.anchored(hourResult)?'本小时设定基准':hourResult?.advice_policy==='gpt-hourly-setpoint-v2'?'当前设定':DecisionHourly.qualityPolicy(hourResult)?'小时均值':'小时末'):'当前'} ${this.number(hourly?hourResult?.guidance?.rhoCur:this.liveMode()?displays.get('density-current').numericValue:s.guide.rhoCur,3)}${this.liveMode()?' · '+this.escape(this.densityLabel()):''}</span><span>目标灰分范围${hourSummary?`<span class="decision-density-target">${targetAshRange}</span>`:' '+targetAshRange}</span>` : '';
+            const sub = node.id === 'density' && newDensityOnly ? `<span>当前设定 ${this.number((hourly?hourResult:DecisionRealtime.presentation())?.density_suggestion?.setting?.value,3)} g/cm³</span><span>目标灰分 ${targetAshRange}</span>` : node.id === 'density' ? `<span>${hourly?(DecisionHourly.anchored(hourResult)?'本小时设定基准':hourResult?.advice_policy==='gpt-hourly-setpoint-v2'?'当前设定':DecisionHourly.qualityPolicy(hourResult)?'小时均值':'小时末'):'当前'} ${this.number(hourly?hourResult?.guidance?.rhoCur:this.liveMode()?displays.get('density-current').numericValue:s.guide.rhoCur,3)}${this.liveMode()?' · '+this.escape(this.densityLabel()):''}</span><span>目标灰分范围${hourSummary?`<span class="decision-density-target">${targetAshRange}</span>`:' '+targetAshRange}</span>` : '';
             const phase = -((now+index*.41)%5).toFixed(3);
             const badge = compact ? `<span class="decision-badge">${this.sourceBadge(node,display)}</span>` : gap ? `<span class="decision-badge">${this.escape(gap.label)}</span>` : display.aggregate || display.calculated || display.shared ? `<span class="decision-badge">${display.badge}</span>` : display.bound && !root ? `<span class="decision-badge">${display.manual ? (display.held ? '待刷新' : display.available ? '补录' : '无补录') : display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
             const compare = display.bound && root ? `<span class="decision-live-comparison">采集对照 ${this.escape(display.value)}${display.available ? '' : '（不可用）'}</span>` : '';
@@ -974,9 +976,9 @@ const DecisionOverviewPage = {
             const amountHtml=componentAmount?`<span class="decision-component-amount">煤量 ${this.escape(componentAmount)}</span>`:'';
             const valueClass=root && display.value==='暂无有效值'?' decision-value-empty':'';
             const content = root && hourSummary
-                ? `<span class="decision-node-heading">即时建议密度</span><span class="decision-node-value${valueClass}">${groupHtml}${unit}</span><span class="decision-node-source"><span>目标灰分 ${targetAshRange}</span></span>`
+                ? `<span class="decision-node-heading">${newDensityOnly ? '建议密度（新版·即时）' : '即时建议密度'}</span><span class="decision-node-value${valueClass}">${groupHtml}${unit}</span><span class="decision-node-source"><span>目标灰分 ${targetAshRange}</span></span>`
                 : compact ? `<span class="decision-node-heading">${this.escape(hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value${valueClass}">${groupHtml}${unit}${amountHtml}</span>`
-                : `<span class="decision-node-heading">${this.escape(hourly && root?'本小时建议密度':hourSummary && root?'即时建议密度':hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value${valueClass}">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(gap ? gap.message : root && !this.liveMode() ? node.source : display.source)}</span>${sub}${preview}${compare}</span>`;
+                : `<span class="decision-node-heading">${this.escape(newDensityOnly && root?'建议密度（新版）':hourly && root?'本小时建议密度':hourSummary && root?'即时建议密度':hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value${valueClass}">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(gap ? gap.message : root && !this.liveMode() ? node.source : display.source)}</span>${sub}${preview}${compare}</span>`;
             return `<button type="button" class="decision-node${hourly?DecisionHourly.gapClass(gap):''}${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${display.pending ? ' is-updating' : ''}${(display.bound || display.aggregate || display.calculated) && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}${root && hourSummary?' decision-density-instant':''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" aria-busy="${!!display.pending}"${display.bound || display.aggregate || display.calculated ? ` title="${this.escape(root && display.held ? display.title : gap?.reason || display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-node-height:${node.h}px;--dm-pulse-delay:${phase}s">${content}${this.heartbeatMarkup(node,display)}</button>`;
         }).join('');
         const shown=hourly?hourResult:this.liveMode()?DecisionRealtime.presentation():null,pending=hourly?DecisionHourly.pending():this.liveMode() && DecisionRealtime.pending();
@@ -1007,6 +1009,7 @@ const DecisionOverviewPage = {
         const scrollTop = document.getElementById('decision-inspector').scrollTop || 0;
         const node = this.nodes.find(n => n.id === this.selected) || this.nodes[0], s = this.snapshot;
         const display = this.pointDisplay(node);
+        if(display.newVersion) { this.renderHTML('decision-inspector',DecisionDensityDisplay.newInspector(this,this.hourMode()?'hourly':'instant'));this.queueInspectorPosition();return; }
         if(this.hourMode()) { DecisionHourly.inspector(this,node); return; }
         if (display.aggregate || display.calculated) {
             const details = (display.summaryParts || display.inputs).map(part => {
