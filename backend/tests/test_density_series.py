@@ -146,3 +146,40 @@ def test_series_get_reads_only_verified_files_and_end_is_exclusive(client,tmp_pa
     assert result['period']['end_exclusive'] is True
     assert result['suggestions'][0]['at']<result['period']['end']
     assert client.get('/api/v1/decision/evidence/density-series',params={'limit':720}).status_code==422
+
+
+def _write_snapshot(root,suffix,period_end):
+    """Minimal checksum-valid snapshot dir; returns its series payload period end."""
+    directory=root/f'output/density-optimization-db7-{suffix}'
+    (directory/'raw').mkdir(parents=True,exist_ok=True)
+    payload=dict(density_policy='density-candidate-v1',policy='density-candidate-v1',experimental=True,
+        period=dict(start=iso_time(period_end-timedelta(days=7)),end=iso_time(period_end)),ash=[],source={},suggestions=[])
+    encoded=json.dumps(payload).encode();(directory/'series.json').write_bytes(encoded)
+    (directory/'manifest.json').write_text(json.dumps(dict(
+        series=dict(sha256=sha256(encoded).hexdigest()),artifacts=[])))
+    return directory
+
+
+def test_series_serves_newest_snapshot_and_names_it(client,tmp_path,monkeypatch):
+    """2026-11-06：read_frozen 取最新 dated 快照目录，并在 source.snapshot 标明来源。"""
+    monkeypatch.setenv('DMCS_DENSITY_EXPERIMENT','1')
+    monkeypatch.setattr('app.config.BASE_DIR',tmp_path/'backend')
+    older_end=HOUR-timedelta(days=2); newer_end=HOUR
+    _write_snapshot(tmp_path,'20261104',older_end)
+    _write_snapshot(tmp_path,'20261106',newer_end)
+    result=client.get('/api/v1/decision/evidence/density-series').json()
+    assert result['period']['end']==iso_time(newer_end)          # 新窗口生效
+    assert result['source']['snapshot']=='density-optimization-db7-20261106'
+
+
+def test_series_falls_back_when_newest_snapshot_is_corrupt(client,tmp_path,monkeypatch):
+    """最新快照校验失败时回退到旧快照，而不是 503。"""
+    monkeypatch.setenv('DMCS_DENSITY_EXPERIMENT','1')
+    monkeypatch.setattr('app.config.BASE_DIR',tmp_path/'backend')
+    older_end=HOUR-timedelta(days=2); newer_end=HOUR
+    _write_snapshot(tmp_path,'20261104',older_end)
+    broken=_write_snapshot(tmp_path,'20261106',newer_end)
+    (broken/'series.json').write_bytes(b'{"tampered":true}')      # 与 manifest 校验和不符
+    result=client.get('/api/v1/decision/evidence/density-series').json()
+    assert result['period']['end']==iso_time(older_end)
+    assert result['source']['snapshot']=='density-optimization-db7-20261104'

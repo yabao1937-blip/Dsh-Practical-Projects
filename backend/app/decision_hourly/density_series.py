@@ -252,14 +252,33 @@ def _frozen(path, modified):
     return result,with_gap_markers(points)
 
 
-def read_frozen(hours=168, start=None, end=None):
-    """No DB queries or writes. Reuse the task's fixed, verified seven-day inputs."""
+def _snapshot_dirs():
+    """All frozen DB7 snapshot dirs with a series file, newest first (name sort).
+    Manifest/artifact verification happens inside _frozen; corrupt newest dirs fall back."""
     from ..config import BASE_DIR
+    base = BASE_DIR.parent/'output'
+    return sorted((p for p in base.glob('density-optimization-db7-*')
+        if p.is_dir() and (p/'series.json').is_file()), reverse=True)
+
+
+def _load_latest_frozen():
+    """Newest snapshot that passes manifest/artifact verification; falls back to older ones."""
+    problems=[]
+    for directory in _snapshot_dirs():
+        path=directory/'series.json'
+        try:
+            return _frozen(str(path),path.stat().st_mtime_ns),directory
+        except (OSError,ValueError,KeyError,TypeError) as error:
+            problems.append(f'{directory.name}: {error}')
+    raise FileNotFoundError('; '.join(problems) or 'no density-optimization-db7-* snapshot directory')
+
+
+def read_frozen(hours=168, start=None, end=None):
+    """No DB queries or writes. Serve the latest verified frozen seven-day recalculation."""
     from .density_candidates import require_enabled
     require_enabled()
-    path=BASE_DIR.parent/'output/density-optimization-db7-20261104/series.json'
     try:
-        source,all_points=_frozen(str(path),path.stat().st_mtime_ns)
+        (source,all_points),snapshot=_load_latest_frozen()
     except (OSError,ValueError,KeyError,TypeError):
         raise HTTPException(503,detail=dict(density_policy='density-candidate-v1',
             message='新版本七天数据库重算文件尚未就绪或校验失败')) from None
@@ -284,6 +303,7 @@ def read_frozen(hours=168, start=None, end=None):
     result['channels']=dict(A304=channel_points(plotted,'setpoint'),actual=channel_points(plotted,'actual'))
     result['ash']=[p for p in result['ash'] if start<=timestamp(p['at'])<end]
     result['source']['fixed_window']=deepcopy(source['period'])
+    result['source']['snapshot']=snapshot.name
     hours_final,hours_summary=hourly_finals(all_points,start,end)
     result.update(hourly_suggestions=hours_final,hourly_summary=hours_summary,
         latest_completed_hour=deepcopy(hours_final[-1]) if hours_final else None)

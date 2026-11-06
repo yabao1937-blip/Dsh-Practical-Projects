@@ -28,18 +28,20 @@ def write(path,value):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--end')
+    parser.add_argument('--out',help='snapshot directory name under output/ (default: density-optimization-db7-<END DATE>)')
     args=parser.parse_args()
     if not REMOTE_READONLY:
         raise RuntimeError('Remote readonly-test is required; no local database fallback')
     root=Path(__file__).resolve().parents[2]
-    out=root/'output/density-optimization-db7-20261104'
-    raw=out/'raw'
-    raw.mkdir(parents=True,exist_ok=True)
     with SessionLocal() as db:
         host_now=parse_time(db.execute(text("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')")).scalar_one())
         end=parse_time(args.end) if args.end else host_now.replace(second=0,microsecond=0)
         if end>host_now or end.second or end.microsecond:
             raise ValueError('end must be a non-future aware minute boundary')
+    out=root/'output'/(args.out or 'density-optimization-db7-'+end.strftime('%Y%m%d'))
+    raw=out/'raw'
+    raw.mkdir(parents=True,exist_ok=True)
+    with SessionLocal() as db:
         start=end-timedelta(days=7)
         points=advice_points(db,start,end)
         actions=list(db.scalars(select(DensityAction).where(DensityAction.channel=='A304',
