@@ -341,3 +341,15 @@ body:has(#page-decision.active) .nav-item.active { background: transparent; colo
 .is-instant-layout .decision-density-instant.has-flow::after { display:none; }
 .is-instant-layout .decision-density-instant.is-selected { outline:1px solid var(--dm-muted); outline-offset:3px; box-shadow:none; }
 .is-instant-layout .decision-density-instant:focus-visible { outline:3px solid var(--dm-cyan); outline-offset:3px; }
+
+/* 2026-11-06 目标灰分并入建议密度卡片 + 标题角太阳图标 */
+.decision-title-wrap { position:relative; display:inline-flex; align-items:flex-start; }
+.decision-theme-icon { position:absolute; right:-36px; top:8px; width:30px; height:30px; display:inline-flex;
+    align-items:center; justify-content:center; border:1px solid var(--ds-rule); border-radius:50%;
+    background:transparent; color:var(--ds-muted); cursor:pointer; padding:0; transition:color .15s ease, border-color .15s ease; }
+.decision-theme-icon:hover { color:var(--ds-accent,#293be3); border-color:var(--ds-accent,#293be3); }
+.decision-theme-icon svg { display:block; }
+.decision-target-inline { cursor:pointer; }
+.decision-target-inline .decision-density-target, .decision-target-inline { text-decoration:underline dotted transparent; text-underline-offset:3px; transition:text-decoration-color .15s ease; }
+.decision-target-inline:hover { text-decoration-color:currentColor; }
+@media (max-width:760px) { .decision-theme-icon { right:-32px; top:4px; width:26px; height:26px; } }

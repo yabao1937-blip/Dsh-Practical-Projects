@@ -424,15 +424,15 @@ const DecisionOverviewPage = {
             this.closeInspector(false); this.refresh();
         }));
         if (typeof DecisionBackground !== 'undefined') this.background = new DecisionBackground(document.getElementById('decision-background-flow'));
-        document.getElementById('decision-refresh').addEventListener('click', () => {
+        document.getElementById('decision-refresh')?.addEventListener('click', () => {
             this.sourceInteractionUntil = 0;
             this.refresh();
             if (typeof DecisionRecentAsh !== 'undefined') DecisionRecentAsh.update(this,true);
             if (window.Operations) window.Operations.refresh().then(() => this.renderInspector());
         });
-        document.getElementById('decision-theme').addEventListener('click', event => {
+        document.getElementById('decision-theme')?.addEventListener('click', event => {
             const light = document.getElementById('decision-workspace').classList.toggle('is-light');
-            event.currentTarget.textContent = light ? '深色视图' : '浅色视图';
+            this.syncThemeIcon(light);
             if (typeof DecisionCoarseCharts !== 'undefined') DecisionCoarseCharts.refresh();
             if (typeof DecisionFloatAnalysis !== 'undefined') DecisionFloatAnalysis.refresh();
         });
@@ -465,6 +465,7 @@ const DecisionOverviewPage = {
             if (event.target.closest('[data-ash-history]') && this.view === 'gpt') { DecisionAshHistory.open(this); return; }
         });
         document.getElementById('decision-canvas-scroll').addEventListener('click', event => {
+            if (event.target.closest('[data-target-open]')) return;   // 目标灰分编辑入口，不触发选卡
             const node = event.target.closest('[data-decision-node]');
             if (node) { this.select(node.dataset.decisionNode); return; }
             if (!event.target.closest('.decision-formula,button,a,input,select,textarea,label,[contenteditable="true"]')) this.closeInspector(false);
@@ -516,6 +517,7 @@ const DecisionOverviewPage = {
         this.timer = setInterval(() => {
             if (this.active() && !document.hidden && Date.now() > this.sourceInteractionUntil) this.refresh();
         }, 5000);
+        this.syncThemeIcon(document.getElementById('decision-workspace').classList.contains('is-light'));
         this.refresh();
     },
     refresh() {
@@ -959,7 +961,7 @@ const DecisionOverviewPage = {
             const gap=newDensityOnly && node.id==='density'?null:hourlyGaps.get(node.id);
             const preview = node.id === 'coarse' && !this.liveMode() ? `<span>查看${this.view === 'gpt' ? ' GPT' : '生产'}预测 ${this.number(s.prediction,2,'%')}${!s.model ? ' · 未训练' : s.previewOnly ? ' · 对照' : ' · 未平滑'}</span>` : '';
             const unit = node.id === 'density' ? '<span class="decision-root-unit">g/cm³</span>' : '';
-            const sub = node.id === 'density' && newDensityOnly ? `<span>当前设定 ${this.number((hourly?hourResult:DecisionRealtime.presentation())?.density_suggestion?.setting?.value,3)} g/cm³</span><span>目标灰分 ${targetAshRange}</span>` : node.id === 'density' ? `<span>${hourly?(DecisionHourly.anchored(hourResult)?'本小时设定基准':hourResult?.advice_policy==='gpt-hourly-setpoint-v2'?'当前设定':DecisionHourly.qualityPolicy(hourResult)?'小时均值':'小时末'):'当前'} ${this.number(hourly?hourResult?.guidance?.rhoCur:this.liveMode()?displays.get('density-current').numericValue:s.guide.rhoCur,3)}${this.liveMode()?' · '+this.escape(this.densityLabel()):''}</span><span>目标灰分范围${hourSummary?`<span class="decision-density-target">${targetAshRange}</span>`:' '+targetAshRange}</span>` : '';
+            const sub = node.id === 'density' && newDensityOnly ? `<span>当前设定 ${this.number((hourly?hourResult:DecisionRealtime.presentation())?.density_suggestion?.setting?.value,3)} g/cm³</span><span class="decision-target-inline" role="button" tabindex="-1" data-target-open title="点击修改目标灰分范围">目标灰分 ${targetAshRange}</span>` : node.id === 'density' ? `<span>${hourly?(DecisionHourly.anchored(hourResult)?'本小时设定基准':hourResult?.advice_policy==='gpt-hourly-setpoint-v2'?'当前设定':DecisionHourly.qualityPolicy(hourResult)?'小时均值':'小时末'):'当前'} ${this.number(hourly?hourResult?.guidance?.rhoCur:this.liveMode()?displays.get('density-current').numericValue:s.guide.rhoCur,3)}${this.liveMode()?' · '+this.escape(this.densityLabel()):''}</span><span class="decision-target-inline" role="button" tabindex="-1" data-target-open title="点击修改目标灰分范围">目标灰分范围${hourSummary?`<span class="decision-density-target">${targetAshRange}</span>`:' '+targetAshRange}</span>` : '';
             const phase = -((now+index*.41)%5).toFixed(3);
             const badge = compact ? `<span class="decision-badge">${this.sourceBadge(node,display)}</span>` : gap ? `<span class="decision-badge">${this.escape(gap.label)}</span>` : display.aggregate || display.calculated || display.shared ? `<span class="decision-badge">${display.badge}</span>` : display.bound && !root ? `<span class="decision-badge">${display.manual ? (display.held ? '待刷新' : display.available ? '补录' : '无补录') : display.stopped ? '设备停机' : display.held ? '沿用' : display.available ? '采集' : '不可用'}</span>` : node.reference ? '<span class="decision-badge">对照</span>' : '';
             const compare = display.bound && root ? `<span class="decision-live-comparison">采集对照 ${this.escape(display.value)}${display.available ? '' : '（不可用）'}</span>` : '';
@@ -968,7 +970,7 @@ const DecisionOverviewPage = {
             const amountHtml=componentAmount?`<span class="decision-component-amount">煤量 ${this.escape(componentAmount)}</span>`:'';
             const valueClass=root && display.value==='暂无有效值'?' decision-value-empty':'';
             const content = root && hourSummary
-                ? `<span class="decision-node-heading">${newDensityOnly ? '建议密度（新版·即时）' : '即时建议密度'}</span><span class="decision-node-value${valueClass}">${groupHtml}${unit}</span><span class="decision-node-source"><span>目标灰分 ${targetAshRange}</span></span>`
+                ? `<span class="decision-node-heading">${newDensityOnly ? '建议密度（新版·即时）' : '即时建议密度'}</span><span class="decision-node-value${valueClass}">${groupHtml}${unit}</span><span class="decision-node-source"><span class="decision-target-inline" role="button" tabindex="-1" data-target-open title="点击修改目标灰分范围">目标灰分 ${targetAshRange}</span></span>`
                 : compact ? `<span class="decision-node-heading">${this.escape(hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value${valueClass}">${groupHtml}${unit}${amountHtml}</span>`
                 : `<span class="decision-node-heading">${this.escape(newDensityOnly && root?'建议密度（新版）':hourly && root?'本小时建议密度':hourSummary && root?'即时建议密度':hourly && node.id==='density-current'?'小时平均密度':node.title)}${badge}</span><span class="decision-node-value${valueClass}">${groupHtml}${unit}</span><span class="decision-node-source"><span>${this.escape(gap ? gap.message : root && !this.liveMode() ? node.source : display.source)}</span>${sub}${preview}${compare}</span>`;
             return `<button type="button" class="decision-node${hourly?DecisionHourly.gapClass(gap):''}${active ? ' is-selected' : ''}${flowingIds.has(node.id) ? ' has-flow' : ''}${display.bound ? ' is-telemetry' : ''}${display.components ? ' is-state-group' : ''}${display.pending ? ' is-updating' : ''}${(display.bound || display.aggregate || display.calculated) && !display.available ? ' is-telemetry-unavailable' : ''}${node.type === 'root' ? ' decision-root' : node.type === 'component' ? ' decision-component' : ''}${root && hourSummary?' decision-density-instant':''}" data-decision-node="${node.id}" data-family="${node.family || 'root'}" aria-pressed="${active}" aria-busy="${!!display.pending}"${display.bound || display.aggregate || display.calculated ? ` title="${this.escape(root && display.held ? display.title : gap?.reason || display.title)}"` : ''} style="left:${node.x}px;top:${node.y}px;width:${node.w}px;min-height:${node.h}px;--dm-node-height:${node.h}px;--dm-pulse-delay:${phase}s">${content}${this.heartbeatMarkup(node,display)}</button>`;
@@ -988,6 +990,13 @@ const DecisionOverviewPage = {
         if(typeof DecisionRecentAsh!=='undefined') DecisionRecentAsh.position(this);
     },
 
+    syncThemeIcon(light) {
+        const button=document.getElementById('decision-theme'); if(!button) return;
+        const sun=button.querySelector('.icon-sun'), moon=button.querySelector('.icon-moon');
+        if(sun&&moon){ sun.hidden=!!light; moon.hidden=!light; }   // 浅色态显示月亮（点击转深），深色态显示太阳
+        button.setAttribute('aria-label', light?'切换到深色视图':'切换到浅色视图');
+        button.title = light?'切换到深色视图':'切换到浅色视图';
+    },
     telemetryState(item, failed = window.Operations?.telemetryFailed) {
         if (item?.kind === 'manual_measurement') return window.Operations?.manualMeasurementsFailed ? '补录查询失败 · 显示上次读取值，待刷新' : item.available ? '已保存到 SQLite · 按测量时间取最新' : '暂无已到时的有效补录';
         const labels = {good:'可用',no_data:'无数据',bad_quality:'坏质量',uncertain_quality:'质量不确定',stale:'接收超时',source_stale:'源时间过期',collector_offline:'采集离线',out_of_range:'超出量程',invalid_value_type:'类型不匹配',non_finite_value:'数值无效',future_source_time:'源时钟异常',incomplete_components:'组合数据未齐',member_unavailable:'部分成员不可用',mixed_batches:'成员接收批次不一致',unit_mismatch:'成员单位不一致'};

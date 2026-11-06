@@ -5,7 +5,12 @@ const DecisionTarget = {
         if(this.initialized) return;
         this.initialized=true;
         this.page=page;
-        document.getElementById('decision-target-open').addEventListener('click',()=>this.opened?this.close():this.open(page));
+        // 2026-11-06：入口从页头按钮改为卡片内目标灰分（span，卡片本身是 button 不能嵌套）
+        document.addEventListener('click',event=>{
+            if(!event.target.closest('[data-target-open]')) return;
+            if(event.target.closest('#decision-target-form')) return;
+            this.opened?this.close():this.open(this.page);
+        });
         document.getElementById('decision-target-cancel').addEventListener('click',()=>this.close());
         document.getElementById('decision-target-form').addEventListener('submit',event=>{event.preventDefault();this.submit(page);});
         document.getElementById('decision-target-form').addEventListener('keydown',event=>{
@@ -13,12 +18,7 @@ const DecisionTarget = {
         });
     },
     sync(page) {
-        const button=document.getElementById('decision-target-open');
-        if(!button) return;
-        button.hidden=!DecisionSources.enabled(page);
-        const c=DecisionSources.config;
-        button.textContent=c?`目标灰分 ${c.target_min}–${c.target_max}%`:'目标灰分范围';
-        // Polls and another workstation's changes must not overwrite a draft.
+        // 触发按钮已并入建议密度卡片（由 renderGraph 渲染最新范围）；此处仅保留表单可见性兼容。
     },
     message(text) { document.getElementById('decision-target-status').textContent=text; },
     async open(page) {
@@ -32,7 +32,7 @@ const DecisionTarget = {
             document.getElementById('decision-target-min').value=DecisionSources.config.target_min;
             document.getElementById('decision-target-max').value=DecisionSources.config.target_max;
             document.getElementById('decision-target-form').hidden=false;
-            document.getElementById('decision-target-open').setAttribute('aria-expanded','true');
+            document.getElementById('decision-target-open')?.setAttribute('aria-expanded','true');
             const readOnly=!!Api.isReadOnlyTest?.();
             const fields=document.getElementById('decision-target-fields');
             fields.disabled=false;
@@ -46,8 +46,8 @@ const DecisionTarget = {
         if(this.busy) return;
         this.opened=false;
         document.getElementById('decision-target-form').hidden=true;
-        document.getElementById('decision-target-open').setAttribute('aria-expanded','false');
-        document.getElementById('decision-target-open').focus();
+        const trigger=document.getElementById('decision-target-open');
+        if(trigger){trigger.setAttribute('aria-expanded','false');trigger.focus();}
     },
     async submit(page) {
         if(this.busy) return;
