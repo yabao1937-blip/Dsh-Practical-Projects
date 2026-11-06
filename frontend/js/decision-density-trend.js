@@ -197,7 +197,9 @@ const DensityTrendPage = {
     },
     connected(a, b) {
         if (!a || !b || a.key !== b.key || !Number.isFinite(a.value) || !Number.isFinite(b.value)) return false;
-        if ((this.laid || []).length && !this.sameBlock(a.t, b.t)) return false;
+        // 设定密度是阀门保持值：删掉停机段的采样后仍连成一条线，跨段处按"保持上一个设定"画水平再接台阶。
+        // 实测密度是测量值，停机段没有测量，仍在接缝处断开；建议线由下面的整点规则断开。
+        if ((this.laid || []).length && !this.sameBlock(a.t, b.t)) return a.key === 'A304';
         if (b.break_before) return false;
         if(b.key==='advice') return b.t-a.t===3600000;
         return b.t>=a.t;
@@ -611,7 +613,8 @@ const DensityTrendPage = {
                     ctx.lineTo(x(p.t),y(p.value));ctx.stroke();
                 }
                 const px=x(p.t);
-                if(px===null){previous=null;continue;}
+                // 停机段里的采样：不画点，但保留 previous，设定密度线才能跨段连起来。
+                if(px===null) continue;
                 const py=p.value===null?top+height-4:y(p.value);
                 if(p.value!==null){
                     const marker=kind==='advice'?(index%stride===0 || !this.connected(previous,p)):
