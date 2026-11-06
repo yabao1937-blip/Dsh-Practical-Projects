@@ -25,7 +25,8 @@ def apply(raw, candidate):
         deltaRho=step['delta'],direction='unavailable' if step['delta'] is None else
         'stable' if abs(step['delta'])<.0005 else 'up' if step['delta']>0 else 'down',
         hold=step['status']!='adjust',reason=advice['reason'],
-        execution_state=step['status'],channels={},maxStep=candidate['parameters']['max_step'])
+        execution_state=step['status'],channels={},maxStep=candidate['parameters']['max_step'],
+        rhoTarget=step.get('rho_target'),targetDirection=step.get('target_direction'))
     result.update(density_policy=POLICY,advice_policy=POLICY,suggested_density=advice,
         density_suggestion=deepcopy(candidate),guidance=guide,execution_guidance=deepcopy(guide),
         advice_frozen=False,density_label='A304',density_version='database-trial-v1')

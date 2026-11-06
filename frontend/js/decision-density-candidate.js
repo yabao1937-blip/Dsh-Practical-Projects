@@ -55,13 +55,18 @@ window.DensityCandidatePanel = {
             : `实测不可用于判断（${readingStatus}） · 观测于 ${this.time(reading.observed_at)}`;
         const fullyAfter = observation.ash_fully_after_action === true ? '灰分生产窗口完整位于本次调密之后' :
             observation.ash_fully_after_action === false ? '灰分生产窗口尚未完整位于本次调密之后' : '调后完整灰分窗口尚未确认';
+        const aim = Number.isFinite(candidate.rho_target) && candidate.rho_target !== candidate.value
+            ? ` · 趋向 ${this.num(candidate.rho_target)}（${candidate.target_direction === 'up' ? '升' : candidate.target_direction === 'down' ? '降' : '平'}）` : '';
+        const sens = data.basis?.ash_sensitivity;
+        const sensTag = sens?.provisional === true && Number.isFinite(sens.distance_pp)
+            ? ` · 暂估距界 ${this.num(sens.distance_pp, 2)}pp` : '';
         document.getElementById('density-candidate-current').innerHTML = `
             <div class="density-candidate-values">
                 <div><h4>当前 A304 设定</h4><p class="density-candidate-number">${this.num(setting.value)} <span>g/cm³</span></p><p class="density-trend-note">观测于 ${this.esc(this.time(setting.at))}</p></div>
-                <div class="density-candidate-action" data-status="${status}"><h4>建议密度（新版） · ${this.status(status)}</h4><p class="density-candidate-number">${usable ? this.num(candidate.value) : '—'} <span>${usable ? 'g/cm³' : this.status(status)}</span></p><p class="density-trend-note">${status==='wait' && usable ? '等待期间保留当前设定，不作为调整指令' : usable ? `相对当前设定 ${this.signed(candidate.delta)} g/cm³` : '缺少可用建议值，原因见下方'}</p></div>
+                <div class="density-candidate-action" data-status="${status}"><h4>建议密度（新版） · ${this.status(status)}</h4><p class="density-candidate-number">${usable ? this.num(candidate.value) : '—'} <span>${usable ? 'g/cm³' : this.status(status)}</span></p><p class="density-trend-note">${status==='wait' && usable ? `等待期间保留当前设定，不作为调整指令${this.esc(aim)}` : usable ? `相对当前设定 ${this.signed(candidate.delta)} g/cm³${this.esc(aim)}` : '缺少可用建议值，原因见下方'}</p></div>
             </div>
             <div class="density-candidate-basis">
-                <div><h4>灰分依据 · ${this.quality(quality.level)}</h4><p>${this.num(ash.value,2)} % · ${this.band(data.basis?.band)}${Number.isFinite(target.min) && Number.isFinite(target.max) ? `（目标 ${this.num(target.min,2)}–${this.num(target.max,2)} %）` : ''}</p><p class="density-trend-note">生产时段 ${this.esc(this.time(ash.start))} — ${this.esc(this.time(ash.end))}</p></div>
+                <div><h4>灰分依据 · ${this.quality(quality.level)}</h4><p>${this.num(ash.value,2)} % · ${this.band(data.basis?.band)}${Number.isFinite(target.min) && Number.isFinite(target.max) ? `（目标 ${this.num(target.min,2)}–${this.num(target.max,2)} %）` : ''}${this.esc(sensTag)}</p><p class="density-trend-note">生产时段 ${this.esc(this.time(ash.start))} — ${this.esc(this.time(ash.end))}</p></div>
                 <div><h4>为什么这样建议</h4><p>${reasons.length ? reasons.map(r=>this.esc(r)).join('；') : '新版规则未返回明确依据，暂不作操作判断。'}</p><p class="density-trend-note">${this.esc(fullyAfter)}${observation.after_at ? ` · 最近调密后观测 ${this.esc(this.time(observation.after_at))}` : ''}</p><p class="density-trend-note">${this.esc(readingLine)}</p><p class="density-trend-note">${this.esc(actual)}</p></div>
             </div>
             <p class="density-trend-note density-candidate-step">单步上限：常规 ${this.num(data.parameters?.max_step)} / 暂估 ${this.num(data.parameters?.provisional_step)} g/cm³；工程参数，尚未验证执行收益。</p>

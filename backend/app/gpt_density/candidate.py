@@ -81,7 +81,8 @@ def evaluate_candidate(evidence, parameters=None):
         evaluated_at=iso_time(now) if now else e.get('evaluated_at'),
         setting=dict(value=current, raw_value=raw, at=cell.get('observed_at'), channel='A304'),
         reference=ref, basis=dict(ash=deepcopy(ash), target=deepcopy(target), band='unknown'),
-        candidate=dict(value=None, status='unavailable', delta=None, reason_codes=[], reasons=[]),
+        candidate=dict(value=None, status='unavailable', delta=None, reason_codes=[], reasons=[],
+            rho_target=None, target_direction=None),
         observation=dict(state='unknown', action_id=None, before_at=None, after_at=None,
             ash_fully_after_action=None, actual_response='unknown'),
         quality=dict(level='unavailable', notes=[]), parameters=asdict(p),
@@ -156,6 +157,12 @@ def evaluate_candidate(evidence, parameters=None):
     if (generated is None or generated > now or not number(ref.get('value'))
             or ref.get('status') != 'calculated'):
         return finish('unavailable', 'reference_unavailable', '原小时参考缺失、后台结算中或晚于评估时刻')
+    # 2026-11-06 优化：执行状态与趋向目标分离——等待/保持时 value 保持当前设定，
+    # 但操作员仍能看到规则正在趋向的多步目标参考（只披露，不改变执行语义）。
+    rho_target = round(min(max(ref['value'], p.rho_min), p.rho_max), 3)
+    result['candidate']['rho_target'] = rho_target
+    result['candidate']['target_direction'] = (
+        'up' if rho_target > current else 'down' if rho_target < current else 'stable')
     if not (number(target.get('min')) and number(target.get('max'))
             and 0 <= target['min'] < target['max'] <= 100):
         return finish('unavailable', 'target_unknown', '缺少当时有效的灰分目标范围')
@@ -176,6 +183,19 @@ def evaluate_candidate(evidence, parameters=None):
     deviation = round(ash['value']-boundary, 3)
     band = 'in_band' if abs(deviation) <= .05 else 'high' if deviation > 0 else 'low'
     result['basis']['band'] = band
+    # 2026-11-06 优化：暂估灰分敏感度披露——距方向判断边界/目标带的距离（百分点）。
+    # 暂估修订超过该距离即跨界，方向或保持判断会翻转（11-04 案例：10.317→9.624 翻转目标带）。
+    if band == 'in_band':
+        sensitivity_edge = target['min'] if ash['value']-target['min'] <= target['max']-ash['value'] else target['max']
+    else:
+        sensitivity_edge = target['min'] if band == 'low' else target['max']
+    sensitivity_distance = round(abs(ash['value']-sensitivity_edge), 3)
+    result['basis']['ash_sensitivity'] = dict(
+        provisional=provisional, band=band, edge=round(sensitivity_edge, 3),
+        distance_pp=sensitivity_distance,
+        note=(f"暂估灰分距{'目标带边界' if band == 'in_band' else '方向判断边界'} "
+              f"{sensitivity_distance:.2f} 个百分点；修订越界将改变{'保持' if band == 'in_band' else '方向'}判断"
+              if provisional else None))
     follow = abs(actual['value']-raw) <= p.actual_follow_tolerance+1e-7
     observation = result['observation']
     observation.update(state='no-recorded-action', actual_response='following' if follow else 'not-following')

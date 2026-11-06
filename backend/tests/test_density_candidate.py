@@ -94,6 +94,49 @@ def test_wait_uses_production_start_not_fixed_two_hour_timer_and_recovers():
     assert r['observation']['state'] == 'post-action-covered'
 
 
+def test_rho_target_separates_aim_from_execution():
+    """2026-11-06：等待/保持时 value=当前设定，rho_target 仍披露多步趋向目标。"""
+    # 等待场景：value 保持当前设定，目标参考照常可见
+    e = evidence()
+    action_at = HOUR-timedelta(hours=1,minutes=59)
+    e['latest_action'] = dict(id='real',before_at=iso_time(action_at-timedelta(seconds=60.2)),
+        after_at=iso_time(action_at),continuous=False,gap=False,identity_known=True)
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'wait'
+    assert r['candidate']['value'] == 1.48            # 执行值 = 当前设定
+    assert r['candidate']['rho_target'] == 1.46       # 趋向目标 = 参考值
+    assert r['candidate']['target_direction'] == 'down'
+    # 调整场景：rho_target 仍是参考值，与单步 value 不同
+    r2 = evaluate_candidate(evidence())
+    assert r2['candidate']['status'] == 'adjust'
+    assert r2['candidate']['value'] == 1.47 and r2['candidate']['rho_target'] == 1.46
+    # 参考不可用时目标不可见（不冒充）
+    e2 = evidence()
+    e2['reference']['status'] = 'settling'
+    r3 = evaluate_candidate(e2)
+    assert r3['candidate']['reason_codes'] == ['reference_unavailable']
+    assert r3['candidate']['rho_target'] is None and r3['candidate']['target_direction'] is None
+
+
+def test_ash_sensitivity_discloses_provisional_margin():
+    """2026-11-06：暂估灰分披露距边界距离；非暂估不带警示 note。"""
+    # 高于目标带 9.3（目标 8.5–9.0）：方向判断边界 = 9.0，距离 0.3pp
+    r = evaluate_candidate(evidence(ash=9.3, provisional=True))
+    s = r['basis']['ash_sensitivity']
+    assert s['provisional'] is True and s['band'] == 'high'
+    assert s['edge'] == 9.0 and s['distance_pp'] == 0.3
+    assert '修订越界' in (s['note'] or '')
+    # 目标带内 8.7：距更近边界 8.5 为 0.2pp
+    r2 = evaluate_candidate(evidence(ash=8.7, provisional=True, reference=1.48))
+    s2 = r2['basis']['ash_sensitivity']
+    assert s2['band'] == 'in_band' and s2['edge'] == 8.5 and s2['distance_pp'] == 0.2
+    assert '保持' in (s2['note'] or '')
+    # 非暂估：结构仍返回，note 为 None（不渲染警示）
+    r3 = evaluate_candidate(evidence(ash=9.3, provisional=False))
+    s3 = r3['basis']['ash_sensitivity']
+    assert s3['provisional'] is False and s3['distance_pp'] == 0.3 and s3['note'] is None
+
+
 def test_long_gap_unknown_action_blocks_related_ash_but_not_forever():
     e = evidence()
     a = HOUR-timedelta(hours=1,minutes=30)
