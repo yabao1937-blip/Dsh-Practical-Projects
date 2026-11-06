@@ -306,7 +306,7 @@ const DensityTrendPage = {
         if(thirty){thirty.disabled=true;thirty.title='当前仅提供已重算的固定7天窗口，近30天尚未重算';}
         const stops=this.stoppedStretches || [], stoppedHours=Math.round(stops.reduce((sum,span)=>sum+(span.end-span.start),0)/3600000);
         const stopNote=stoppedHours?` 停机 ${stops.length} 段共 ${stoppedHours} 小时（301 入洗煤量为零）已从图中移除，横轴按有效小时压缩。`:'';
-        document.getElementById('density-trend-source').textContent='每小时一条最终建议。红线仅沿用显示，不是新建议；缺失原因可点击红线或展开下方列表查看。建议为新版历史重算。'+stopNote+(this.carryContextWarning?' '+this.carryContextWarning:'');
+        document.getElementById('density-trend-source').textContent='每小时一条最终建议。没有建议的小时不画点、不占位，前后建议直接连成一条线；缺失原因见下方列表。建议为新版历史重算。'+stopNote+(this.carryContextWarning?' '+this.carryContextWarning:'');
     },
     renderHourlyCard(data) {
         const latest=data.latest_completed_hour,point=latest?.complete===true && Date.parse(latest.hour_end)<=Date.parse(data.period.end)?latest:null,host=document.getElementById('density-candidate-current');
@@ -320,7 +320,7 @@ const DensityTrendPage = {
     renderMissing() {
         const groups=this.series?.carry.groups || [];
         document.getElementById('density-trend-missing-summary').textContent=`无建议时段与原因 · ${groups.length} 段`;
-        document.getElementById('density-trend-missing-body').innerHTML=groups.length?`<ul class="density-missing-list">${groups.map(g=>`<li><div><strong>${this.esc(this.time(g.start))} — ${this.esc(this.time(g.end))}</strong><p>${this.esc(g.reason)}</p></div><span>沿用 ${this.num(g.value)}（显示）</span></li>`).join('')}</ul>`:'<p class="density-trend-note">所选时段没有红线沿用区间。</p>';
+        document.getElementById('density-trend-missing-body').innerHTML=groups.length?`<ul class="density-missing-list">${groups.map(g=>`<li><div><strong>${this.esc(this.time(g.start))} — ${this.esc(this.time(g.end))}</strong><p>${this.esc(g.reason)}</p></div><span>无建议 ${Math.round((g.end-g.start)/3600000)} 小时</span></li>`).join('')}</ul>`:'<p class="density-trend-note">所选时段没有无建议区间。</p>';
     },
     carryInfoAt(t) {
         const carry=this.series?.carry;if(!carry)return null;
@@ -413,7 +413,7 @@ const DensityTrendPage = {
         const panes=[
             ['ash-plot',ash?`${ashName} ${ash.value.toFixed(2)}%${ash.provisional?'（暂估）':''}`:`${ashName} —`,colors.ash],
             ['plot',`设定 ${this.num(setpoint?.value)} · 实测 ${this.num(actual?.value)}`,colors.A304],
-            ['advice-plot',carried?`无新建议 · 沿用 ${this.num(carried.value)}（显示）`:advice?`小时最终建议 ${this.num(advice.value)}`:'小时最终建议 —',carried?colors.missingAdvice:advice?colors.advice:colors.muted]
+            ['advice-plot',advice?`小时最终建议 ${this.num(advice.value)}`:'小时最终建议 —',advice?colors.advice:colors.muted]
         ];
         for (const [id, text, color] of panes) {
             const pane = document.getElementById('density-trend-' + id), top = pane.offsetTop;
@@ -478,10 +478,9 @@ const DensityTrendPage = {
             const r=canvas.getBoundingClientRect(),px=event.clientX-r.left,py=event.clientY-r.top;
             let best=null,distance=Infinity;
             if(canvas.id==='density-trend-advice-canvas' && px>=left && px<=left+width){
+                // 没有建议密度的时段已整点移除，图上不再有沿用线可悬停；接缝处直接落空。
                 const t=this.tAt(px-left);
                 if(t===null){canvas._tipPinned=false;tip.hidden=true;this.hideCrosshair();return;}
-                const carried=this.carryInfoAt(t);
-                if(carried && Math.abs(py-frame.y(carried.value))<24){show({x:px,y:frame.y(carried.value),text:this.carryText(carried)});this.crosshairAt({t,x:px});return;}
             }
             if (px>=left && px<=left+width && py>=top && py<=top+height) {
                 for (const hit of canvas._hits) {
@@ -567,19 +566,17 @@ const DensityTrendPage = {
     },
     drawCarryAdvice(ctx,frame,canvas,colors,points) {
         const {x,y,width}=frame;
-        for(const segment of this.series.carry.segments){
-            const sx=x(segment.start),ex=x(segment.end);
-            // 跨停机段或落入被移除时段的沿用线不再绘制。
-            if(sx===null||ex===null||!this.sameBlock(segment.start,segment.end))continue;
-            ctx.strokeStyle=segment.kind==='valid'?colors.advice:colors.missingAdvice;ctx.lineWidth=1.8;ctx.setLineDash([]);
-            ctx.beginPath();ctx.moveTo(sx,y(segment.from));ctx.lineTo(ex,y(segment.to));ctx.stroke();
+        // 没有建议密度的时刻整点丢弃：不画沿用红线、不留点；前后有真实建议的小时直接连成一条线，
+        // 跨缺灰分小时和跨停机接缝都连（与总灰分同一口径）。
+        const drawn=points.filter(p=>p.value!==null && x(p.t)!==null && !this.stoppedHour(p));
+        ctx.strokeStyle=colors.advice;ctx.lineWidth=1.8;ctx.setLineDash([]);
+        for(let i=1;i<drawn.length;i++){
+            ctx.beginPath();ctx.moveTo(x(drawn[i-1].t),y(drawn[i-1].value));ctx.lineTo(x(drawn[i].t),y(drawn[i].value));ctx.stroke();
         }
-        const validCount=points.filter(p=>p.value!==null&&x(p.t)!==null).length,stride=Math.max(1,Math.ceil(validCount/Math.max(1,width/7)));
-        for(const [index,p] of points.entries()){
-            const px=x(p.t);
-            if(px===null || this.stoppedHour(p)) continue;
-            const py=y(p.value===null?p.display_value:p.value);
-            if(p.value!==null && (index%stride===0 || p.break_before || !points[index-1] || points[index-1].value===null || index===points.length-1)){ctx.fillStyle=colors.advice;ctx.beginPath();ctx.arc(px,py,2,0,2*Math.PI);ctx.fill();}
+        const stride=Math.max(1,Math.ceil(drawn.length/Math.max(1,width/7)));
+        for(const [index,p] of drawn.entries()){
+            const px=x(p.t),py=y(p.value);
+            if(index%stride===0 || index===drawn.length-1){ctx.fillStyle=colors.advice;ctx.beginPath();ctx.arc(px,py,2,0,2*Math.PI);ctx.fill();}
             canvas._hits.push({...p,x:px,y:py,key:'advice'});
         }
     },

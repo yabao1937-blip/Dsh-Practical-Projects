@@ -481,9 +481,8 @@
                     <button type="button" data-density-series="A304" aria-pressed="true"><i></i>A304 设定</button>
                     <button type="button" data-density-series="actual" aria-pressed="false"><i></i>显示实测</button>
                     <button type="button" data-density-series="advice" aria-pressed="true"><i></i>小时最终建议</button>
-                    <span class="density-carry-legend"><i aria-hidden="true"></i>红线：无建议，沿用前值（开头1.490）</span>
                 </div>
-                <p class="density-trend-note density-trend-provenance-note" id="density-trend-source">每个已结束小时一个最终建议；红线为沿用显示，不是新建议。</p>
+                <p class="density-trend-note density-trend-provenance-note" id="density-trend-source">每个已结束小时一个最终建议；没有建议的小时留空，前后建议连成一条线。</p>
                 <div class="density-trend-stack" id="density-trend-stack" role="group" aria-labelledby="density-trend-chart-title">
                     <div class="density-trend-plot density-trend-ash-plot" id="density-trend-ash-plot">
                         <span class="density-trend-pane-label" id="density-trend-ash-label">总灰分</span>
