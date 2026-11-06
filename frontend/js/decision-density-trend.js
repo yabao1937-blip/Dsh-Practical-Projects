@@ -525,10 +525,12 @@ const DensityTrendPage = {
         ctx.strokeStyle=colors.ash; ctx.fillStyle=colors.ash; ctx.lineWidth=2;
         let link=null;
         for (const p of points) {
-            if (p.value===null) {link=null;continue;}
+            // 没有总灰分的时刻直接跳过：不画点，也不打断曲线 —— 前后有值的时刻直接连成一条线，
+            // 包括跨过停机接缝和缺灰分的小时。
+            if (p.value===null || this.inStopped(p.t-60000)) continue;
             const px=x(p.t);
-            if (px===null) {link=null;continue;}
-            if (link && this.sameBlock(link.t,p.t) && p.t-link.t <= 75*60000) {
+            if (px===null) continue;
+            if (link) {
                 ctx.beginPath();ctx.moveTo(x(link.t),y(link.value));ctx.lineTo(px,y(p.value));ctx.stroke();
             }
             link=p;
@@ -536,7 +538,7 @@ const DensityTrendPage = {
         for (const p of points) {
             if(p.value===null) continue;
             // 灰分点描述的是它前面那个生产小时；该小时停机就整点丢弃。
-            if(this.inStopped(p.t-60000)) {link=null;continue;}
+            if(this.inStopped(p.t-60000)) continue;
             const px=x(p.t);if(px===null) continue;
             const py=y(p.value);
             ctx.beginPath();ctx.arc(px,py,2.2,0,2*Math.PI);
