@@ -516,6 +516,8 @@ const DecisionOverviewPage = {
         this.timer = setInterval(() => {
             if (this.active() && !document.hidden && Date.now() > this.sourceInteractionUntil) this.refresh();
         }, 5000);
+        document.getElementById('decision-focus-toggle').addEventListener('click', () => this.toggleFocus());
+        this.applyFocus(localStorage.getItem('dmcs_decision_focus')!=='0');
         this.refresh();
     },
     refresh() {
@@ -632,7 +634,7 @@ const DecisionOverviewPage = {
         const total=document.getElementById('decision-toolbar-total'), toolbar=total?.parentElement;
         if(!toolbar) return;
         toolbar.classList.remove('has-total-row');
-        if(total.hidden) return;
+        if(total.hidden || !toolbar.offsetParent) return;
         const density=document.querySelector('#decision-board [data-decision-node="density"]');
         if(!density) return;
         const bar=toolbar.getBoundingClientRect(), card=density.getBoundingClientRect();
@@ -656,6 +658,7 @@ const DecisionOverviewPage = {
     },
     fit() {
         this.alignNavigation();
+        if (this.focusActive()) return;   // 聚焦视图画布隐藏，跳过布局；展开时 applyFocus 会补一次 fit
         const viewport = document.getElementById('decision-canvas-scroll');
         const width=this.graphWidth();
         const scale = this.zoom ?? Math.min(1, Math.max(.65, viewport.clientWidth / width));
@@ -990,6 +993,61 @@ const DecisionOverviewPage = {
         this.renderHTML('decision-board',`<svg class="decision-edges" aria-hidden="true" viewBox="0 0 ${this.graphWidth()} ${this.graphHeight()}" style="width:${this.graphWidth()}px;height:${this.graphHeight()}px"><defs>${markers}</defs>${paths}${hourLink}</svg>${cards}${hourSummary}${totalPanel}`);
         this.renderHTML('decision-recent-ash-layer',recentAsh);
         if(typeof DecisionRecentAsh!=='undefined') DecisionRecentAsh.position(this);
+        this.renderHero({shown,hourly,s,target,displays});
+    },
+
+    // 2026-11-06 聚焦视图：默认三数 + 关键输入，完整追溯链一键展开（applyFocus）。
+    focusActive() { return document.getElementById('page-decision').classList.contains('is-focus'); },
+    applyFocus(on) {
+        const page=document.getElementById('page-decision'); if(!page) return;
+        page.classList.toggle('is-focus',on);
+        try { localStorage.setItem('dmcs_decision_focus',on?'1':'0'); } catch(e) {}
+        const button=document.getElementById('decision-focus-toggle');
+        if(button) button.textContent=on?'展开完整视图':'收起到聚焦视图';
+        if(!on){
+            this.fit();
+            if(typeof DecisionCoarseCharts!=='undefined') DecisionCoarseCharts.refresh();
+            if(typeof DecisionFloatAnalysis!=='undefined') DecisionFloatAnalysis.refresh();
+        }
+    },
+    toggleFocus() { this.applyFocus(!this.focusActive()); },
+    renderHero({shown,hourly,s,target,displays}) {
+        const host=document.getElementById('decision-hero'); if(!host) return;
+        const num=(v,d)=>Number.isFinite(v)?Number(v).toFixed(d??2):'—';
+        const tMin=Number(target?.min ?? 8.5), tMax=Number(target?.max ?? 9);
+        const ashValue=shown?.total_ash?.value ?? (hourly?undefined:s?.formula);
+        const ashBand=!Number.isFinite(ashValue)?'unknown':ashValue<tMin-.05?'below':ashValue>tMax+.05?'above':'in';
+        const bandText={below:'低于目标带',above:'高于目标带',in:'目标带内',unknown:'目标 '+num(tMin,1)+'–'+num(tMax,1)+'%'}[ashBand];
+        const bandClass=ashBand==='in'?'hero-ok':(ashBand==='below'||ashBand==='above')?'hero-warn':'';
+        const suggestion=shown?.density_suggestion||{};
+        const cand=suggestion.candidate||{};
+        const statusMap={adjust:'一步调整',hold:'有依据保持',wait:'等待观察',unavailable:'无法给出'};
+        const settingValue=shown?.guidance?.rhoCur ?? s?.guide?.rhoCur;
+        const aim=Number.isFinite(cand.rho_target)&&cand.rho_target!==(cand.value??settingValue)
+            ?` · 趋向 ${num(cand.rho_target,3)}（${cand.target_direction==='up'?'升':cand.target_direction==='down'?'降':'平'}）`:'';
+        const reason=(cand.reasons&&cand.reasons[0])||suggestion.reason||'';
+        host.querySelector('#decision-hero-ash').innerHTML=
+            `<span class="hero-label">总精煤灰分${hourly?' · 小时':''}</span>`+
+            `<span class="hero-value" data-band="${ashBand}">${num(ashValue)}<small>%</small></span>`+
+            `<span class="hero-sub ${bandClass}">${bandText}</span>`;
+        host.querySelector('#decision-hero-setting').innerHTML=
+            `<span class="hero-label">当前设定密度</span>`+
+            `<span class="hero-value">${num(settingValue,3)}<small>g/cm³</small></span>`+
+            `<span class="hero-sub">${this.escape(this.densityLabel?.()||'A304')} · 目标灰分 ${num(tMin,1)}–${num(tMax,1)}%</span>`;
+        const adviceValue=Number.isFinite(cand.value)?cand.value:(shown?.suggested_density?.value??s?.guide?.rhoNew);
+        const adviceStatus=cand.status||shown?.suggested_density?.status||'unavailable';
+        host.querySelector('#decision-hero-advice').innerHTML=
+            `<span class="hero-label">建议密度 · ${statusMap[adviceStatus]||statusMap.unavailable}</span>`+
+            `<span class="hero-value">${Number.isFinite(adviceValue)?num(adviceValue,3):'—'}<small>g/cm³</small></span>`+
+            `<span class="hero-sub">${this.escape(reason)}${this.escape(aim)}</span>`;
+        const chipIds=[['heavy-ash','重介灰分'],['heavy-amount','重介量'],['float-ash','浮精灰分'],
+            ['float-amount','浮精量'],['coarse','粗精煤泥灰分'],['coarse-amount','粗精煤泥量'],['coarse-slime','煤泥含量']];
+        const chips=chipIds.map(([id,label])=>{
+            const display=displays?.get(id); if(!display) return '';
+            const value=display.value??'—';
+            return `<span>${label}<b>${this.escape(String(value))}</b></span>`;
+        }).join('');
+        document.getElementById('decision-hero-chips').innerHTML=chips;
     },
 
     telemetryState(item, failed = window.Operations?.telemetryFailed) {
