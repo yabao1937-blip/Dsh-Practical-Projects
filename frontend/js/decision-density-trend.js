@@ -199,7 +199,7 @@ const DensityTrendPage = {
         if (!a || !b || a.key !== b.key || !Number.isFinite(a.value) || !Number.isFinite(b.value)) return false;
         // 设定密度是阀门保持值：删掉停机段的采样后仍连成一条线，跨段处按"保持上一个设定"画水平再接台阶。
         // 实测密度是测量值，停机段没有测量，仍在接缝处断开；建议线由下面的整点规则断开。
-        if ((this.laid || []).length && !this.sameBlock(a.t, b.t)) return a.key === 'A304';
+        if ((this.laid || []).length && !this.sameBlock(a.t, b.t)) return a.key === 'A304' && b.t > a.t;
         if (b.break_before) return false;
         if(b.key==='advice') return b.t-a.t===3600000;
         return b.t>=a.t;
@@ -605,16 +605,17 @@ const DensityTrendPage = {
             const validCount=points.filter(row=>row.value!==null).length;
             const stride=kind==='advice'?Math.max(1,Math.ceil(validCount/Math.max(1,width/7))):1;
             for(const [index,p] of points.entries()){
+                const px=x(p.t);
+                // 停机段里的采样先跳过：既不画点，也不推进 previous（设定密度线在接缝处保持上一个设定）。
+                // 这一步必须在画线之前做，否则 null 坐标会被 canvas 当成 0，把线画回最左边。
+                if(px===null) continue;
                 if(p.value!==null && this.connected(previous,p)){
                     ctx.strokeStyle=colors[kind];ctx.lineWidth=kind==='advice'?1.8:kind==='actual'?1.4:2;
                     ctx.setLineDash(kind==='actual'?[3,3]:[]);
                     ctx.beginPath();ctx.moveTo(x(previous.t),y(previous.value));
-                    if(kind==='A304')ctx.lineTo(x(p.t),y(previous.value));
-                    ctx.lineTo(x(p.t),y(p.value));ctx.stroke();
+                    if(kind==='A304')ctx.lineTo(px,y(previous.value));
+                    ctx.lineTo(px,y(p.value));ctx.stroke();
                 }
-                const px=x(p.t);
-                // 停机段里的采样：不画点，但保留 previous，设定密度线才能跨段连起来。
-                if(px===null) continue;
                 const py=p.value===null?top+height-4:y(p.value);
                 if(p.value!==null){
                     const marker=kind==='advice'?(index%stride===0 || !this.connected(previous,p)):
