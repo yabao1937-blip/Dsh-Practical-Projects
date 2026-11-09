@@ -190,7 +190,7 @@ const DensityTrendPage = {
         const carry=this.carryDisplay(this.fullHourly || local,this.carryFixed || data.source?.fixed_window || data.period,data.period,local,this.carryParameters || data.parameters || {});
         this.stoppedStretches=this.stoppedSpans(this.hourGrid);
         const byTime=new Map(carry.rows.map(p=>[p.t,p]));
-        const advice=local.map(p=>{const t=Date.parse(p.hour_end),shown=byTime.get(t);return {...p,key:'advice',at:p.hour_end,t,
+        const advice=local.map(p=>{const endT=Date.parse(p.hour_end),t=Date.parse(p.hour_start),shown=byTime.get(endT);return {...p,key:'advice',at:p.hour_end,t,
             value:p.final_valid===true && Number.isFinite(p.value)?p.value:null,display_value:shown?.display_value ?? 1.490,
             is_carried:!(p.final_valid===true && Number.isFinite(p.value)),carry_source_at:shown?.carry_source_at || null,break_before:p.hourly_break_before===true};});
         return {A304:shape(data.channels?.A304,'A304'),actual:shape(data.channels?.actual,'actual').map(p=>({...p,value:p.value>1 && p.value<3 && !['invalid','bad','stale','future'].includes(p.status)?p.value:null})),advice,ash:shape(data.ash,'ash'),carry};
@@ -306,13 +306,13 @@ const DensityTrendPage = {
         if(thirty){thirty.disabled=true;thirty.title='当前仅提供已重算的固定7天窗口，近30天尚未重算';}
         const stops=this.stoppedStretches || [], stoppedHours=Math.round(stops.reduce((sum,span)=>sum+(span.end-span.start),0)/3600000);
         const stopNote=stoppedHours?` 停机 ${stops.length} 段共 ${stoppedHours} 小时（301 入洗煤量为零）已从图中移除，横轴按有效小时压缩。`:'';
-        document.getElementById('density-trend-source').textContent='每小时一条最终建议。没有建议的小时不画点、不占位，前后建议直接连成一条线；缺失原因见下方列表。建议为新版历史重算。'+stopNote+(this.carryContextWarning?' '+this.carryContextWarning:'');
+        document.getElementById('density-trend-source').textContent='每小时一条最终建议。灰分与建议都按各自描述的那一小时起点落位；每条建议用的是两小时前那一格灰分（悬停可看依据）。没有建议的小时不画点、不占位，前后建议直接连成一条线；缺失原因见下方列表。'+stopNote+(this.carryContextWarning?' '+this.carryContextWarning:'');
     },
     renderHourlyCard(data) {
         const latest=data.latest_completed_hour,point=latest?.complete===true && Date.parse(latest.hour_end)<=Date.parse(data.period.end)?latest:null,host=document.getElementById('density-candidate-current');
         document.getElementById('density-candidate-title').textContent=point?'最近已完成小时':'所选时段尚无新小时建议';
         const valid=point?.complete===true && Date.parse(point.hour_end)<=Date.parse(data.period.end) && point.final_valid===true && Number.isFinite(point.value);
-        const row=point?this.series?.advice.find(p=>p.t===Date.parse(point.hour_end)):null;
+        const row=point?this.series?.advice.find(p=>p.t===Date.parse(point.hour_start)):null;
         const value=valid?point.value:row?.display_value ?? this.series?.carry.lastValue ?? 1.490;
         const reason=valid?'':point?this.reasonFor(point,this.carryParameters):'该时段尚无已完成小时结果';
         host.innerHTML=`<div class="density-hourly-final-value${valid?'':' is-carried'}"><p class="density-candidate-number">${this.num(value)} <span>g/cm³${valid?'':' · 沿用（显示）'}</span></p><p class="density-hourly-final-period">${this.esc(this.time(point?.hour_start || data.period.start))} — ${this.esc(this.time(point?.hour_end || data.period.end))}</p><p class="density-trend-note">${valid?'小时最终建议 · 新版历史重算':'无新建议；'+this.esc(reason)}</p></div>`;
@@ -339,8 +339,15 @@ const DensityTrendPage = {
             missingAdvice:get('--trend-advice-missing','#d94f4f'), ash:get('--trend-ash','#8a7ae0')};
     },
     detail(p) {
-        if(p.key==='advice' && p.is_carried) return this.carryText({value:p.display_value,start:Date.parse(p.hour_start),end:p.t,reason:this.reasonFor(p,this.carryParameters)});
-        if(p.key==='advice') return `小时最终建议 ${Number.isFinite(p.value)?this.num(p.value)+' g/cm³':'暂无有效结果'}\n${this.time(p.hour_start)} — ${this.time(p.hour_end)}`;
+        // 无建议的小时已经不画点、不画红线了；这条分支只在极端情况下兜底，别再说"红线沿用"。
+        if(p.key==='advice' && p.is_carried) return `该小时未生成建议\n建议小时 ${this.time(p.hour_start)} — ${this.time(p.hour_end)}\n原因：${this.reasonFor(p,this.carryParameters)}`;
+        if(p.key==='advice') {
+            // 建议依据的灰分就是它自己那一行里的 ash 窗口，直接写出来，省得读图时去数格子。
+            const basis=p.ash&&Number.isFinite(p.ash.value)
+                ? `\n依据灰分 ${this.time(p.ash.start,true)} — ${this.time(p.ash.end,true)} = ${p.ash.value.toFixed(2)}%${p.ash.provisional?'（暂估）':''}`
+                : '\n依据灰分未记录';
+            return `小时最终建议 ${Number.isFinite(p.value)?this.num(p.value)+' g/cm³':'暂无有效结果'}\n建议小时 ${this.time(p.hour_start)} — ${this.time(p.hour_end)}${basis}`;
+        }
         return `A304 ${p.key==='actual'?'实测密度':'实际设定'} ${this.num(p.value)} g/cm³\n观测时刻 ${this.time(p.at)}`;
     },
     ashDetail(p) {
