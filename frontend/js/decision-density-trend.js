@@ -343,7 +343,11 @@ const DensityTrendPage = {
         if(p.key==='advice') return `小时最终建议 ${Number.isFinite(p.value)?this.num(p.value)+' g/cm³':'暂无有效结果'}\n${this.time(p.hour_start)} — ${this.time(p.hour_end)}`;
         return `A304 ${p.key==='actual'?'实测密度':'实际设定'} ${this.num(p.value)} g/cm³\n观测时刻 ${this.time(p.at)}`;
     },
-    ashDetail(p) { return `实际灰分 ${Number.isFinite(p.value)?p.value.toFixed(2):'—'} %\n生产时段 ${this.time(p.start || p.at,true)} — ${this.time(p.end,true)}`; },
+    ashDetail(p) {
+        // 灰分点按小时起点落位，接口不返回 end；没有 end 时补 +1 小时，别在提示里留"——"。
+        const start = p.start || p.at, end = p.end || (start ? new Date(Date.parse(start) + 3600000).toISOString() : null);
+        return `实际灰分 ${Number.isFinite(p.value)?p.value.toFixed(2):'—'} %\n生产时段 ${this.time(start,true)} — ${this.time(end,true)}`;
+    },
     crosshair: null,
     crosshairAt(hit) {
         this.crosshair = hit ? {t: hit.t, x: hit.x} : null;
