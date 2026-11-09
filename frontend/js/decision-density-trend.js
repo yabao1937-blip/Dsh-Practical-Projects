@@ -306,7 +306,7 @@ const DensityTrendPage = {
         if(thirty){thirty.disabled=true;thirty.title='当前仅提供已重算的固定7天窗口，近30天尚未重算';}
         const stops=this.stoppedStretches || [], stoppedHours=Math.round(stops.reduce((sum,span)=>sum+(span.end-span.start),0)/3600000);
         const stopNote=stoppedHours?` 停机 ${stops.length} 段共 ${stoppedHours} 小时（301 入洗煤量为零）已从图中移除，横轴按有效小时压缩。`:'';
-        document.getElementById('density-trend-source').textContent='每小时一条最终建议。灰分与建议都按各自描述的那一小时起点落位；每条建议用的是两小时前那一格灰分（悬停可看依据）。没有建议的小时不画点、不占位，前后建议直接连成一条线；缺失原因见下方列表。'+stopNote+(this.carryContextWarning?' '+this.carryContextWarning:'');
+        document.getElementById('density-trend-source').textContent='每小时一条最终建议。灰分、设定密度、建议密度都按同一时钟小时落位，时间轴不做任何平移；建议本身存在两小时固有的灰分滞后。没有建议的小时不画点、不占位，前后建议直接连成一条线；缺失原因见下方列表。'+stopNote+(this.carryContextWarning?' '+this.carryContextWarning:'');
     },
     renderHourlyCard(data) {
         const latest=data.latest_completed_hour,point=latest?.complete===true && Date.parse(latest.hour_end)<=Date.parse(data.period.end)?latest:null,host=document.getElementById('density-candidate-current');
@@ -342,11 +342,8 @@ const DensityTrendPage = {
         // 无建议的小时已经不画点、不画红线了；这条分支只在极端情况下兜底，别再说"红线沿用"。
         if(p.key==='advice' && p.is_carried) return `该小时未生成建议\n建议小时 ${this.time(p.hour_start)} — ${this.time(p.hour_end)}\n原因：${this.reasonFor(p,this.carryParameters)}`;
         if(p.key==='advice') {
-            // 建议依据的灰分就是它自己那一行里的 ash 窗口，直接写出来，省得读图时去数格子。
-            const basis=p.ash&&Number.isFinite(p.ash.value)
-                ? `\n依据灰分 ${this.time(p.ash.start,true)} — ${this.time(p.ash.end,true)} = ${p.ash.value.toFixed(2)}%${p.ash.provisional?'（暂估）':''}`
-                : '\n依据灰分未记录';
-            return `小时最终建议 ${Number.isFinite(p.value)?this.num(p.value)+' g/cm³':'暂无有效结果'}\n建议小时 ${this.time(p.hour_start)} — ${this.time(p.hour_end)}${basis}`;
+            // 时间轴不做平移：这里只报这一个小时自己的建议值，不带两小时前的灰分。
+            return `小时最终建议 ${Number.isFinite(p.value)?this.num(p.value)+' g/cm³':'暂无有效结果'}\n建议小时 ${this.time(p.hour_start)} — ${this.time(p.hour_end)}`;
         }
         return `A304 ${p.key==='actual'?'实测密度':'实际设定'} ${this.num(p.value)} g/cm³\n观测时刻 ${this.time(p.at)}`;
     },
