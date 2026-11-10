@@ -79,6 +79,35 @@ def test_actual_display_does_not_draw_good_source_placeholder_as_valid():
     assert plotted['source_status']=='good' and plotted['status']=='invalid'
 
 
+def test_trend_exclusions_use_meter_and_confirmed_stops_not_recommendation():
+    def point(seconds, *, operating=None, actual=True, cadence=60):
+        return dict(at=iso_time(HOUR+timedelta(seconds=seconds)),value=None,status='unavailable',
+            input_evidence=dict(operating=operating,setpoint=dict(value=1.5,status='good')),
+            observation=dict(actual_reading=dict(usable=actual)),source=dict(cadence_seconds=cadence))
+
+    stop=dict(raw_value=0,status='held',quality='good',value=1)
+    unknown=dict(raw_value=0,status='missing',quality='bad',value=1)
+    points=series.with_gap_markers([
+        point(0,operating=stop,actual=False),point(60.2,operating=stop),
+        point(119.8,operating=unknown),point(181,actual=False),
+        point(360,actual=True),point(420,actual=None),point(480,operating=stop),
+    ])
+    assert series.trend_exclusions(points,HOUR+timedelta(seconds=30),HOUR+timedelta(seconds=500))==[
+        dict(start=iso_time(HOUR+timedelta(seconds=a)),end=iso_time(HOUR+timedelta(seconds=b)),reason=reason)
+        for a,b,reason in [(30,119.8,'stopped'),(181,241,'invalid_actual'),(480,500,'stopped')]
+    ]
+    assert series.trend_exclusions(points,HOUR+timedelta(seconds=242),HOUR+timedelta(seconds=479))==[]
+    assert series.trend_exclusion(point(0,operating=dict(value=0,status='good',quality='good'))) is None
+
+
+def test_gap_markers_keep_known_short_cadence_if_neighbor_metadata_is_missing():
+    points=[
+        dict(at=iso_time(HOUR),source=dict(cadence_seconds=5)),
+        dict(at=iso_time(HOUR+timedelta(seconds=20)),source={}),
+    ]
+    assert series.with_gap_markers(points)[1]['break_before'] is True
+
+
 @pytest.mark.parametrize('status,value',[('adjust',1.47),('wait',1.48),('unavailable',None)])
 def test_test_default_views_replace_only_density_and_always_mark_new_policy(client,monkeypatch,status,value):
     monkeypatch.setenv('DMCS_DENSITY_EXPERIMENT','1')
@@ -143,6 +172,7 @@ def test_series_get_reads_only_verified_files_and_end_is_exclusive(client,tmp_pa
     assert response.status_code==200,response.text
     result=response.json()
     assert result['summary']['total_samples']==1
+    assert result['trend_exclusions']==[]
     assert result['period']['end_exclusive'] is True
     assert result['suggestions'][0]['at']<result['period']['end']
     assert client.get('/api/v1/decision/evidence/density-series',params={'limit':720}).status_code==422

@@ -482,7 +482,7 @@
                     <button type="button" data-density-series="actual" aria-pressed="false"><i></i>显示实测</button>
                     <button type="button" data-density-series="advice" aria-pressed="true"><i></i>小时最终建议</button>
                 </div>
-                <p class="density-trend-note density-trend-provenance-note" id="density-trend-source">每个已结束小时一个最终建议；没有建议的小时留空，前后建议连成一条线。</p>
+                <p class="density-trend-note density-trend-provenance-note" id="density-trend-source">横轴省略停机或实测无效时段，保留时段按原时间显示。</p>
                 <div class="density-trend-stack" id="density-trend-stack" role="group" aria-labelledby="density-trend-chart-title">
                     <div class="density-trend-plot density-trend-ash-plot" id="density-trend-ash-plot">
                         <span class="density-trend-pane-label" id="density-trend-ash-label">总灰分</span>
@@ -541,7 +541,7 @@
     <script src="js/decision-hourly.js?v=11"></script>
     <script src="js/decision-evidence.js?v=1"></script>
     <script src="js/decision-density-candidate.js?v=2"></script>
-    <script src="js/decision-density-trend.js?v=16"></script>
+    <script src="js/decision-density-trend.js?v=17"></script>
     <script src="js/manual-measurements.js?v=5"></script>
     <script src="js/coarse.js?v=24"></script>
     <script src="js/coarse-comparison.js?v=1"></script>

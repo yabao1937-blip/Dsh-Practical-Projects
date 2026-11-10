@@ -145,13 +145,14 @@ def compact_result(row):
         source=row['source'],input_evidence=row['input_evidence'])
 
 
-def plot_indices(points, maximum=3000):
+def plot_indices(points, maximum=3000, *, preserve_trim_edges=False):
     if len(points)<=maximum:
         return list(range(len(points)))
     selected={0,len(points)-1}
     for i in range(1,len(points)):
         a,b=points[i-1],points[i]
-        if b.get('break_before') or (a['status'],a['reason_codes'],a['quality']['level']) != (b['status'],b['reason_codes'],b['quality']['level']):
+        if (b.get('break_before') or (preserve_trim_edges and trend_exclusion(a) != trend_exclusion(b))
+                or (a['status'],a['reason_codes'],a['quality']['level']) != (b['status'],b['reason_codes'],b['quality']['level'])):
             selected.update((i-1,i))
     width=max(1,(len(points)+(maximum//6)-1)//(maximum//6))
     for start in range(0,len(points),width):
@@ -171,11 +172,53 @@ def with_gap_markers(points):
     for point in result:
         gap=(timestamp(point['at'])-timestamp(previous['at'])).total_seconds() if previous else None
         cadences=[p.get('source',{}).get('cadence_seconds') for p in (previous,point) if p]
-        cadence=max((c for c in cadences if isinstance(c,(int,float)) and c>0),default=60)
+        cadence=max((c for c in cadences if number(c) and c>0),default=60)
         point.update(break_before=bool(gap is not None and gap>max(15,1.5*cadence)),
             sample_gap_seconds=round(gap,3) if gap is not None else None)
         previous=point
     return result
+
+
+def sample_cadence(point):
+    cadence = point.get('source', {}).get('cadence_seconds')
+    return cadence if number(cadence) and cadence > 0 else 60
+
+
+def trend_exclusion(point):
+    operating = (point.get('input_evidence') or {}).get('operating') or {}
+    raw = operating.get('raw_value')
+    if (number(raw) and raw == 0 and operating.get('quality') == 'good'
+            and operating.get('status') in ('held', 'good')):
+        return 'stopped'
+    actual = (point.get('observation') or {}).get('actual_reading') or {}
+    if actual.get('usable') is False:
+        return 'invalid_actual'
+    return None
+
+
+def trend_exclusions(points, start, end):
+    """Clip full-sample evidence to the query without filling real acquisition gaps."""
+    intervals = []
+    for i, point in enumerate(points):
+        left = timestamp(point['at'])
+        if left >= end:
+            break
+        reason = trend_exclusion(point)
+        if not reason:
+            continue
+        following = points[i + 1] if i + 1 < len(points) else None
+        right = timestamp(following['at']) if following else end
+        if not following or following.get('break_before'):
+            right = min(right, left + timedelta(seconds=sample_cadence(point)))
+        left, right = max(left, start), min(right, end)
+        if left >= right:
+            continue
+        if intervals and intervals[-1][2] == reason and left == intervals[-1][1]:
+            intervals[-1] = (intervals[-1][0], right, reason)
+        else:
+            intervals.append((left, right, reason))
+    return [dict(start=iso_time(left), end=iso_time(right), reason=reason)
+            for left, right, reason in intervals]
 
 
 def channel_points(points, key):
@@ -292,7 +335,7 @@ def read_frozen(hours=168, start=None, end=None):
             or start<lower or end>upper or end<=start):
         raise HTTPException(422,'新版本已冻结近7天；请选择该窗口内含时区的分钟级范围')
     selected=[p for p in all_points if start<=timestamp(p['at'])<end]
-    plotted=[selected[i] for i in plot_indices(selected)]
+    plotted=[selected[i] for i in plot_indices(selected,preserve_trim_edges=True)]
     result=deepcopy(source)
     result.update(period=dict(start=iso_time(start),end=iso_time(end),end_exclusive=True),suggestions=plotted,
         summary=dict(total_samples=len(selected),plot_samples=len(plotted),
@@ -304,6 +347,7 @@ def read_frozen(hours=168, start=None, end=None):
     result['ash']=[p for p in result['ash'] if start<=timestamp(p['at'])<end]
     result['source']['fixed_window']=deepcopy(source['period'])
     result['source']['snapshot']=snapshot.name
+    result['trend_exclusions']=trend_exclusions(all_points,start,end)
     hours_final,hours_summary=hourly_finals(all_points,start,end)
     result.update(hourly_suggestions=hours_final,hourly_summary=hours_summary,
         latest_completed_hour=deepcopy(hours_final[-1]) if hours_final else None)
