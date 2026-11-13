@@ -20,7 +20,8 @@ const DensityTrendPage = {
             const reading=point.observation?.actual_reading;
             return reading?.status==='invalid' && Number.isFinite(reading.raw_value)?`实测密度无效（${this.num(reading.raw_value)}），未生成建议`:'当时缺少有效实测密度，未生成建议';
         }
-        if(codes.includes('operating_unknown')) return '当时运行状态未确认，未生成建议';
+        if(codes.includes('device_not_following')) return '实测密度超过15分钟未跟随设定，设备可能未执行上次调整，需现场确认';
+        if(codes.includes('operating_unknown')) return '状态未确认（开停机证据缺失），保持当前设定';
         if(codes.includes('reference_provenance')) return '缺少当时在线计算依据，未生成建议';
         if(codes.includes('reference_unavailable')){
             if(point.source?.context_reason) return point.source.context_reason;

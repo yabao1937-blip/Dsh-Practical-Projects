@@ -20,8 +20,10 @@ class CandidateParameters:
     provisional_step: float = .005
     provisional_mode: str = 'cautious'
     min_coverage: float = .8
-    actual_follow_tolerance: float = .005
+    actual_follow_tolerance: float = .010
     max_age_seconds: float = 30
+    follow_grace_seconds: float = 900
+    actual_degraded_age_seconds: float = 300
     max_action_gap_seconds: float = 180
     rho_min: float = 1.35
     rho_max: float = 1.60
@@ -39,6 +41,11 @@ class CandidateParameters:
                 and 30 <= self.max_action_gap_seconds <= 3600
                 and 1 < self.rho_min < self.rho_max < 3):
             raise ValueError('候选质量、时效或运行范围参数无效')
+        # 2026-11-13 三态口径：跟随容差放宽到一个常规步长（稳态 |实测−设定| 中位 0.0059，
+        # 旧值 0.005 低于噪声地板）；新增跟随兜底与降级时效参数。
+        if not (30 <= self.follow_grace_seconds <= 7200
+                and self.max_age_seconds < self.actual_degraded_age_seconds <= 1800):
+            raise ValueError('跟随兜底或降级时效参数无效')
 
 
 def number(value):
@@ -103,10 +110,24 @@ def evaluate_candidate(evidence, parameters=None):
             and c.get('unit') in ('g/cm³', 'g/cm3')
             and 0 <= (now-at).total_seconds() <= p.max_age_seconds)
 
+    def usable(c):
+        """2026-11-13 三态口径：30 秒内为新鲜；5 分钟内同观测的 good 读数降级可用。"""
+        if good(c):
+            return 'fresh'
+        at = timestamp(c.get('observed_at'))
+        if (c.get('status') == 'good' and at is not None and now is not None
+                and 0 <= (now-at).total_seconds() <= p.actual_degraded_age_seconds
+                and number(c.get('value')) and 1 < c['value'] < 3
+                and c.get('unit') in ('g/cm³', 'g/cm3')):
+            return 'degraded'
+        return None
+
     actual_at = timestamp(actual.get('observed_at'))
     actual_age = (now-actual_at).total_seconds() if now and actual_at else None
-    actual_usable = good(actual)
-    actual_status = ('good' if actual_usable else 'future' if actual_age is not None and actual_age < 0 else
+    actual_state = usable(actual)
+    actual_usable = actual_state is not None
+    actual_status = ('good' if actual_state == 'fresh' else 'degraded' if actual_state == 'degraded' else
+        'future' if actual_age is not None and actual_age < 0 else
         'stale' if actual_age is not None and actual_age > p.max_age_seconds else
         actual.get('status') if actual.get('status') not in (None, 'good') else 'invalid')
     result['observation']['actual_reading'] = dict(
@@ -123,10 +144,12 @@ def evaluate_candidate(evidence, parameters=None):
         return finish('unavailable', 'invalid_time', '缺少有效评估时刻')
     if parts is not None and sorted(parts) != ['A304']:
         return finish('unavailable', 'different_route', '候选仅适用于 A304 独立设定，不混用其它通道')
-    if not good(cell) or current is None or not p.rho_min <= current <= p.rho_max:
+    if usable(cell) is None or current is None or not p.rho_min <= current <= p.rho_max:
         return finish('unavailable', 'setpoint_unavailable', '当前 A304 设定密度缺失、过期、未来或超范围')
-    if not good(actual):
+    if usable(actual) is None:
         return finish('unavailable', 'actual_unavailable', '缺少新鲜有效的当前实测密度，不能评价下一步')
+    if 'degraded' in (usable(cell), usable(actual)):
+        result['quality']['notes'].append('实测/设定读数超过30秒（5分钟内同批），降级采用')
     if not e.get('identity_known') or not all(cell.get(k) for k in ('source_id', 'point_key', 'definition_id')):
         return finish('unavailable', 'identity_unknown', '来源、通道或点位定义证据不足')
     if (actual.get('source_id') != cell.get('source_id') or not cell.get('batch_id')
@@ -134,13 +157,15 @@ def evaluate_candidate(evidence, parameters=None):
             or actual.get('observed_at') != cell.get('observed_at')):
         return finish('unavailable', 'batch_mismatch', '实测与设定不是同源同批同观测时刻')
     if operating.get('status') != 'good' or operating.get('stopped') not in (True, False, 0, 1):
-        return finish('unavailable', 'operating_unknown', '缺少当时开停机证据，不能评价')
+        # 2026-11-13 三态口径：开停机证据缺失=未知态，保持当前设定并披露，不再整体拒算。
+        return finish('hold', 'operating_unknown', '状态未确认（开停机证据缺失），保持当前设定', current)
     if 'observed_at' in operating:
         state_at = timestamp(operating['observed_at'])
         if not state_at or not 0 <= (now-state_at).total_seconds() <= p.max_age_seconds:
-            return finish('unavailable', 'operating_unknown', '开停机观测过期或时序无效，不能评价')
+            return finish('hold', 'operating_unknown', '状态未确认（开停机观测过期或时序无效），保持当前设定', current)
     if operating['stopped']:
-        return finish('hold', 'stopped', '设备停机，保持当前设定', current)
+        # 停机：不给出建议密度（含保持值）。
+        return finish('unavailable', 'stopped', '设备停机，不给出建议', None)
     if e.get('action_history_status') != 'good':
         return finish('unavailable', 'action_history_unknown', '调密历史查询缺失或失效，不能假定没有调密')
     if (ref.get('identity') not in ('live-calculation', 'online-default')
@@ -229,6 +254,12 @@ def evaluate_candidate(evidence, parameters=None):
     if waiting:
         return finish('wait', waiting[0], waiting[1], current)
     if not follow:
+        # 2026-11-13 三态口径：变更后超过跟随兜底时限仍未跟随，明确报设备未执行，
+        # 不再无限期等待（实测收敛中位 3 分钟、p90 9 分钟，兜底 15 分钟）。
+        if action and after is not None and (now-after).total_seconds() > p.follow_grace_seconds:
+            observation['state'] = 'device-not-following'
+            return finish('unavailable', 'device_not_following',
+                '实测密度超过15分钟未跟随设定，设备可能未执行上次调整，需现场确认', None)
         observation['state'] = 'waiting-current-reading'
         return finish('wait', 'actual_not_following', '当前实测读数尚未跟随设定；单样本不作稳定判断', current)
     if provisional and p.provisional_mode == 'hold':

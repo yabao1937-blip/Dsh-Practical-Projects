@@ -169,9 +169,9 @@ def test_post_action_provisional_window_remains_unconfirmed():
 
 @pytest.mark.parametrize('issue,code', [
     ('missing_setting','setpoint_unavailable'),('future_setting','setpoint_unavailable'),
-    ('stale_actual','actual_unavailable'),('batch','batch_mismatch'),
+    ('batch','batch_mismatch'),
     ('identity','identity_unknown'),('history','action_history_unknown'),
-    ('operating','operating_unknown'),('replay','reference_provenance'),
+    ('replay','reference_provenance'),
     ('pending','reference_unavailable'),('future_reference','reference_unavailable'),
     ('coverage','ash_coverage'),('unknown_provisional','ash_quality_unknown'),
     ('future_ash','ash_unavailable')])
@@ -179,11 +179,9 @@ def test_insufficient_evidence_is_explicit_and_recovers(issue,code):
     e = evidence()
     if issue=='missing_setting': e['current_setpoint']['value']=None
     if issue=='future_setting': e['current_setpoint']['observed_at']=iso_time(HOUR+timedelta(seconds=1))
-    if issue=='stale_actual': e['actual_density']['observed_at']=iso_time(HOUR-timedelta(seconds=31))
     if issue=='batch': e['actual_density']['batch_id']='different'
     if issue=='identity': e['identity_known']=False
     if issue=='history': e['action_history_status']='unavailable'
-    if issue=='operating': e['operating']['status']='missing'
     if issue=='replay': e['reference']['origin']='advice-backfill-v1'
     if issue=='pending': e['reference'].update(value=None,status='pending')
     if issue=='future_reference': e['reference']['generated_at']=iso_time(HOUR+timedelta(seconds=1))
@@ -194,6 +192,54 @@ def test_insufficient_evidence_is_explicit_and_recovers(issue,code):
     assert r['candidate']['status'] == 'unavailable' and r['candidate']['value'] is None
     assert r['candidate']['reason_codes'] == [code]
     assert evaluate_candidate(evidence())['candidate']['status'] == 'adjust'
+
+
+def test_operating_tri_state_unknown_holds_and_stopped_gives_no_advice():
+    """2026-11-13 三态口径：证据缺失=未知态 hold=当前设定；停机=不给建议。"""
+    e = evidence(current=1.48)
+    e['operating']['status'] = 'missing'
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'hold' and r['candidate']['value'] == 1.48
+    assert r['candidate']['reason_codes'] == ['operating_unknown']
+    e2 = evidence(current=1.48)
+    e2['operating']['observed_at'] = iso_time(HOUR-timedelta(seconds=31))
+    r2 = evaluate_candidate(e2)
+    assert r2['candidate']['status'] == 'hold' and r2['candidate']['value'] == 1.48
+    assert r2['candidate']['reason_codes'] == ['operating_unknown']
+    e3 = evidence(current=1.48)
+    e3['operating']['stopped'] = True
+    r3 = evaluate_candidate(e3)
+    assert r3['candidate']['status'] == 'unavailable' and r3['candidate']['value'] is None
+    assert r3['candidate']['reason_codes'] == ['stopped']
+
+
+def test_degraded_same_batch_readings_within_five_minutes_still_usable():
+    """30 秒外、5 分钟内的同批 good 读数降级可用并披露；超 5 分钟仍拒算。"""
+    e = evidence()
+    stale_at = iso_time(HOUR-timedelta(seconds=120))
+    e['current_setpoint']['observed_at'] = stale_at
+    e['actual_density']['observed_at'] = stale_at
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'adjust'
+    assert any('降级采用' in note for note in r['quality']['notes'])
+    too_old = iso_time(HOUR-timedelta(seconds=301))
+    e['current_setpoint']['observed_at'] = too_old
+    e['actual_density']['observed_at'] = too_old
+    assert evaluate_candidate(e)['candidate']['reason_codes'] == ['setpoint_unavailable']
+
+
+def test_follow_grace_reports_device_not_following_after_fifteen_minutes():
+    """变更后超过兜底时限仍未跟随 → 明确报设备未执行，不再无限期等待。"""
+    e = evidence()
+    action_at = HOUR-timedelta(minutes=90)
+    e['latest_action'] = dict(id='old',before_at=iso_time(action_at-timedelta(seconds=60)),
+        after_at=iso_time(action_at),continuous=True,gap=False,identity_known=True)
+    e['reference']['ash'].update(start=iso_time(HOUR-timedelta(hours=1)),end=iso_time(HOUR))
+    e['actual_density']['value'] = e['current_setpoint']['value'] + .02
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'unavailable' and r['candidate']['value'] is None
+    assert r['candidate']['reason_codes'] == ['device_not_following']
+    assert r['observation']['state'] == 'device-not-following'
 
 
 def test_stopped_and_actual_response_and_precision_bounds():
@@ -221,24 +267,30 @@ def test_actual_single_reading_contract_remains_explicit_when_stale():
     e['actual_density']['value']=1.482
     reading=evaluate_candidate(e)['observation']['actual_reading']
     assert reading['value']==1.482 and reading['difference_from_setting']==.002
-    assert reading['tolerance']==.005 and reading['observed_at']==iso_time(HOUR)
+    assert reading['tolerance']==.010 and reading['observed_at']==iso_time(HOUR)
     assert reading['usable'] and reading['status']=='good' and reading['age_seconds']==0
+    # 2026-11-13：31 秒同批 good 读数降级可用；超过 5 分钟才拒算
     e['actual_density']['observed_at']=iso_time(HOUR-timedelta(seconds=31))
+    e['current_setpoint']['observed_at']=iso_time(HOUR-timedelta(seconds=31))
+    reading=evaluate_candidate(e)['observation']['actual_reading']
+    assert reading['usable'] and reading['age_seconds']==31
+    e['actual_density']['observed_at']=iso_time(HOUR-timedelta(seconds=301))
+    e['current_setpoint']['observed_at']=iso_time(HOUR-timedelta(seconds=301))
     reading=evaluate_candidate(e)['observation']['actual_reading']
     assert reading['value'] is None and reading['difference_from_setting'] is None
     assert reading['raw_value']==1.482 and reading['status']=='stale'
-    assert not reading['usable'] and reading['age_seconds']==31
+    assert not reading['usable'] and reading['age_seconds']==301
 
 
-@pytest.mark.parametrize('actual,following', [(1.515,True),(1.525,True),
-    (1.514999,False),(1.525001,False)])
+@pytest.mark.parametrize('actual,following', [(1.510,True),(1.530,True),
+    (1.509999,False),(1.530001,False)])
 def test_follow_tolerance_float_boundaries_are_symmetric(actual,following):
     e=evidence(current=1.520,reference=1.500)
     e['actual_density']['value']=actual
     result=evaluate_candidate(e)
     assert result['observation']['actual_response']==('following' if following else 'not-following')
     assert result['candidate']['status']==('adjust' if following else 'wait')
-    assert result['parameters']['actual_follow_tolerance']==.005
+    assert result['parameters']['actual_follow_tolerance']==.010
 
 
 @pytest.mark.parametrize('parameters', [{'max_step':.04},{'provisional_step':.02},
