@@ -24,6 +24,7 @@ class CandidateParameters:
     max_age_seconds: float = 30
     follow_grace_seconds: float = 900
     actual_degraded_age_seconds: float = 300
+    post_action_confirm_seconds: float = 600
     max_action_gap_seconds: float = 180
     rho_min: float = 1.35
     rho_max: float = 1.60
@@ -43,9 +44,11 @@ class CandidateParameters:
             raise ValueError('候选质量、时效或运行范围参数无效')
         # 2026-11-13 三态口径：跟随容差放宽到一个常规步长（稳态 |实测−设定| 中位 0.0059，
         # 旧值 0.005 低于噪声地板）；新增跟随兜底与降级时效参数。
+        # 2026-11-16 用户口径：调密后10分钟实测密度跟随→调密执行成功，不等灰分窗口。
         if not (30 <= self.follow_grace_seconds <= 7200
-                and self.max_age_seconds < self.actual_degraded_age_seconds <= 1800):
-            raise ValueError('跟随兜底或降级时效参数无效')
+                and self.max_age_seconds < self.actual_degraded_age_seconds <= 1800
+                and 60 <= self.post_action_confirm_seconds <= 3600):
+            raise ValueError('跟随兜底、降级时效或调后确认时限参数无效')
 
 
 def number(value):
@@ -241,10 +244,24 @@ def evaluate_candidate(evidence, parameters=None):
         if not action.get('continuous', False):
             result['quality']['notes'].append('调密连续性标志为否；短采样抖动只披露，真实操作仍在两次观测之间')
         if not covered:
-            observation['state'] = 'waiting-post-action-production'
-            waiting = ('waiting_post_action', '等待完整调后生产小时：当前灰分窗口尚含调密前生产，不继续追调')
-            if long_gap or action.get('identity_known') is not True:
-                waiting = ('uncertain_recent_action', '最近调密存在长缺口或来源不明；当前灰分尚未覆盖完整调后生产')
+            post_elapsed = (now-after).total_seconds() if after else None
+            # 2026-11-16 用户口径：调密后10分钟实测密度已跟随新设定→调密执行成功，
+            # 不等灰分窗口完全覆盖调后生产（原来要等1-3小时，现在10分钟即恢复）。
+            if follow and post_elapsed is not None and post_elapsed >= p.post_action_confirm_seconds:
+                observation['state'] = 'post-action-confirmed-by-actual'
+                result['quality']['notes'].append(
+                    f'调密后{post_elapsed:.0f}秒实测已跟随设定，调密执行确认；不等灰分窗口完全覆盖调后生产')
+            else:
+                observation['state'] = 'waiting-post-action-production'
+                if post_elapsed is not None and post_elapsed < p.post_action_confirm_seconds:
+                    waiting = ('waiting_post_action',
+                        f'调密后{p.post_action_confirm_seconds/60:.0f}分钟实测跟随确认中'
+                        f'（已过{post_elapsed/60:.0f}分钟）；灰分窗口尚含调前生产')
+                else:
+                    waiting = ('waiting_post_action',
+                        '调密后实测未跟随或时序不明，等待完整调后生产小时，不继续追调')
+                if long_gap or action.get('identity_known') is not True:
+                    waiting = ('uncertain_recent_action', '最近调密存在长缺口或来源不明；当前灰分尚未覆盖完整调后生产')
         else:
             observation['state'] = 'post-action-covered-provisional' if provisional else 'post-action-covered'
             if long_gap or action.get('identity_known') is not True:

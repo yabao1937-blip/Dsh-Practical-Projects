@@ -80,27 +80,65 @@ def test_no_reverse_chase_when_operator_has_passed_reference(ash,reference,curre
 
 def test_wait_uses_production_start_not_fixed_two_hour_timer_and_recovers():
     e = evidence()
-    # Even elapsed time alone is insufficient: this action is inside that hour.
+    # 2026-11-16 用户口径：调密后>10分钟且实测已跟随→调密执行确认，不再等灰分窗口。
     action_at = HOUR-timedelta(hours=1,minutes=59)
     e['latest_action'] = dict(id='real',before_at=iso_time(action_at-timedelta(seconds=60.2)),
         after_at=iso_time(action_at),continuous=False,gap=False,identity_known=True)
     r = evaluate_candidate(e)
-    assert r['candidate']['status'] == 'wait'
+    # 调密后 1h59m >> 10 分钟且实测跟随 → 不再 wait，直接 adjust
+    assert r['candidate']['status'] == 'adjust'
+    assert r['observation']['state'] == 'post-action-confirmed-by-actual'
     assert r['observation']['ash_fully_after_action'] is False
-    assert 'uncertain_recent_action' not in r['candidate']['reason_codes']
+    # 灰分窗口完全在调后时状态回到 covered
     e['reference']['ash'].update(start=iso_time(HOUR-timedelta(hours=1)),end=iso_time(HOUR))
     r = evaluate_candidate(e)
     assert r['candidate']['status'] == 'adjust'
     assert r['observation']['state'] == 'post-action-covered'
 
 
+def test_post_action_confirm_10min_follow_recovers():
+    """2026-11-16 用户口径：调密后10分钟实测跟随→执行确认→恢复建议；<10分钟仍在确认中。"""
+    e = evidence()
+    # 场景 A：调密后仅 5 分钟（<10min）→ 仍 wait（确认中）
+    action_at = HOUR-timedelta(minutes=5)
+    e['latest_action'] = dict(id='r5',before_at=iso_time(action_at-timedelta(seconds=30)),
+        after_at=iso_time(action_at),continuous=True,gap=False,identity_known=True)
+    # ash 窗口需在 action 之前（covered=False）
+    e['reference']['ash'].update(start=iso_time(HOUR-timedelta(hours=1)),end=iso_time(HOUR))
+    # 实测跟随
+    e['actual_density'].update(value=1.48,status='good',
+        observed_at=iso_time(HOUR))
+    e['current_setpoint'].update(value=1.48,status='good',
+        observed_at=iso_time(HOUR))
+    # evaluated_at = HOUR, action at HOUR-5min → post_elapsed=300 < 600 → wait
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'wait'
+    assert r['candidate']['reason_codes'] == ['waiting_post_action']
+    assert '确认中' in r['candidate']['reasons'][0]
+    # 场景 B：调密后 15 分钟（>10min）→ 实测跟随 → 确认成功 → adjust
+    e['latest_action']['after_at'] = iso_time(HOUR-timedelta(minutes=15))
+    e['latest_action']['before_at'] = iso_time(HOUR-timedelta(minutes=16))
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'adjust'
+    assert r['observation']['state'] == 'post-action-confirmed-by-actual'
+    # 场景 C：调密后 15 分钟但实测未跟随 → 仍 wait（不走10分钟捷径）
+    e['actual_density'].update(value=1.42)  # 远离设定 1.48
+    r = evaluate_candidate(e)
+    # not follow → 先走 follow 检查（但 waiting 优先于 follow）
+    assert r['candidate']['status'] == 'wait'
+    assert r['candidate']['reason_codes'] == ['waiting_post_action']
+
+
 def test_rho_target_separates_aim_from_execution():
     """2026-11-06：等待/保持时 value=当前设定，rho_target 仍披露多步趋向目标。"""
-    # 等待场景：value 保持当前设定，目标参考照常可见
+    # 2026-11-16 等待场景（<10分钟确认期）：value 保持当前设定，目标参考照常可见
     e = evidence()
-    action_at = HOUR-timedelta(hours=1,minutes=59)
+    action_at = HOUR-timedelta(minutes=5)  # 调密后仅5分钟 → 确认中
     e['latest_action'] = dict(id='real',before_at=iso_time(action_at-timedelta(seconds=60.2)),
         after_at=iso_time(action_at),continuous=False,gap=False,identity_known=True)
+    # ash 窗口需在 action 之前（covered=False），否则不走 wait 分支
+    e['reference']['ash'].update(start=iso_time(HOUR-timedelta(hours=2)),end=iso_time(HOUR-timedelta(hours=1)))
+    e['reference']['generated_at'] = iso_time(HOUR-timedelta(hours=1))
     r = evaluate_candidate(e)
     assert r['candidate']['status'] == 'wait'
     assert r['candidate']['value'] == 1.48            # 执行值 = 当前设定
@@ -138,11 +176,21 @@ def test_ash_sensitivity_discloses_provisional_margin():
 
 
 def test_long_gap_unknown_action_blocks_related_ash_but_not_forever():
+    # 2026-11-16：>10分钟且实测跟随时，不确定动作也被10分钟确认规则放行。
     e = evidence()
     a = HOUR-timedelta(hours=1,minutes=30)
     e['latest_action'] = dict(id='gap',before_at=iso_time(a-timedelta(minutes=10)),
         after_at=iso_time(a),continuous=False,gap=True,identity_known=False)
-    assert evaluate_candidate(e)['candidate']['reason_codes'] == ['uncertain_recent_action']
+    # 调密后90分钟>>10分钟且实测跟随 → 10分钟确认通过，不再被不确定动作阻塞
+    assert evaluate_candidate(e)['candidate']['status'] == 'adjust'
+    # 但<10分钟时不确认规则不适用，不确定动作仍阻塞
+    e2 = evidence()
+    a2 = HOUR-timedelta(minutes=5)
+    e2['latest_action'] = dict(id='gap2',before_at=iso_time(a2-timedelta(minutes=10)),
+        after_at=iso_time(a2),continuous=False,gap=True,identity_known=False)
+    e2['reference']['ash'].update(start=iso_time(HOUR-timedelta(hours=2)),end=iso_time(HOUR-timedelta(hours=1)))
+    e2['reference']['generated_at'] = iso_time(HOUR-timedelta(hours=1))
+    assert evaluate_candidate(e2)['candidate']['reason_codes'] == ['uncertain_recent_action']
     e['reference']['ash'].update(start=iso_time(HOUR-timedelta(hours=1)),end=iso_time(HOUR))
     assert evaluate_candidate(e)['candidate']['status'] == 'adjust'
 
