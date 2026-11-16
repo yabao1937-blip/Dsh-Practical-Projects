@@ -268,10 +268,10 @@ const DensityTrendPage = {
         return `A304 ${p.key==='actual'?'实测密度':'实际设定'} ${this.num(p.value)} g/cm³\n观测时刻 ${this.time(p.at)}`;
     },
     ashDetail(p) {
-        // 灰分点按小时起点落位，接口不返回 end；没有 end 时补 +1 小时，别在提示里留"——"。
         const start = p.start || p.at, end = p.end || (start ? new Date(Date.parse(start) + 3600000).toISOString() : null);
         const edge=p.atTrimEdge?'\n小时起点已省略，点位于本小时保留边界。':'';
-        return `实际灰分 ${Number.isFinite(p.value)?p.value.toFixed(2):'—'} %\n生产时段 ${this.time(start,true)} — ${this.time(end,true)}${edge}`;
+        const flag=p.flagged?'\n该小时灰分覆盖不足或实测异常，未给出建议密度':'';
+        return `实际灰分 ${Number.isFinite(p.value)?p.value.toFixed(2):'—'} %\n生产时段 ${this.time(start,true)} — ${this.time(end,true)}${flag}${edge}`;
     },
     crosshair: null,
     crosshairAt(hit) {
@@ -453,20 +453,24 @@ const DensityTrendPage = {
         }
         const {x,y,left,top,width,height} = frame;
         ctx.save(); ctx.beginPath(); ctx.rect(left-3,top,width+6,height); ctx.clip();
-        ctx.strokeStyle=colors.ash; ctx.fillStyle=colors.ash; ctx.lineWidth=2;
+        // 2026-11-16：该小时没有建议密度（灰分覆盖不足/实测坏值等）→ 灰分点改红色，操作员一眼看出哪些小时的数据有问题
+        const advised=new Set((this.series?.advice||[]).filter(p=>Number.isFinite(p.value)).map(p=>p.t));
         let previous=null;
         for (const p of points) {
             const px=x(p.t), py=y(p.value);
             if (px===null) continue;
-            // Keep the existing line between settled values, including across seams.
-            if (previous) {
+            const flagged=!advised.has(p.t);
+            // 连线只在两个端点都正常时画，被标记的小时断开
+            if (previous && !previous.flagged && !flagged) {
+                ctx.strokeStyle=colors.ash; ctx.lineWidth=2;
                 ctx.beginPath();ctx.moveTo(previous.x,previous.y);ctx.lineTo(px,py);ctx.stroke();
             }
-            previous={x:px,y:py};
-            ctx.beginPath();ctx.arc(px,py,2.2,0,2*Math.PI);
-            if (p.provisional) ctx.stroke();
-            else ctx.fill();
-            canvas._hits.push({...p,x:px,y:py,key:'ash'});
+            previous={x:px,y:py,flagged};
+            ctx.fillStyle=flagged?(colors.missingAdvice||'#d94f4f'):colors.ash;
+            ctx.strokeStyle=ctx.fillStyle;
+            ctx.beginPath();ctx.arc(px,py,flagged?3:2.2,0,2*Math.PI);
+            ctx.fill();
+            canvas._hits.push({...p,x:px,y:py,key:'ash',flagged});
         }
         ctx.restore();
         canvas._hits.sort((a,b)=>a.t-b.t);
