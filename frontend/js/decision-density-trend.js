@@ -453,21 +453,22 @@ const DensityTrendPage = {
         }
         const {x,y,left,top,width,height} = frame;
         ctx.save(); ctx.beginPath(); ctx.rect(left-3,top,width+6,height); ctx.clip();
-        // 2026-11-16：该小时没有建议密度（灰分覆盖不足/实测坏值等）→ 灰分点改红色，操作员一眼看出哪些小时的数据有问题
+        // 2026-11-16：全时段连线不断开——覆盖率足够的小时之间画正常色线段，
+        // 涉及覆盖不足小时的线段画红色，操作员从线的颜色直接看出哪段数据有问题。
         const advised=new Set((this.series?.advice||[]).filter(p=>Number.isFinite(p.value)).map(p=>p.t));
+        const red=colors.missingAdvice||'#d94f4f';
         let previous=null;
         for (const p of points) {
             const px=x(p.t), py=y(p.value);
             if (px===null) continue;
             const flagged=!advised.has(p.t);
-            // 连线只在两个端点都正常时画，被标记的小时断开
-            if (previous && !previous.flagged && !flagged) {
-                ctx.strokeStyle=colors.ash; ctx.lineWidth=2;
+            if (previous) {
+                ctx.strokeStyle=(flagged||previous.flagged)?red:colors.ash;
+                ctx.lineWidth=2;
                 ctx.beginPath();ctx.moveTo(previous.x,previous.y);ctx.lineTo(px,py);ctx.stroke();
             }
             previous={x:px,y:py,flagged};
-            ctx.fillStyle=flagged?(colors.missingAdvice||'#d94f4f'):colors.ash;
-            ctx.strokeStyle=ctx.fillStyle;
+            ctx.fillStyle=flagged?red:colors.ash;
             ctx.beginPath();ctx.arc(px,py,flagged?3:2.2,0,2*Math.PI);
             ctx.fill();
             canvas._hits.push({...p,x:px,y:py,key:'ash',flagged});
