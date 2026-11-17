@@ -243,14 +243,46 @@ def evaluate_candidate(evidence, parameters=None):
             (after-before).total_seconds() > p.max_action_gap_seconds)
         if not action.get('continuous', False):
             result['quality']['notes'].append('调密连续性标志为否；短采样抖动只披露，真实操作仍在两次观测之间')
+    # ── 2026-11-17 口径：调密后收敛门控 ──
+    # 规则：调密后满15分钟 → 检查最近5分钟实测 → 允许/暂停/再观察。
+    # tail_evidence 由调用方从遥测历史计算传入：
+    #   {point_count, mad, last2_within_tolerance}
+    gate = e.get('tail_evidence')
+    if action and gate is not None:
+        post_s = (now-after).total_seconds() if after else None
+        if post_s is not None and post_s < 900:
+            return finish('wait', 'post_action_wait',
+                f'调密后保持当前设定，等待15分钟（已过{post_s/60:.0f}分钟）', current)
+        n = gate.get('point_count') or 0
+        if n < 2:
+            return finish('wait', 'tail_data_insufficient',
+                f'最近5分钟有效实测不足2个点（现有{n}个），等待新数据', current)
+        tmad = gate.get('mad')
+        if tmad is None:
+            return finish('wait', 'tail_data_insufficient', '末段偏差未计算，等待新数据', current)
+        if tmad > 0.015:
+            observation['state'] = 'post-action-paused'
+            return finish('unavailable', 'tail_pause',
+                f'最近5分钟平均偏差{tmad:.4f}超过0.015，暂停追加调密', None)
+        if tmad > 0.010:
+            observation['state'] = 'post-action-caution'
+            return finish('wait', 'tail_caution',
+                f'最近5分钟平均偏差{tmad:.4f}在0.010–0.015之间，再观察5分钟', current)
+        if gate.get('last2_within_tolerance') is not True:
+            observation['state'] = 'post-action-points-check'
+            return finish('wait', 'tail_points_check',
+                '最近2个实测点未全部在设定±0.010内，再观察5分钟', current)
+        observation['state'] = 'post-action-converged'
+        result['quality']['notes'].append(
+            f'调密后收敛确认：末段偏差{tmad:.4f}≤0.010且最近2点在容差内，允许下一次调密')
+    elif action:
+        # 兼容路径：无 tail_evidence 时保留 10 分钟跟随确认
+        post_elapsed = (now-after).total_seconds() if after else None
         if not covered:
-            post_elapsed = (now-after).total_seconds() if after else None
-            # 2026-11-16 用户口径：调密后10分钟实测密度已跟随新设定→调密执行成功，
-            # 不等灰分窗口完全覆盖调后生产（原来要等1-3小时，现在10分钟即恢复）。
             if follow and post_elapsed is not None and post_elapsed >= p.post_action_confirm_seconds:
                 observation['state'] = 'post-action-confirmed-by-actual'
                 result['quality']['notes'].append(
-                    f'调密后{post_elapsed:.0f}秒实测已跟随设定，调密执行确认；不等灰分窗口完全覆盖调后生产')
+                    f'调密后{post_elapsed:.0f}秒实测已跟随设定，调密执行确认')
             else:
                 observation['state'] = 'waiting-post-action-production'
                 if post_elapsed is not None and post_elapsed < p.post_action_confirm_seconds:
@@ -270,7 +302,8 @@ def evaluate_candidate(evidence, parameters=None):
         return finish('hold', 'target_band', '灰分在目标范围或 0.05 灰分百分点死区内，保持当前设定', current)
     if waiting:
         return finish('wait', waiting[0], waiting[1], current)
-    if not follow:
+    # follow 检查仅在无门控时生效（有 tail_evidence 时收敛已确认）
+    if gate is None and not follow:
         # 2026-11-13 三态口径：变更后超过跟随兜底时限仍未跟随，明确报设备未执行，
         # 不再无限期等待（实测收敛中位 3 分钟、p90 9 分钟，兜底 15 分钟）。
         if action and after is not None and (now-after).total_seconds() > p.follow_grace_seconds:

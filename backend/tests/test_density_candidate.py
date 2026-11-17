@@ -24,6 +24,13 @@ def evidence(ash=9.3, reference=1.46, current=1.48, provisional=False):
         operating=dict(status='good',stopped=False), latest_action=None)
 
 
+def gate_evidence(**kw):
+    """2026-11-17 收敛门控 tail_evidence 构造器。"""
+    d = dict(point_count=3, mad=0.008, last2_within_tolerance=True)
+    d.update(kw)
+    return d
+
+
 @pytest.mark.parametrize('ash,reference,expected', [(9.3,1.46,1.47),(8.2,1.50,1.49)])
 @pytest.mark.parametrize('provisional', [False,True])
 def test_current_step_both_directions_and_smaller_provisional(ash,reference,expected,provisional):
@@ -346,3 +353,95 @@ def test_follow_tolerance_float_boundaries_are_symmetric(actual,following):
 def test_trial_parameters_are_validated(parameters):
     with pytest.raises(ValueError):
         evaluate_candidate(evidence(), parameters)
+
+
+# ══════════ 2026-11-17 收敛门控测试 ══════════
+
+def _gate_event(minutes_since=16, tail=None):
+    """构造带 tail_evidence 的事件。"""
+    e = evidence()
+    e['latest_action'] = dict(id='g1',
+        before_at=iso_time(HOUR-timedelta(minutes=minutes_since+1)),
+        after_at=iso_time(HOUR-timedelta(minutes=minutes_since)),
+        continuous=True, gap=False, identity_known=True)
+    e['tail_evidence'] = tail or gate_evidence()
+    return e
+
+
+def test_gate_wait_before_15min():
+    """调密后不足15分钟 → wait(post_action_wait)。"""
+    e = _gate_event(minutes_since=10)
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'wait'
+    assert r['candidate']['reason_codes'] == ['post_action_wait']
+    assert '等待15分钟' in r['candidate']['reasons'][0]
+
+
+def test_gate_data_insufficient():
+    """满15分钟但末段点数<2 → wait(tail_data_insufficient)。"""
+    e = _gate_event(minutes_since=16, tail=gate_evidence(point_count=1))
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'wait'
+    assert r['candidate']['reason_codes'] == ['tail_data_insufficient']
+
+
+def test_gate_pause_above_015():
+    """末段MAD>0.015 → unavailable(tail_pause)。"""
+    e = _gate_event(minutes_since=16, tail=gate_evidence(mad=0.016))
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'unavailable'
+    assert r['candidate']['reason_codes'] == ['tail_pause']
+    assert r['candidate']['value'] is None
+
+
+def test_gate_caution_between_010_015():
+    """末段MAD在0.010-0.015 → wait(tail_caution)，再观察5分钟。"""
+    e = _gate_event(minutes_since=16, tail=gate_evidence(mad=0.012))
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'wait'
+    assert r['candidate']['reason_codes'] == ['tail_caution']
+
+
+def test_gate_points_check_fails():
+    """MAD≤0.010但最近2点不全在±0.010内 → wait(tail_points_check)。"""
+    e = _gate_event(minutes_since=16,
+        tail=gate_evidence(mad=0.008, last2_within_tolerance=False))
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'wait'
+    assert r['candidate']['reason_codes'] == ['tail_points_check']
+
+
+def test_gate_converged_allows_adjust():
+    """MAD≤0.010且最近2点在容差内 → 收敛确认 → 正常给出adjust。"""
+    e = _gate_event(minutes_since=16,
+        tail=gate_evidence(mad=0.008, last2_within_tolerance=True))
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'adjust'
+    assert r['observation']['state'] == 'post-action-converged'
+    assert any('收敛确认' in n for n in r['quality']['notes'])
+
+
+def test_gate_converged_allows_hold_if_in_band():
+    """收敛确认后灰分在目标带内 → hold。"""
+    e = _gate_event(minutes_since=16,
+        tail=gate_evidence(mad=0.008))
+    e['reference']['ash']['value'] = 8.8  # 在8.5-9.0内
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'hold'
+    assert r['candidate']['reason_codes'] == ['target_band']
+
+
+def test_gate_mad_exactly_010_passes():
+    """MAD恰好=0.010 → 不超过，允许。"""
+    e = _gate_event(minutes_since=16, tail=gate_evidence(mad=0.010))
+    r = evaluate_candidate(e)
+    assert r['candidate']['status'] == 'adjust'
+
+
+def test_gate_mad_exactly_015_pauses():
+    """MAD恰好=0.015 → 不超过0.015，进入caution区间。"""
+    e = _gate_event(minutes_since=16, tail=gate_evidence(mad=0.015))
+    r = evaluate_candidate(e)
+    # 0.015不>0.015, 所以走caution分支
+    assert r['candidate']['status'] == 'wait'
+    assert r['candidate']['reason_codes'] == ['tail_caution']
